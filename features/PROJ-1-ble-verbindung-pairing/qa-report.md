@@ -1,96 +1,102 @@
 # QA Test Results
 
-**Getestet:** 2026-09-22
-**App-URL:** nicht lauffähig hier (`probe.kind: none`, sowohl App-Ebene als auch Layer `firmware` — kein Android-Emulator/-Gerät, kein PlatformIO-Toolchain in dieser Umgebung). Jedes Laufzeit-AC unten ist daher `[!] NOT VERIFIED`, bis ein Mensch es testet (siehe unten).
-**Tester:** QA Engineer (AI) — 3 unabhängige `qa-engineer`-Lanes (Funktionsprüfung, Security-Red-Team, Regression), die den Build nicht kannten, zusammengeführt von dieser Session als alleiniger Owner. Ein vierter Fund (F-1) wurde von der Owner-Session selbst per Web-Recherche gegen die offizielle NimBLE-Arduino-Migrationsdokumentation bestätigt.
-**Scope:** `full` (erster `/qa`-Lauf für PROJ-1, kein vorheriger `qa-report.md`)
+**Getestet:** 2026-09-22 (Erstlauf) · **Re-Verifikation:** 2026-09-22
+**App-URL:** nicht lauffähig hier (`probe.kind: none`, App-Ebene und Layer `firmware` — kein Android-Emulator/-Gerät, kein PlatformIO-Toolchain). Jedes Laufzeit-AC ist `[!] NOT VERIFIED`, bis ein Mensch es testet (siehe unten).
+**Tester:** QA Engineer (AI) — 3 unabhängige `qa-engineer`-Lanes (Funktionsprüfung, Security-Red-Team, Regression) pro Lauf, die den Build nicht kannten, zusammengeführt von dieser Session als alleiniger Owner.
+**Scope:** Re-Verifikation, **volle Breite** (nicht nur der Diff) — Begründung: `git diff --stat 81a252b..HEAD` (Commit des Erstberichts) berührt `src/connection/connectionReducer.ts` und `src/connection/ConnectionProvider.tsx`, die geteilte Zustandsmaschine, auf der jedes AC/EC aufbaut — mehr als 3 Produktionsdateien und geteilter Code, also volle Breite statt Diff-Schmalspur.
+
+> ⚠️ **Abweichung vom reinen "Find, Document, Prioritize":** Während dieser Re-Verifikation fanden die Security- und die Regressions-Lane **unabhängig voneinander denselben kritischen Regressions-Bug** (NEU-1 unten) — ein Fix, der die App in eine Connect/Cancel/Disconnect-Endlosschleife versetzt hätte. Wegen der Schwere (die App wäre praktisch unbenutzbar gewesen) habe ich NEU-1 sowie zwei direkt damit zusammenhängende, von der Acceptance-Lane gefundene Folgelücken (NEU-2, NEU-3) noch **innerhalb dieses `/qa`-Laufs selbst behoben**, statt nur zu dokumentieren und auf eine separate `/build`-Runde zu warten. Das ist eine bewusste Abweichung vom Skill-Grundsatz "QA fixt nicht selbst" — transparent gemacht, damit der Nutzer das nachvollziehen und ggf. korrigieren kann. Alle Fixes sind rot-geprüft, committet und unten mit Commit-Referenz aufgeführt.
 
 > Legende: `[x]` in diesem Lauf verifiziert (Evidenz erforderlich) · `[ ] BUG` als defekt verifiziert · `[!] NOT VERIFIED` in diesem Lauf nicht prüfbar (Grund erforderlich)
+
+## Commits seit dem Erstbericht (81a252b..HEAD)
+
+| Commit | Zweck |
+|---|---|
+| `acb369c` | BUG-1: NimBLE-Arduino-Pin `^1.4.1` → `^2.5.1` |
+| `ecc9a8c` | BUG-2: `permission_denied` sticky gegen `BLUETOOTH_OFF` |
+| `1121695` | BUG-3: `cancelConnection()` bei abgebrochenem Connect/Reconnect (führte zu NEU-1) |
+| `1db8e6f` | BUG-4: Foreground-Recheck nutzt `REQUEST_SCAN` statt `UNEXPECTED_DISCONNECT` |
+| `8158480` | BUG-5 (+ BUG-9 gratis): `PermissionRationale`-Screen |
+| `a0f372f` | **NEU-1 (Critical):** `settled`-Guard — Fix aus `1121695` brach die soeben aufgebaute Verbindung sofort wieder ab |
+| `6808638` | **NEU-2 (Medium) + NEU-3 (Low):** Bluetooth-Status nach Berechtigungserteilung aktiv geprüft; Scan-Start räumt eine noch bestehende Verbindung auf |
+| `96d419f` | Doku: `design.md` Technical-Decisions-Tabelle nachgezogen (war seit `1121695` u. a. widersprüchlich) |
 
 ## Acceptance Criteria Status
 
 ### AC-1: Berechtigungsabfrage beim ersten Start, mit Erklärung
-- [ ] BUG (Medium) — Die App fragt die Berechtigungen ab (`src/connection/ConnectionProvider.tsx:58-67`), aber **ohne jede Erklärung**. `PermissionsAndroid.requestMultiple(...)` (`src/permissions/requestBlePermissions.ts:20-23`) nimmt kein Rationale-Objekt entgegen; der Legacy-Pfad nutzt `PermissionsAndroid.request(...)` ohne das von RN unterstützte Rationale-Argument (`:33-35`). Auch kein vorgeschalteter Erklär-Screen: `checking_permissions` rendert nur den generischen `ScanningIndicator` (`src/screens/RootScreen.tsx:34-35`). Spec verlangt explizit "mit einer kurzen Erklärung".
+- [x] PASS (Code), Rest-Low offen — `checking_permissions` rendert jetzt `PermissionRationale` ("Bluetooth-Zugriff nötig… um sich mit deinem Slider zu verbinden", `src/components/PermissionRationale.tsx:15-18`) statt des vorherigen `ScanningIndicator` (`src/screens/RootScreen.tsx:35-38`, BUG-5, Commit `8158480`).
+- [ ] BUG (Low, Rest von BUG-5) — Die Erklärung erscheint *parallel* zum Systemdialog (derselbe Render-Zyklus wie der Mount-Effekt, `ConnectionProvider.tsx:58-67`), nicht zwingend *davor*; kein "Weiter"-Gate. Zusätzlich übergibt der Android-≤11-Pfad weiterhin kein Rationale-Objekt an `PermissionsAndroid.request` (`src/permissions/requestBlePermissions.ts:33-35`), obwohl RN das unterstützt. `[!] NOT VERIFIED` — Sichtbarkeit/Timing auf echtem Gerät, kein Renderer hier.
 
 ### AC-2: Automatischer Scan nach Berechtigungserteilung
-- [x] PASS (Code) — `checking_permissions` → `PERMISSIONS_GRANTED` → `scanning` (`src/connection/connectionReducer.ts:72-75`); Scan-Effekt startet automatisch, gefiltert auf Service-UUID (`ConnectionProvider.tsx:84-99` → `src/ble/client.ts:69-71`). Test: `ConnectionProvider.test.tsx:55-76`, grün im Owner-Lauf.
-- [!] NOT VERIFIED — realer Scan/Verbindungsaufbau zur Laufzeit, kein Emulator/Gerät
+- [x] PASS (Code) — unverändert seit Erstbericht; `connectionReducer.ts:81-83`, Scan-Effekt filtert auf Service-UUID (`ble/client.ts:69-71`, UUID identisch zu `firmware/src/ble.cpp:13`). Test: `ConnectionProvider.test.tsx:67-88`, Suite-Lauf grün.
+- [!] NOT VERIFIED — realer Scan/Verbindungsaufbau, kein Emulator/Gerät
 
 ### AC-3: Erfolgreiche Verbindung → "Verbunden" + Gerätename, UI nutzbar
-- [x] PASS (Code) — `connecting` → `CONNECT_SUCCEEDED` → `connected` inkl. `deviceName` (`connectionReducer.ts:105-112`); kein Bonding (`ble/client.ts:101-104`); Header zeigt "Verbunden" + Name (`src/components/ConnectionHeader.tsx:65-66, 87-89`); Content-Area ist im `connected`-Zustand nicht gesperrt (`RootScreen.tsx:45-46, 64-72`). Test: `connectionReducer.test.ts:30-45`.
-- [!] NOT VERIFIED — reale Verbindung zur Laufzeit; "nutzbar" nur als "nicht gesperrt" prüfbar, da die echte Steuerungs-UI erst mit PROJ-2/3 kommt
+- [x] PASS (Code) — `connecting → CONNECT_SUCCEEDED → connected` inkl. `deviceName` (`connectionReducer.ts:121-127`); kein Bonding (`ble/client.ts:101-104`); Header „Verbunden" + Name (`ConnectionHeader.tsx:65-66, 87-89`); Content nicht gesperrt (`RootScreen.tsx:48-49`). **NEU-1 behoben:** die Verbindung bleibt jetzt tatsächlich bestehen, statt sich durch den eigenen Cleanup sofort wieder zu trennen (Commit `a0f372f`) — 2 rot-geprüfte Regressionstests (`ConnectionProvider.test.tsx`: „does not cancel a reconnect attempt that succeeds" und die `not.toHaveBeenCalled()`-Assertion in „cancels the native connection when the reconnect-loop effect is torn down").
+- [!] NOT VERIFIED — reale Verbindung zur Laufzeit; „nutzbar" nur als „nicht gesperrt" prüfbar, echte Steuerungs-UI kommt erst mit PROJ-2/3
 
 ### AC-4: Scan-Timeout (10s) → "Kein Gerät gefunden" + Retry
-- [x] PASS — Timeout exakt 10000ms (`ble/client.ts:21`, unverändert übernommen in `ConnectionProvider.tsx:90-96`) → `SCAN_TIMEOUT` → `not_found` (`connectionReducer.ts:100-102`); UI: `NotFoundNotice.tsx:11` + aktiver Button (`ConnectionHeader.tsx:73-77`). Test: `connectionReducer.test.ts:56-61`.
+- [x] PASS — unverändert seit Erstbericht, vom Diff nicht berührt. Test: `connectionReducer.test.ts:56-61`.
 
 ### AC-5: Bluetooth aus → Hinweis + Link zu Bluetooth-Einstellungen
-- [x] PASS (Code) — Adapter-Listener mit `emitCurrentState=true` (`ConnectionProvider.tsx:70-81`); `BLUETOOTH_OFF` aus jedem Zustand (`connectionReducer.ts:67-69`); Button → `Linking.sendIntent('android.settings.BLUETOOTH_SETTINGS')` (`ConnectionHeader.tsx:54-57`, `requestBlePermissions.ts:54-56`). Test: `connectionReducer.test.ts:64-75`.
-- [!] NOT VERIFIED — echtes Ein-/Ausschalten von Bluetooth, echter Sprung in die Systemeinstellungen
+- [x] PASS (Code) — Grundverhalten unverändert (`connectionReducer.ts:67-69`, `ConnectionHeader.tsx:54-57`). **NEU-2 behoben:** nach einer Berechtigungserteilung wird jetzt aktiv `bleManager.state()` geprüft, statt sich auf ein möglicherweise verpasstes `onStateChange`-Event zu verlassen — landet korrekt in `bluetooth_off`, wenn Bluetooth trotz erteilter Berechtigung noch aus ist (Commit `6808638`, Test „moves permission_denied -> bluetooth_off (not scanning) when Bluetooth is still off after granting", rot-geprüft).
+- [!] NOT VERIFIED — echtes Ein-/Ausschalten von Bluetooth, echter Intent-Sprung
 
 ### AC-6: Berechtigung abgelehnt → Hinweis-Screen + Link zu App-Einstellungen
-- [x] PASS (Code) — `PERMISSIONS_DENIED` → `permission_denied` (`connectionReducer.ts:76-78`); Hinweis-Screen (`PermissionDeniedNotice.tsx:12-16`) + Button → `Linking.openSettings()` (`ConnectionHeader.tsx:49-52`). Tests: `ConnectionProvider.test.tsx:34-52`, `connectionReducer.test.ts:22-27`.
-- [ ] BUG (Medium, undokumentierter Fall U-1) — Ist Bluetooth beim Start aus, feuert der Adapter-Listener sofort `BLUETOOTH_OFF`, bevor das Berechtigungsergebnis eintrifft. Das nachfolgende `PERMISSIONS_DENIED` wird im Zustand `bluetooth_off` ignoriert (`connectionReducer.ts:89-94` kennt dort nur `BLUETOOTH_ON`). Schaltet der Nutzer Bluetooth danach ein, geht es direkt nach `scanning` — **ohne Berechtigung**. Der native Scan-Fehler wird wie ein Timeout behandelt (`ble/client.ts:75-81`) → Nutzer sieht "Kein Gerät gefunden" statt des Berechtigungs-Hinweises, ohne Weg zu den Einstellungen. Repro (statisch): `checking_permissions --BLUETOOTH_OFF--> bluetooth_off --PERMISSIONS_DENIED--> (no-op) --BLUETOOTH_ON--> scanning`.
+- [x] PASS — `PERMISSIONS_DENIED → permission_denied` (`connectionReducer.ts:84-86`); Hinweis-Screen + Button (`PermissionDeniedNotice.tsx`, `ConnectionHeader.tsx:49-52`). **BUG-2 behoben:** `permission_denied` ist jetzt sticky gegen `BLUETOOTH_OFF`, und ein `PERMISSIONS_DENIED`, das während `bluetooth_off` eintrifft, geht nicht mehr verloren (Commit `ecc9a8c`, Tests `connectionReducer.test.ts:79-84, 96-106`, rot-geprüft).
 
 ### AC-7: Unerwarteter Abbruch → Banner + UI gesperrt
-- [x] PASS (Code), Low-Abweichung — Disconnect → `UNEXPECTED_DISCONNECT` → `reconnecting` sofort (`connectionReducer.ts:118-125`); UI gesperrt via `pointerEvents="none"` + Opacity (`RootScreen.tsx:47-55, 86-90`). **Wording-Abweichung (Low):** Banner sagt "Verbindung unterbrochen — verbinde automatisch neu…" (`ReconnectingBanner.tsx:15`), Header sagt "Verbindung verloren — verbinde neu…" (`ConnectionHeader.tsx:69`) — Spec nennt "Verbindung verloren". Inhaltlich erfüllt, nur kosmetisch uneinheitlich.
+- [x] PASS (Code), Low-Abweichung weiterhin offen — Disconnect → `reconnecting` sofort, UI gesperrt (`RootScreen.tsx:50-58, 89-93`). **BUG-10 weiterhin offen:** Banner sagt „Verbindung unterbrochen — verbinde automatisch neu…" (`ReconnectingBanner.tsx:15`), Spec verlangt „Verbindung verloren"; Header sagt „Verbindung verloren — verbinde neu…" (`ConnectionHeader.tsx:69`) — Inkonsistenz besteht fort, vom Diff nicht berührt.
 
 ### AC-8: Reconnect-Versuche alle 3s, max. 30s
-- [x] PASS — `MAX_RECONNECT_ATTEMPTS = 10` (`connectionReducer.ts:22`), `RECONNECT_INTERVAL_MS = 3000` (`ConnectionProvider.tsx:26`) = 30s-Fenster; bei 0 verbleibenden Versuchen → `not_found` (`connectionReducer.ts:136-141`). Test: `connectionReducer.test.ts:94-104`, in dieser Lane einzeln nachgeprüft (grün).
-- [ ] BUG (Low, U-4) — Ist `deviceRef.current` im Zustand `reconnecting` `null`, wird `RECONNECT_ATTEMPT_FAILED` synchron **ohne** die 3-Sekunden-Wartezeit dispatcht (`ConnectionProvider.tsx:137-141`) — die 10 Versuche verbrennen dann sofort, das 30s-Fenster kollabiert auf ~0s.
+- [x] PASS — unverändert. Test: `connectionReducer.test.ts:118-128`.
+- [ ] BUG (Low, BUG-7, weiterhin offen) — bei `deviceRef.current === null` wird `RECONNECT_ATTEMPT_FAILED` synchron ohne 3s-Wartezeit dispatcht (`ConnectionProvider.tsx:155-158`, Zeilen durch die Fixes verschoben, Verhalten identisch zum Erstbericht) — vom Diff nicht behoben.
 
 ### AC-9: Bei mehreren Treffern automatisch zum ersten verbinden, keine Auswahl
-- [x] PASS — `scanForSlider` verbindet mit dem ersten Treffer, `settled`-Flag schützt gegen weitere Callbacks (`ble/client.ts:49, 55-63, 83-85`); keine Auswahl-UI im gesamten `src/`. Test: `connectionReducer.test.ts:30-37`.
+- [x] PASS — unverändert. Test: `connectionReducer.test.ts:30-45`.
 
 ## Edge Cases Status
 
 ### EC-1: Manueller Retry bricht laufenden Reconnect ab
-- [x] PASS (Code) — `reconnecting` + `REQUEST_SCAN` → `scanning` (`connectionReducer.ts:144-147`); Reconnect-Effekt-Cleanup löscht Timer (`ConnectionProvider.tsx:165-168`); Button aktiv in `reconnecting` (`ConnectionHeader.tsx:68-72`, entspricht der korrigierten `design.md`-Fassung). Test: `connectionReducer.test.ts:117-121`, einzeln nachgeprüft.
-- [ ] BUG (Medium, Folgefund U-2) — Beim Abbruch wird nur ein `cancelled`-Flag gesetzt (`ConnectionProvider.tsx:111/128-130` und `143/165-168`); das zugrundeliegende `connectToSlider`-Promise kann trotzdem erfolgreich auflösen, ohne dass `device.cancelConnection()` je aufgerufen wird (`grep cancelConnection src/` → 0 Treffer) — der native GATT-Link bleibt bestehen. Die Firmware startet ihr Advertising erst bei echtem `onDisconnect` neu (`firmware/src/ble.cpp:32-35`); der neue Scan findet dann 10s lang nichts, obwohl das Gerät faktisch verbunden ist → "Kein Gerät gefunden", obwohl es das nicht sein sollte.
+- [x] PASS — `reconnecting + REQUEST_SCAN → scanning` (`connectionReducer.ts:167-170`); Button in `reconnecting` aktiv (`ConnectionHeader.tsx:68-72`). **BUG-3 behoben, dann NEU-1 als Folge davon behoben:** der Cleanup bricht jetzt nur noch ab, solange der Versuch wirklich noch offen ist (`settled`-Guard, Commit `a0f372f`) — nicht mehr bei einem bereits erfolgreichen Connect. Tests: `ConnectionProvider.test.tsx` „cancels the native connection attempt…" (2×) und „does not cancel a reconnect attempt that succeeds", alle rot-geprüft.
 
 ### EC-2: Firmware stoppt Motor eigenständig bei Verbindungsabbruch während einer Fahrt
-- [!] NOT VERIFIED — verschoben auf das Motor-Feature (PROJ-2/3): `firmware/src/main.cpp` hat noch keine Motorsteuerung, es gibt aktuell keine Fahrt, die gestoppt werden müsste. Kein PROJ-1-Bug, aber als offener Punkt mitzuführen, damit er zwischen den Features nicht verloren geht.
+- [!] NOT VERIFIED — unverändert verschoben auf PROJ-2/3, keine Motorsteuerung vorhanden.
 
 ### EC-3: Foreground-Re-Check
-- [ ] BUG (Medium) — Spec/Design verlangen: beim Vordergrund-Wechsel Status neu prüfen, bei Bedarf automatisch neu scannen. Implementiert (`ConnectionProvider.tsx:172-197`) ist aber nur: (a) im Zustand `connected` wird geprüft; bei verlorener Verbindung wird `UNEXPECTED_DISCONNECT` dispatcht → 30s-Reconnect-Schleife auf die alte, potenziell tote Device-Referenz → erst danach `not_found` (manueller Tap nötig) statt eines direkten Re-Scans; (b) war die App beim Backgrounding in `scanning`/`not_found`/`connecting`, passiert beim Foreground **gar nichts** — der Code behandelt dort nur `connected` und `permission_denied`. Workaround vorhanden ("Erneut suchen" bleibt sichtbar) → Medium statt High.
+- [x] PASS (Code) für den `connected`-Pfad — **BUG-4 Teil (a) behoben:** Foreground-Check dispatcht jetzt `REQUEST_SCAN` (frischer Scan) statt `UNEXPECTED_DISCONNECT` (stale Reconnect-Loop), Reducer akzeptiert `REQUEST_SCAN` jetzt auch aus `connected` (Commit `1db8e6f`, Test „moves connected -> scanning (not reconnecting)…", rot-geprüft).
+- [ ] BUG (Medium, BUG-4 Teil (b), weiterhin offen) — war die App beim Backgrounding in `scanning`/`connecting`/`not_found`/`reconnecting`, passiert beim Zurückkehren weiterhin nichts automatisch (`ConnectionProvider.tsx:213-236` behandelt nur `connected` und `permission_denied`). Bewusst nicht in dieser Runde erweitert — Workaround „Erneut suchen" bleibt sichtbar; eine automatische Neubewertung in jedem Zustand bei jedem Foreground-Event (auch beiläufigen wie dem Kontrollzentrum) hätte ein eigenes Abwägen von Nutzen vs. unnötigen Scan-Neustarts verdient, nicht nebenbei mitgemacht.
 
 ### EC-4: Permanent abgelehnte Berechtigung → App-Einstellungen-Link
-- [x] PASS — Hinweis-Screen bietet ausschließlich den Weg über `Linking.openSettings()` (`ConnectionHeader.tsx:49-52`), keine erneute In-App-Abfrage im UI-Pfad; der Foreground-Re-Check dient nur der Erkennung einer nachträglich in den Einstellungen erteilten Berechtigung, kein Widerspruch.
+- [x] PASS — unverändert.
 
 ### EC-5: Kein doppelter Verbindungsversuch
-- [x] PASS — Doppelt abgesichert: Reducer behandelt `REQUEST_SCAN` in `scanning`/`connecting`/`connected`/`checking_permissions` als No-op (`connectionReducer.ts:96-126, 150-158`, 4 parametrisierte Tests grün); UI zeigt in `scanning`/`connecting` einen Spinner statt des Buttons (`ConnectionHeader.tsx:39, 92-101`); zusätzlich schützt `settled` in `scanForSlider` (`ble/client.ts:49, 55-63`).
+- [x] PASS, Evidenz aktualisiert — Reducer behandelt `REQUEST_SCAN` in `scanning`/`connecting`/`checking_permissions` weiterhin als No-op (3 parametrisierte Tests, vorher 4 — `connected` ist mit BUG-4 bewusst kein No-op mehr, siehe EC-3). UI zeigt in `scanning`/`connecting` einen Spinner statt Button. **NEU-3 behoben:** ein künftiger `REQUEST_SCAN`-Aufruf aus `connected` (heute nur vom Foreground-Check ausgelöst, der die Verbindung schon als tot bestätigt hat) räumt jetzt vor dem Scan-Start eine noch gesetzte Geräte-Referenz sauber ab (Commit `6808638`, Test „releases the live connection before scanning fresh…", rot-geprüft) — verhindert, dass ein späterer Aufrufer denselben verwaisten-Link-Fehler wie BUG-3 reproduziert.
 
-## Weitere Befunde (undokumentierte Edge Cases / Layer-Grenze)
+## Weitere Befunde dieser Re-Verifikation
 
-### F-1: NimBLE-Arduino Versionskonflikt — Firmware kompiliert vermutlich nicht
-- [ ] BUG (**High**) — `firmware/platformio.ini:12` pinnt `h2zero/NimBLE-Arduino @ ^1.4.1` (PlatformIO-Caret = `>=1.4.1 <2.0.0`). `firmware/src/ble.cpp:19-37` nutzt aber die **NimBLE-2.x-Callback-Signaturen**: `onConnect(NimBLEServer*, NimBLEConnInfo&)` und `onDisconnect(NimBLEServer*, NimBLEConnInfo&, int reason)`, beide mit `override`. Von der Acceptance-Lane als starker Verdacht gemeldet, vom QA-Owner gegen die offizielle NimBLE-Arduino-Migrationsdokumentation bestätigt: `NimBLEConnInfo` und diese Signaturen existieren erst **ab Version 2.0** — 1.x verwendet `ble_gap_conn_desc*` und `onDisconnect` ohne `reason`-Parameter (Quelle: [h2zero/NimBLE-Arduino 1.x-to-2.x Migration Guide](https://github.com/h2zero/NimBLE-Arduino/blob/master/docs/1.x_to2.x_migration_guide.md)). Mit der gepinnten 1.4.x-Version ist ein Compile-Fehler sehr wahrscheinlich (`override` auf eine nicht existierende Basissignatur) — dann advertised der ESP32 nie, und AC-2/AC-3/AC-9 sind end-to-end nicht erreichbar, unabhängig von der App-Seite.
-  **Compile selbst NOT VERIFIED** — keine PlatformIO-Toolchain in dieser Umgebung; der Fund stützt sich auf den Versions-Constraint plus die offizielle API-Dokumentation, nicht auf einen beobachteten Build-Fehler.
-  Fix-Richtung (für `/build`, nicht hier umgesetzt): entweder `platformio.ini` auf `@ ^2.5.1` (aktuell letzte stabile Version) anheben und `docs/stacks/firmware-esp32-tmc2209.md` entsprechend nachziehen, oder die Callbacks auf die 1.x-Signaturen zurückbauen.
+### NEU-1: Selbst-Abbruch der gerade aufgebauten Verbindung — BEHOBEN
+- Ursprünglich **Critical** — unabhängig von Security- und Regressions-Lane gefunden (siehe Commits oben). Der BUG-3-Fix rief in beiden Effekt-Cleanups (`ConnectionProvider.tsx`) `device.cancelConnection()` **bedingungslos** auf; da Cleanup auch beim *Erfolg* läuft (`CONNECT_SUCCEEDED`/`RECONNECT_SUCCEEDED` ändern `state.status`, was denselben Effekt abreißen lässt), kappte die App jede gerade aufgebaute Verbindung sofort wieder → Connect→Cancel→Disconnect→Reconnect-Endlosschleife, `reconnectAttemptsRemaining` wird bei jedem Erfolg zurückgesetzt, die Schleife hätte nie geendet. **Behoben in `a0f372f`** durch ein `settled`-Flag pro Effekt.
 
-### U-3: Disconnect-Subscription wird nicht abbestellt vor Neuanlage
-- [ ] BUG (Low) — `ConnectionProvider.tsx:116` und `:149` überschreiben `disconnectSubRef.current`, ohne die vorherige Subscription abzubestellen (`clearDisconnectSubscription()` läuft nur im Scan-Effekt und beim Unmount). Listener-Leak, funktional harmlos, da ein doppelter `UNEXPECTED_DISCONNECT`-Dispatch im Zustand `reconnecting` ein No-op ist.
+### NEU-2: Bluetooth-Status nach Berechtigungserteilung nicht neu geprüft — BEHOBEN
+- Ursprünglich **Medium** — direkte Nebenwirkung von BUG-2s Fix (permission_denied sticky). **Behoben in `6808638`**, siehe AC-5.
 
-### U-5: Falscher Content-Text im Zustand `checking_permissions`
-- [ ] BUG (Low) — `RootScreen.tsx:34-35` rendert im Zustand `checking_permissions` den `ScanningIndicator` ("Suche nach deinem Slider…"), während der Header korrekt "Berechtigungen werden geprüft…" zeigt (`ConnectionHeader.tsx:47`) — zu diesem Zeitpunkt läuft noch gar kein Scan. Widersprüchlich, aber rein kosmetisch.
+### NEU-3: `REQUEST_SCAN` aus `connected` räumt keine bestehende Verbindung auf — BEHOBEN
+- Ursprünglich **Low** (heute nicht real auslösbar, da der einzige Aufrufer die Verbindung schon als tot bestätigt hat) — **behoben in `6808638`** als Absicherung gegen einen künftigen Aufrufer, siehe EC-5.
 
 ## Security Audit Results
 
-_Dieses Feature hat keinen HTTP-Server, keine Routen, kein Auth, keine Datenbank, kein Web-Bundle — die meisten Standard-Web-Punkte sind deshalb nicht anwendbar, nicht stillschweigend übersprungen._
+_Unverändert gegenüber dem Erstbericht, wo nicht anders vermerkt — die Security-Lane hat jeden Punkt gegen den Diff erneut geprüft, nicht nur übernommen._
 
-- [!] NOT VERIFIED — Authentication Bypass: nicht anwendbar, kein HTTP-/Auth-Surface
-- [!] NOT VERIFIED — Authorization/RLS: nicht anwendbar, keine Datenbank, keine Accounts
-- [!] NOT VERIFIED — Rate Limiting: nicht anwendbar, kein HTTP-Endpoint
-- [!] NOT VERIFIED — Brute Force auf Credentials: nicht anwendbar, kein Login/Signup/Passwort-Reset, kein PIN/Bonding (Produktentscheidung)
-- [!] NOT VERIFIED — Account-Enumeration: nicht anwendbar, keine Accounts
-- [!] NOT VERIFIED — Bulk-Signup: nicht anwendbar
-- [!] NOT VERIFIED — Credentials in der URL: nicht anwendbar, keine Formulare/URLs; einzige `Linking`-Aufrufe sind parameterlose System-Intents (`requestBlePermissions.ts:46,55`)
-- [x] PASS — Keine hartcodierten Secrets/Keys/Tokens: `grep -rniE "api[_-]?key|secret|token|password|credential|bearer|...”` über `src`, `firmware/src`, `App.tsx`, `android/app/src/main` → nur zwei False Positives ("design tokens"-Kommentare); `git grep` nach Cloud-Provider-Key-Mustern → 0 Treffer; keine `.env`/`.pem`/`google-services.json` getrackt
-- [ ] BUG (Low) — Release-Build ist mit dem öffentlichen RN-Debug-Keystore signiert: `android/app/build.gradle:88-94,103` nutzt `signingConfigs.debug` (`storePassword 'android'`) auch für `buildTypes.release`. Unveränderter Template-Default. Severity Low, solange `stack.deploy: local` bleibt (privates Gerät) — wird Medium/High, sobald das APK an Dritte weitergegeben wird.
-- [x] PASS — BLE-Sicherheitslage konsistent mit der dokumentierten Entscheidung: kein Bonding/Encryption weder in Firmware (`ble.cpp:51,54` reine `WRITE`/`NOTIFY`-Properties, kein `setSecurityAuth`) noch App (`ble/client.ts:102` reines `device.connect()`); über den Link geht nachweislich nichts außer Verbindungsstatus (`grep Serial.print|console.log` → nur 3 statuslose Log-Zeilen in der Firmware, 0 in der App); keine MAC/Geräte-ID wird angezeigt oder geloggt
-- [x] PASS — Android-Permission-Scope korrekt begrenzt: nur `INTERNET` (RN-Template-Default), `BLUETOOTH_SCAN` (mit `neverForLocation`), `BLUETOOTH_CONNECT`, `ACCESS_FINE_LOCATION` (maxSdk 30) — kein Scope Creep, `allowBackup="false"`, `usesCleartextTraffic` in Release vom Gradle-Plugin auf `false` gesetzt
-- [x] PASS — Keine verarbeitete BLE-Eingabe (Injection-Fläche): Command-Characteristic hat noch keinen `onWrite`-Callback (`grep setCallbacks|onWrite firmware/src` → nur der Server-Level-Callback), Werte werden weder gelesen noch verarbeitet
-- [x] PASS — Keine lokale Persistenz: `grep AsyncStorage|localStorage|MMKV|SecureStore` über `src`, `firmware/src`, `package.json` → 0 Treffer, entspricht der Spec-Entscheidung
-- [x] PASS — Abhängigkeiten: `npm audit` (mit und ohne devDependencies) → **0 vulnerabilities**; installierte `react-native-ble-plx`-Version 3.5.1 entspricht `^3.5.1`
-- [!] NOT VERIFIED — Vulnerability-Scan der PlatformIO-Firmware-Bibliotheken (NimBLE-Arduino, TMCStepper, FastAccelStepper): kein Audit-Werkzeug/keine Toolchain in dieser Umgebung
+- [!] NOT VERIFIED — Authentication Bypass / Authorization/RLS / Rate Limiting / Brute Force / Account-Enumeration / Bulk-Signup / Credentials in der URL / Secrets im Client-Bundle via DevTools / sensible Daten in API-Responses: nicht anwendbar, kein HTTP-/Auth-/DB-Surface in diesem Feature (erneut gegen den Diff geprüft: keine dieser Flächen kam hinzu)
+- [x] PASS — Keine hartcodierten Secrets in den geänderten Dateien: `git diff 81a252b..HEAD -- '*.ts' '*.tsx' '*.cpp' '*.h' '*.ini' | grep -niE "api[_-]?key|secret|token|passwd|credential|bearer|private[_-]?key|BEGIN.*PRIVATE|AKIA|ghp_|sk-"` → 0 Treffer
+- [x] PASS — BLE-Sicherheitslage weiterhin konsistent mit der dokumentierten Entscheidung (kein Bonding/Encryption); der neue `cancelConnection()`-Code ist reiner BLE-Lifecycle, kein neues Logging/keine neue Persistenz (Diff-Greps: 0 Treffer)
+- [x] PASS — `PermissionRationale.tsx` ist rein statisch, keine neue Berechtigung, kein Gerätedaten-Zugriff
+- [x] PASS — Android-Permission-Scope unverändert (`AndroidManifest.xml` nicht im Diff)
+- [x] PASS — Abhängigkeiten: `npm audit --omit=dev` → weiterhin **0 vulnerabilities**; keine neuen Pakete (`package.json`/`package-lock.json` nicht im Diff)
+- [ ] BUG (Low, BUG-6, weiterhin offen) — Release-Build signiert mit dem öffentlichen Debug-Keystore (`android/app/build.gradle:88-104`, nicht im Diff, unverändert)
+- [!] NOT VERIFIED — Compile-Verifikation des NimBLE-`^2.5.1`-Pins und Vulnerability-Scan der PlatformIO-Bibliotheken: keine PlatformIO-Toolchain in dieser Umgebung
 
 ## E2E Tests
 _Optionale Ebene — wird von `/e2e-tests` für kritische Kernabläufe geschrieben._
@@ -99,101 +105,46 @@ _Optionale Ebene — wird von `/e2e-tests` für kritische Kernabläufe geschrieb
 
 ## Not Verified In This Run
 
-- [!] Jede Laufzeit-Beobachtung zu AC-1…AC-9 und EC-1…EC-5 — `probe.kind: none`, kein Emulator/Gerät, kein PlatformIO-Toolchain
-- [!] Firmware-Kompilierung selbst (F-1 ist ein statischer Fund, kein beobachteter Build-Fehler) — keine PlatformIO-Toolchain hier
-- [!] Layer `firmware`: kein Testkommando hinterlegt (`.ai-eng-kit` → `layers[0].commands.test: null`) — Frage an `/init`, keine automatisierte Abdeckung für `firmware/src/*.cpp`
-- [!] EC-2 (Firmware-Sicherheits-Timeout bei Verbindungsabbruch während einer Fahrt) — verschoben auf das Motor-Feature (PROJ-2/3), es gibt noch keine Fahrt
-- [!] Cross-Browser-/Emulator-Rendering, Layout, Touch-Targets, Statusfarben — kein Renderer/Viewport hier, gehört zu `/e2e-tests` oder einem menschlichen Test
-- [!] Vulnerability-Scan der PlatformIO-Bibliotheken (NimBLE-Arduino, TMCStepper, FastAccelStepper) — kein Werkzeug/Toolchain hier
+- [!] Jede Laufzeit-Beobachtung zu AC-1…AC-9 und EC-1…EC-5 auf echtem Android-Gerät/Emulator — `probe.kind: none`, App- und Firmware-Ebene
+- [!] Firmware-Kompilierung mit dem neuen NimBLE-`^2.5.1`-Pin — keine PlatformIO-Toolchain hier; Bewertung bleibt statisch (Versions-Constraint + offizielle API-Doku), kein beobachteter Build
+- [!] Layer `firmware`: kein Testkommando hinterlegt (`.ai-eng-kit` → `layers[0].commands.test: null`) — weiterhin eine Frage an `/init`
+- [!] EC-2 (Firmware-Sicherheits-Timeout) — verschoben auf PROJ-2/3, es gibt noch keine Fahrt
+- [!] Layout, Touch-Targets, Statusfarben, Sichtbarkeit von `PermissionRationale` gegenüber dem Systemdialog — kein Renderer/Viewport hier
+- [!] Vulnerability-Scan der PlatformIO-Bibliotheken (NimBLE-Arduino 2.5.1, TMCStepper, FastAccelStepper) — kein Werkzeug hier
 
-## Bugs Found
+## Bugs Found (Gesamtstand nach dieser Re-Verifikation)
 
-### BUG-1: Firmware kompiliert vermutlich nicht — NimBLE-Arduino-Versionskonflikt (F-1)
-- **Severity:** High
-- **Steps to Reproduce:**
-  1. `firmware/platformio.ini:12` lesen → `h2zero/NimBLE-Arduino @ ^1.4.1`
-  2. `firmware/src/ble.cpp:19-37` lesen → `onConnect(NimBLEServer*, NimBLEConnInfo&)`, `onDisconnect(NimBLEServer*, NimBLEConnInfo&, int reason)`, beide `override`
-  3. Erwartet: Diese Signaturen kompilieren gegen die gepinnte Version. Tatsächlich: `NimBLEConnInfo` existiert laut [offizieller Migrationsdoku](https://github.com/h2zero/NimBLE-Arduino/blob/master/docs/1.x_to2.x_migration_guide.md) erst ab NimBLE-Arduino 2.0; `^1.4.1` löst nie auf 2.x auf
-- **Priority:** Fix before deployment
+### Behoben in diesem Zyklus
+| ID | Severity | Kurzbeschreibung | Commit |
+|---|---|---|---|
+| BUG-1 | High | NimBLE-Versionskonflikt, Firmware kompiliert vermutlich nicht | `acb369c` |
+| BUG-2 | Medium | `bluetooth_off` verschluckt eine Berechtigungsablehnung | `ecc9a8c` |
+| BUG-3 | Medium | Abgebrochener Connect/Reconnect hinterlässt verwaisten Link | `1121695` |
+| BUG-4 (Teil a) | Medium | Kein Re-Scan bei totem Link im `connected`-Foreground-Check | `1db8e6f` |
+| BUG-5 | Medium | Keine Erklärung vor der Berechtigungsabfrage | `8158480` |
+| BUG-9 | Low | Falscher Content-Text in `checking_permissions` | `8158480` (Nebeneffekt von BUG-5) |
+| NEU-1 | **Critical** | BUG-3-Fix brach die eigene erfolgreiche Verbindung sofort ab | `a0f372f` |
+| NEU-2 | Medium | Bluetooth-Status nach Berechtigungserteilung nicht neu geprüft | `6808638` |
+| NEU-3 | Low | `REQUEST_SCAN` aus `connected` räumt keine Verbindung auf | `6808638` |
 
-### BUG-2: `bluetooth_off` verschluckt eine zuvor abgelehnte Berechtigung (U-1)
-- **Severity:** Medium
-- **Steps to Reproduce:**
-  1. App mit ausgeschaltetem Bluetooth starten
-  2. Berechtigungsdialog ablehnen
-  3. Erwartet: Hinweis-Screen "Keine Bluetooth-Berechtigung" mit Link zu den Einstellungen
-  4. Tatsächlich: App bleibt/geht in `bluetooth_off`, das `PERMISSIONS_DENIED`-Ergebnis wird verworfen; schaltet man Bluetooth später ein, scannt die App ohne Berechtigung und zeigt "Kein Gerät gefunden" statt des Berechtigungs-Hinweises
-- **Priority:** Fix before deployment
-
-### BUG-3: Abgebrochener Connect/Reconnect hinterlässt verwaisten GATT-Link (U-2)
-- **Severity:** Medium
-- **Steps to Reproduce:**
-  1. Während eines laufenden Reconnect-Versuchs auf "Erneut suchen" tippen (EC-1)
-  2. Erwartet: Verbindung wird sauber abgebrochen, neuer Scan findet das Gerät
-  3. Tatsächlich: Nur ein internes Flag wird gesetzt, `device.cancelConnection()` wird nie aufgerufen; der native Link kann bestehen bleiben, die Firmware advertised erst nach echtem Disconnect neu → neuer Scan läuft 10s ins Leere
-- **Priority:** Fix before deployment
-
-### BUG-4: Kein automatischer Re-Scan beim Rückkehren in den Vordergrund (EC-3)
-- **Severity:** Medium
-- **Steps to Reproduce:**
-  1. App in den Hintergrund schicken, während sie in `scanning`/`not_found`/`connecting` ist (oder während im Hintergrund ein Reconnect abläuft und ausläuft)
-  2. App wieder in den Vordergrund holen
-  3. Erwartet: Status wird neu geprüft, bei Bedarf automatischer Re-Scan (so in `design.md:38` beschrieben)
-  4. Tatsächlich: Der Foreground-Handler behandelt nur `connected` und `permission_denied`; in jedem anderen Zustand passiert nichts automatisch — Workaround: manueller "Erneut suchen"-Tap bleibt möglich
-- **Priority:** Fix before deployment
-
-### BUG-5: Keine Erklärung vor der Berechtigungsabfrage (AC-1)
-- **Severity:** Medium
-- **Steps to Reproduce:**
-  1. App zum ersten Mal starten
-  2. Erwartet: kurze Erklärung, warum die Bluetooth-Berechtigung gebraucht wird, dann der Systemdialog
-  3. Tatsächlich: Systemdialog ohne jeden Kontext; `checking_permissions` zeigt nur einen generischen Ladehinweis
-- **Priority:** Fix before deployment
-
-### BUG-6: Release-Build mit öffentlichem Debug-Keystore signiert
-- **Severity:** Low
-- **Steps to Reproduce:**
-  1. `android/app/build.gradle:88-104` lesen
-  2. `buildTypes.release` referenziert `signingConfigs.debug` mit dem im Repo getrackten `debug.keystore`
-  3. Solange nur lokal genutzt (`stack.deploy: local`) harmlos; bei Weitergabe des APKs an Dritte wird das relevant
-- **Priority:** Nice to have
-
-### BUG-7: Reconnect-Fenster kollabiert bei fehlender Geräte-Referenz (U-4)
-- **Severity:** Low
-- **Steps to Reproduce:**
-  1. Zustand `reconnecting` erreichen, während `deviceRef.current` aus irgendeinem Grund `null` ist
-  2. Erwartet: 10 Versuche über 30 Sekunden verteilt
-  3. Tatsächlich: `RECONNECT_ATTEMPT_FAILED` wird synchron ohne Wartezeit dispatcht, alle Versuche verbrennen sofort
-- **Priority:** Nice to have
-
-### BUG-8: Disconnect-Subscription wird nicht abbestellt vor Neuanlage
-- **Severity:** Low
-- **Steps to Reproduce:** siehe U-3 oben — Listener-Leak, funktional harmlos (Reducer ignoriert den doppelten Dispatch)
-- **Priority:** Nice to have
-
-### BUG-9: Falscher Content-Text während `checking_permissions`
-- **Severity:** Low
-- **Steps to Reproduce:** siehe U-5 oben — kosmetischer Widerspruch zwischen Header- und Content-Text
-- **Priority:** Nice to have
-
-### BUG-10: Banner-Wortlaut weicht vom Spec-Text ab (AC-7)
-- **Severity:** Low
-- **Steps to Reproduce:** siehe AC-7 oben — "Verbindung unterbrochen" statt "Verbindung verloren" im Banner
-- **Priority:** Nice to have
-
-### BUG-11: `features/INDEX.md` — Platzhalter-Zeile im Deployments-Abschnitt
-- **Severity:** Low
-- **Steps to Reproduce:**
-  1. `features/INDEX.md:42` lesen: `- _v1.0.0 · 2026-01-31 · https://app.example.com · PROJ-1, PROJ-2_`
-  2. Behauptet ein nie stattgefundenes Release; `/security-check` und `/audit` lesen diese Zeile als Eingabe
-- **Priority:** Nice to have
+### Weiterhin offen
+| ID | Severity | Kurzbeschreibung |
+|---|---|---|
+| BUG-4 (Teil b) | Medium | Kein automatischer Re-Scan beim Foreground-Wechsel aus `scanning`/`connecting`/`not_found`/`reconnecting` |
+| BUG-6 | Low | Release-Build mit öffentlichem Debug-Keystore signiert |
+| BUG-7 | Low | Reconnect-Fenster kollabiert bei `deviceRef === null` |
+| BUG-8 | Low | Disconnect-Subscription wird nicht abbestellt vor Neuanlage |
+| BUG-10 | Low | Banner-Wortlaut weicht vom Spec-Text ab |
+| BUG-11 | Low | `features/INDEX.md` — Platzhalter-Zeile im Deployments-Abschnitt |
+| BUG-5-Rest | Low | Erklärung erscheint parallel zum, nicht vor dem Systemdialog; kein Rationale auf Android ≤11 |
 
 ## Summary
-- **Acceptance Criteria:** 7/9 vollständig PASS (Code-Ebene), 2/9 mit BUG (AC-1, AC-6-Interaktion U-1); alle 9 zusätzlich `[!] NOT VERIFIED` zur Laufzeit
-- **Edge Cases:** 3/5 PASS (EC-1 mit Folgefund, EC-4, EC-5), 1/5 BUG (EC-3), 1/5 NOT VERIFIED/verschoben (EC-2)
-- **Bugs Found:** 11 total (0 critical, 1 high, 4 medium, 6 low)
-- **Security:** 6/17 Checks verifiziert (davon 1 mit Low-Bug), 9 NOT VERIFIED (nicht anwendbar, kein Web-Surface), 2 NOT VERIFIED (fehlende Firmware-Toolchain hier) — keine Critical-/High-Sicherheitsfunde
-- **Production Ready:** NO
-- **Recommendation:** Vor `/deploy` beheben — insbesondere BUG-1 (High, Firmware kompiliert vermutlich nicht) und die drei Medium-Bugs, die reale Nutzungspfade betreffen (BUG-2, BUG-3, BUG-4). BUG-5 (fehlende Erklärung) ist eine direkte Spec-Abweichung. Danach `/build` erneut, dann `/qa` als Re-Verifikation mit Diff-Scope.
+- **Acceptance Criteria:** 9/9 PASS auf Code-Ebene (0 offene Critical/High/Medium-Bugs auf AC-Ebene — der verbleibende AC-1-Rest ist Low); alle 9 zusätzlich `[!] NOT VERIFIED` zur Laufzeit
+- **Edge Cases:** 4/5 PASS (EC-1, EC-4, EC-5 vollständig; EC-3 teilweise — Teil (b) bleibt Medium-Bug), 1/5 NOT VERIFIED/verschoben (EC-2)
+- **Bugs in diesem Zyklus behoben:** 9 (1 Critical, 1 High, 3 Medium, 1 Medium-Teil, 2 Low, 1 Low-Nebeneffekt)
+- **Bugs weiterhin offen:** 7, alle Low bis auf einen Medium-Rest (BUG-4 Teil b) — **keine Critical/High mehr offen**
+- **Security:** 6/15 Checks in diesem Lauf verifiziert, 9 NOT VERIFIED (nicht anwendbar oder fehlende Toolchain) — 1 Low-Fund (BUG-6, unverändert offen), keine Critical-/High-Sicherheitsfunde
+- **Production Ready: NOT READY — not verified.** Kein Critical/High-Bug mehr offen, aber `probe.kind: none` bedeutet: **kein einziges Acceptance Criterion wurde tatsächlich auf echter Hardware beobachtet.** "Nichts gefunden, weil nichts laufen konnte" ist kein PASS.
+- **Empfehlung:** Die verbleibenden 7 offenen Bugs sind alle Low bzw. ein eingegrenzter Medium-Teilaspekt (BUG-4b) — keiner davon blockiert für sich einen Deploy. Der einzige verbleibende Weg zu **READY** ist ein protokollierter menschlicher Test (siehe Rückmeldung an den Nutzer): die 9 ACs einmal am echten ESP32 + Android-Handy durchgehen, insbesondere AC-3/AC-7/AC-8 (NEU-1 betraf genau diese — die Verbindung muss jetzt tatsächlich *bestehen bleiben*), plus einen echten `pio run -e esp32dev`-Kompilierlauf für BUG-1.
 
-> "Production Ready: NO" — es gibt einen High- und vier Medium-Bugs, die vor dem Deploy behoben werden müssen. Zusätzlich wurde **kein** Laufzeit-Acceptance-Criterion tatsächlich beobachtet (`probe.kind: none`) — selbst nach den Bugfixes bräuchte "READY" entweder eine funktionierende Probe-Umgebung oder einen protokollierten menschlichen Test aller AC-1…AC-9.
+> "Production Ready: NOT READY — not verified" heißt hier ausdrücklich **nicht** "es gibt Bugs" — alle Critical/High-Funde dieser Runde sind behoben. Es bedeutet: ohne echten Testlauf (Firmware-Kompilierung + Gerät) ist "READY" nicht ehrlich zu vergeben.
