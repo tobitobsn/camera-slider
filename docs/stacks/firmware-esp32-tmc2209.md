@@ -98,20 +98,23 @@ Ein einziger GATT-Service mit wenigen Characteristics reicht für dieses Produkt
 #include <NimBLEDevice.h>
 
 #define SERVICE_UUID        "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
-#define CMD_CHAR_UUID        "6e400002-b5a3-f393-e0a9-e50e24dcca9e"  // Write: Befehle
+#define CMD_CHAR_UUID        "6e400002-b5a3-f393-e0a9-e50e24dcca9e"  // Write + Write-ohne-Antwort: Befehle
 #define STATUS_CHAR_UUID     "6e400003-b5a3-f393-e0a9-e50e24dcca9e"  // Notify: Status
 
-// Befehlsformat: 1 Byte Opcode + Payload, z. B.
-//   0x01 <int32 steps>            JOG (relative Schritte, Geschwindigkeit aus aktuellem Setting)
-//   0x02                          SET_START (aktuelle Position als Startpunkt merken)
-//   0x03                          SET_END (aktuelle Position als Endpunkt merken)
-//   0x04 <uint16 durationMs>      AUTO_MOVE (Start → Ende in gegebener Dauer)
-//   0x05                          STOP (sofortiges Anhalten, EN low halten)
+// Befehlsformat: 1 Byte Opcode + Payload.
+// Von PROJ-2 (/architecture) final festgelegt, siehe features/PROJ-2-manuelle-steuerung-jog/design.md:
+//   0x01 <uint8 direction 0=vorwärts/1=rückwärts> <uint8 speedPercent 1-100>
+//                                  JOG — Write OHNE Antwort, alle 300ms wiederholt solange
+//                                  eine Richtungstaste in der App gehalten wird
+//   0x05                          STOP — Write MIT Antwort, sofortiges Anhalten
+//
+// Weitere Opcodes (Start-/Endpunkt setzen, automatische Fahrt) sind noch NICHT festgelegt —
+// das entscheidet /architecture erst, wenn PROJ-3 dran ist. Hier nicht vorwegnehmen.
 ```
 
-Der genaue GATT-Aufbau (Opcodes, Payload-Layout, Notify-Frequenz für Live-Position) wird in `design.md` von PROJ-1 festgelegt, sobald `/architecture` läuft — hier steht nur der Rahmen, damit Firmware und App von Anfang an dasselbe Protokoll annehmen.
+**STOP muss unabhängig vom aktuellen Firmware-Zustand funktionieren** — als Interrupt-artiger Pfad, der die laufende Bewegung sofort abbricht, nicht als weiterer Eintrag in einer Befehlswarteschlange, die bei einer hängenden Bewegung nicht mehr abgearbeitet wird.
 
-**STOP muss unabhängig vom aktuellen Firmware-Zustand funktionieren** — als Interrupt-artiger Pfad, der `stepper->forceStopAndNewPosition()` aufruft und danach `EN` HIGH setzt, nicht als weiterer Eintrag in einer Befehlswarteschlange, die bei einer hängenden Bewegung nicht mehr abgearbeitet wird.
+**Watchdog (PROJ-2):** Die Firmware merkt sich den Zeitpunkt des letzten empfangenen JOG-Befehls. Läuft der Motor gerade und seit diesem Zeitpunkt sind mehr als 1000ms vergangen (≈3 verpasste 300ms-Wiederholungen), stoppt die Firmware eigenständig — unabhängig davon, ob die BLE-Verbindung formal noch besteht. Das fängt App-Abstürze, Hintergrund-Drosselung und Paketverlust ab, die der reine Disconnect-Callback nicht abdeckt.
 
 ## Kalibrierung / Steps-pro-mm
 
@@ -128,4 +131,5 @@ Der konkrete Wert ist eine Kalibrierungs-Konstante in der Firmware, kein Archite
 
 - `EN`-Pin HIGH (Treiber aus) im Fehlerfall und beim Boot, bevor der erste Befehl kommt — ein stromloser Motor ist der sichere Default
 - Kein Dauerstrom im Stillstand nötig (haltendes Moment optional über `pwm_autoscale`), sonst Wärmeentwicklung unnötig hoch
-- BLE-Verbindungsabbruch während einer Fahrt → Firmware stoppt die Bewegung selbstständig nach einem Timeout ohne Heartbeat/Befehl (kein "weiterfahren ins Blaue", wenn die App die Verbindung verliert)
+- BLE-Verbindungsabbruch während einer Fahrt → `onDisconnect`-Callback stoppt die Bewegung sofort (kein "weiterfahren ins Blaue", wenn die App die Verbindung verliert)
+- Zusätzlich, unabhängig vom Verbindungsstatus: der JOG-Watchdog (siehe „BLE-Kommandoschicht" oben) stoppt auch dann, wenn die Verbindung formal besteht, aber die App aus anderem Grund (Absturz, Hintergrund, Paketverlust) über 1s kein Kommando mehr sendet
