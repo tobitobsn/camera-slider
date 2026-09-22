@@ -76,3 +76,6 @@ yarn-error.log
 # PlatformIO / Firmware
 firmware/.pio/
 firmware/.vscode/
+
+# Claude Code session-internal state
+.claude/scheduled_tasks.lock

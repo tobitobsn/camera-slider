@@ -10,16 +10,16 @@
 
 <!-- Fundament für App und Firmware. Beide Bereiche sind komplett disjunkt (App-Root vs. firmware/) → beide [P]. -->
 
-- [ ] T1 [P]  React-Native-Projekt "CameraSliderApp" (TypeScript-Template) initialisieren  · files: package.json, App.tsx, tsconfig.json  · → AC-1–AC-9 (Voraussetzung)
-- [ ] T2 [P]  PlatformIO-Firmware-Projekt in `firmware/` anlegen (platformio.ini, main.cpp-Grundgerüst)  · files: firmware/platformio.ini, firmware/src/main.cpp  · → AC-1–AC-9 (Voraussetzung)
+- [x] T1 [P]  React-Native-Projekt "CameraSliderApp" (TypeScript-Template) initialisieren  · files: package.json, App.tsx, tsconfig.json  · → AC-1–AC-9 (Voraussetzung)
+- [x] T2 [P]  PlatformIO-Firmware-Projekt in `firmware/` anlegen (platformio.ini, main.cpp-Grundgerüst)  · files: firmware/platformio.ini, firmware/src/main.cpp  · → AC-1–AC-9 (Voraussetzung)
 
 ## Level 2 — BLE-Grundbausteine
 
 <!-- Firmware-Advertising, App-BLE-Client und App-Berechtigungen sind drei disjunkte Bereiche → alle drei [P]. -->
 
-- [ ] T3 [P]  Firmware: NimBLE-Server mit SERVICE_UUID + Gerätename, Advertising starten, kein Bonding/Verschlüsselung, onConnect/onDisconnect-Callbacks  · files: firmware/src/ble.h, firmware/src/ble.cpp, firmware/src/main.cpp  · → AC-2, AC-3, AC-9
-- [ ] T4 [P]  `react-native-ble-plx` einbinden; BLE-Client-Singleton mit Scan gefiltert nach SERVICE_UUID, verbindet automatisch zum ersten Treffer  · files: package.json, src/ble/client.ts  · → AC-2, AC-9
-- [ ] T5 [P]  Android-Manifest-Berechtigungen (BLUETOOTH_SCAN/CONNECT, ACCESS_FINE_LOCATION maxSdk 30) + Laufzeit-Request-Funktion mit Versions-Weiche (Android 12+ vs. ≤11)  · files: android/app/src/main/AndroidManifest.xml, src/permissions/requestBlePermissions.ts  · → AC-1, AC-6
+- [x] T3 [P]  Firmware: NimBLE-Server mit SERVICE_UUID + Gerätename, Advertising starten, kein Bonding/Verschlüsselung, onConnect/onDisconnect-Callbacks  · files: firmware/src/ble.h, firmware/src/ble.cpp, firmware/src/main.cpp  · → AC-2, AC-3, AC-9
+- [x] T4 [P]  `react-native-ble-plx` einbinden; BLE-Client-Singleton mit Scan gefiltert nach SERVICE_UUID, verbindet automatisch zum ersten Treffer  · files: package.json, src/ble/client.ts  · → AC-2, AC-9
+- [x] T5 [P]  Android-Manifest-Berechtigungen (BLUETOOTH_SCAN/CONNECT, ACCESS_FINE_LOCATION maxSdk 30) + Laufzeit-Request-Funktion mit Versions-Weiche (Android 12+ vs. ≤11)  · files: android/app/src/main/AndroidManifest.xml, src/permissions/requestBlePermissions.ts  · → AC-1, AC-6
 
 ## Level 3 — Zustandslogik
 
