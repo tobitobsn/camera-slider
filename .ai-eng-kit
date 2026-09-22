@@ -1,0 +1,145 @@
+{
+  "version": "0.7.3",
+  "mode": "new",
+  "language": "de",
+  "agents": [
+    "claude"
+  ],
+  "memory": "CLAUDE.md",
+  "createdWith": "create-ai-eng-app",
+  "platform": "mobile",
+  "stack": {
+    "framework": "react-native",
+    "backend": "localstorage",
+    "test": "jest",
+    "e2e": null,
+    "ui": null,
+    "deploy": "local",
+    "packageManager": "npm"
+  },
+  "commands": {
+    "dev": "npx react-native run-android",
+    "build": "cd android && ./gradlew assembleRelease",
+    "test": "npm test",
+    "lint": "npm run lint"
+  },
+  "probe": {
+    "kind": "none",
+    "baseUrl": null
+  },
+  "layers": [
+    {
+      "name": "firmware",
+      "root": "firmware",
+      "kind": "service",
+      "language": "cpp",
+      "framework": "arduino-platformio",
+      "commands": {
+        "dev": "pio run -e esp32dev -t upload",
+        "test": null,
+        "lint": null
+      },
+      "probe": {
+        "kind": "none",
+        "baseUrl": null
+      },
+      "packs": [
+        "docs/stacks/firmware-esp32-tmc2209.md"
+      ]
+    }
+  ],
+  "law": null,
+  "featurePrefix": "PROJ",
+  "managed": {
+    ".claude/skills": [
+      "architecture",
+      "audit",
+      "build",
+      "cleanup",
+      "deploy",
+      "dsgvo",
+      "e2e-tests",
+      "help",
+      "init",
+      "map",
+      "qa",
+      "refactor",
+      "refine",
+      "reverse-spec",
+      "security-check",
+      "starter-kit-migration",
+      "tasks",
+      "verify-setup",
+      "write-spec"
+    ],
+    ".claude/rules": [
+      "general.md",
+      "security.md"
+    ],
+    ".claude/agents": [
+      "qa-engineer.md"
+    ],
+    "docs/production": [
+      "database-optimization.md",
+      "error-tracking.md",
+      "performance.md",
+      "rate-limiting.md",
+      "security-headers.md"
+    ],
+    "docs/stacks": [
+      "backend-supabase.md",
+      "deploy-hostinger.md",
+      "deploy-vercel.md",
+      "framework-nextjs.md",
+      "tests-vitest-playwright.md",
+      "ui-shadcn.md"
+    ],
+    "docs/law": [
+      "ai-act.md",
+      "dsg.md",
+      "gdpr.md"
+    ],
+    "docs/kit": [
+      "CHANGELOG.md"
+    ]
+  },
+  "hashes": {
+    ".claude/skills/architecture": "57e5ff5c8c292481",
+    ".claude/skills/audit": "0136503de4db9b7d",
+    ".claude/skills/build": "3908b5931de8b08e",
+    ".claude/skills/cleanup": "ccc39001f3aa66b6",
+    ".claude/skills/deploy": "b712e53b4462f02a",
+    ".claude/skills/dsgvo": "5eb87b899123a0d0",
+    ".claude/skills/e2e-tests": "fe0f54758c495687",
+    ".claude/skills/help": "a5a1972a339f8ccd",
+    ".claude/skills/init": "792b1f1b06ec637c",
+    ".claude/skills/map": "328661bd5948c65b",
+    ".claude/skills/qa": "a64a3df68a3d2120",
+    ".claude/skills/refactor": "d24eb9274e1b718d",
+    ".claude/skills/refine": "596b6580d372ed5f",
+    ".claude/skills/reverse-spec": "464fc6c3d1745428",
+    ".claude/skills/security-check": "dbd46e74d34182fc",
+    ".claude/skills/starter-kit-migration": "c3f09e69878ef6d5",
+    ".claude/skills/tasks": "3058c4481d837278",
+    ".claude/skills/verify-setup": "7b54154d80862d89",
+    ".claude/skills/write-spec": "c5d7fa12565601fc",
+    ".claude/rules/general.md": "d189f7c7d9d89be2",
+    ".claude/rules/security.md": "ddd99b4b1754878b",
+    ".claude/agents/qa-engineer.md": "945d1a12f33181a1",
+    "docs/production/database-optimization.md": "ea25a896ca251692",
+    "docs/production/error-tracking.md": "9a26ae3d0029ae96",
+    "docs/production/performance.md": "c592f2aa3f8eb761",
+    "docs/production/rate-limiting.md": "ae53c1276171f153",
+    "docs/production/security-headers.md": "e0d533266cc33ef2",
+    "docs/stacks/backend-supabase.md": "30a602afb13c7c0e",
+    "docs/stacks/deploy-hostinger.md": "e695932a009c76fc",
+    "docs/stacks/deploy-vercel.md": "76675af7e1486260",
+    "docs/stacks/framework-nextjs.md": "d3e9f35ed073139a",
+    "docs/stacks/tests-vitest-playwright.md": "16b10381dfee170d",
+    "docs/stacks/ui-shadcn.md": "86c2202698f1a17f",
+    "docs/law/ai-act.md": "ab7a959b366afbff",
+    "docs/law/dsg.md": "8521b1d04b8aa0b1",
+    "docs/law/gdpr.md": "4669e4e2e2964833",
+    "docs/kit/CHANGELOG.md": "04cc6e7e17fca0e5"
+  }
+}

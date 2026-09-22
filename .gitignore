@@ -1,0 +1,31 @@
+# React Native / Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env
+.env.local
+
+# Android
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/*.keystore
+!android/debug.keystore
+*.jks
+
+# iOS (not built in this project, ignored defensively)
+ios/build/
+ios/Pods/
+
+# PlatformIO / Firmware
+firmware/.pio/
+firmware/.vscode/
+
+# Metro / RN tooling
+.metro-health-check*
+*.log
+
+# OS
+.DS_Store
