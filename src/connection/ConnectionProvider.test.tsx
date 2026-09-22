@@ -1,4 +1,5 @@
 import React from 'react';
+import { AppState } from 'react-native';
 import ReactTestRenderer, { act } from 'react-test-renderer';
 
 import { bleManager } from '../ble/client';
@@ -26,6 +27,17 @@ async function flushMicrotasks() {
 }
 
 describe('ConnectionProvider', () => {
+  beforeEach(() => {
+    // startDeviceScan needs a per-test mockReset (not just clearAllMocks,
+    // which only wipes call history, not a mock's implementation): several
+    // tests give it a full mockImplementation, and that would otherwise
+    // leak into the next test once its own mockImplementationOnce is
+    // consumed. bleManager.onStateChange / AppState.addEventListener keep
+    // the baked-in defaults from their mock modules (they return a real
+    // `{ remove }`), so they aren't reset here.
+    (bleManager.startDeviceScan as jest.Mock).mockReset();
+  });
+
   afterEach(() => {
     jest.clearAllMocks();
   });
@@ -166,5 +178,66 @@ describe('ConnectionProvider', () => {
     await act(async () => renderer.unmount());
 
     expect(fakeDevice.cancelConnection).toHaveBeenCalled();
+  });
+
+  // BUG-4 / QA finding EC-3: returning to the foreground with a dead link
+  // must trigger a fresh scan, not a 30s retry against the old device.
+  it('moves connected -> scanning (not reconnecting) when the foreground check finds the link dead', async () => {
+    (requestBlePermissions as jest.Mock).mockResolvedValue(true);
+
+    let appStateListener: ((state: string) => void) | undefined;
+    (AppState.addEventListener as jest.Mock).mockImplementation(
+      (_event: string, listener: (state: string) => void) => {
+        appStateListener = listener;
+        return { remove: jest.fn() };
+      },
+    );
+
+    const fakeDevice: Record<string, jest.Mock> = {
+      connect: jest.fn(),
+      discoverAllServicesAndCharacteristics: jest.fn(),
+      onDisconnected: jest.fn(() => ({ remove: jest.fn() })),
+      cancelConnection: jest.fn().mockResolvedValue(undefined),
+      // The foreground check's liveness probe — the link is actually gone.
+      isConnected: jest.fn().mockResolvedValue(false),
+    };
+    fakeDevice.connect.mockResolvedValue(fakeDevice);
+    fakeDevice.discoverAllServicesAndCharacteristics.mockResolvedValue(fakeDevice);
+
+    // Only the *first* scan finds a device — a re-scan triggered by the
+    // foreground check should be observable as 'scanning' rather than
+    // racing straight back to 'connected' within the same flush.
+    (bleManager.startDeviceScan as jest.Mock).mockImplementationOnce(
+      (_uuids: string[], _options: unknown, listener: (error: unknown, device: unknown) => void) => {
+        listener(null, fakeDevice);
+      },
+    );
+
+    let lastStatus = '';
+    let renderer: ReactTestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = ReactTestRenderer.create(
+        <ConnectionProvider>
+          <StatusProbe onStatus={s => (lastStatus = s)} />
+        </ConnectionProvider>,
+      );
+    });
+    await flushMicrotasks(); // scanning -> connecting -> connected
+    expect(lastStatus).toBe('connected');
+    expect(appStateListener).toBeDefined();
+
+    // App returns to the foreground; isConnected() says the link is gone.
+    await act(async () => {
+      await appStateListener?.('active');
+    });
+    await flushMicrotasks();
+
+    expect(fakeDevice.isConnected).toHaveBeenCalled();
+    expect(lastStatus).toBe('scanning');
+    // The re-scan really did start a new native scan (2nd call overall) —
+    // not just move a status label.
+    expect(bleManager.startDeviceScan).toHaveBeenCalledTimes(2);
+
+    await act(async () => renderer.unmount());
   });
 });

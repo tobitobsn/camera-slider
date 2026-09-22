@@ -58,9 +58,11 @@ export type ConnectionAction =
  * scanning with no permission at all. `permission_denied` only ever clears
  * via `PERMISSIONS_GRANTED`.
  *
- * `REQUEST_SCAN` is only meaningful from `not_found` and `reconnecting`
- * (EC-1: interrupts a running reconnect loop and restarts scanning). From
- * `permission_denied`/`bluetooth_off` the "Erneut suchen" button is a pure
+ * `REQUEST_SCAN` is meaningful from `not_found` and `reconnecting` (EC-1:
+ * interrupts a running reconnect loop and restarts scanning) and from
+ * `connected` (BUG-4 / QA finding EC-3: the foreground liveness check uses
+ * it to force a fresh scan instead of retrying a possibly stale device).
+ * From `permission_denied`/`bluetooth_off` the "Erneut suchen" button is a pure
  * UI side effect (opens OS settings) and never reaches this reducer; from
  * every other state it is a no-op — this is the reducer's own defense
  * against EC-5 (a duplicate scan/connect attempt), independent of whatever
@@ -135,6 +137,14 @@ export function connectionReducer(
           status: 'reconnecting',
           reconnectAttemptsRemaining: MAX_RECONNECT_ATTEMPTS,
         };
+      }
+      if (action.type === 'REQUEST_SCAN') {
+        // BUG-4 / QA finding EC-3: the app-foreground liveness check uses
+        // this (instead of UNEXPECTED_DISCONNECT) when it finds the link
+        // silently gone — a fresh scan is more reliable after an unknown
+        // amount of background time than retrying the old, possibly stale
+        // Device reference through the reconnect loop.
+        return { ...state, status: 'scanning', deviceName: null };
       }
       return state;
 

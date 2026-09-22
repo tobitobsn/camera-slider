@@ -191,7 +191,12 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
             .isConnected()
             .catch(() => false);
           if (!stillConnected) {
-            dispatch({ type: 'UNEXPECTED_DISCONNECT' });
+            // BUG-4 / QA finding EC-3: dispatch REQUEST_SCAN, not
+            // UNEXPECTED_DISCONNECT — after an unknown amount of background
+            // time, retrying the old Device reference through the 30s
+            // reconnect loop is less reliable than just scanning fresh, and
+            // the spec/design call for a re-scan here, not a reconnect.
+            dispatch({ type: 'REQUEST_SCAN' });
           }
           return;
         }

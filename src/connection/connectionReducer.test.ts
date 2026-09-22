@@ -151,8 +151,22 @@ describe('connectionReducer', () => {
     expect(next.status).toBe('scanning');
   });
 
-  // EC-5: REQUEST_SCAN must never start a second, parallel attempt
-  it.each<ConnectionState['status']>(['scanning', 'connecting', 'connected', 'checking_permissions'])(
+  // BUG-4 / QA finding EC-3: the foreground liveness check forces a fresh
+  // scan instead of retrying a possibly stale device through the reconnect
+  // loop — reuses REQUEST_SCAN rather than a separate action.
+  it('moves connected -> scanning on REQUEST_SCAN (foreground liveness check found the link gone)', () => {
+    const next = connectionReducer(
+      state({ status: 'connected', deviceName: 'CameraSlider' }),
+      { type: 'REQUEST_SCAN' },
+    );
+    expect(next.status).toBe('scanning');
+    expect(next.deviceName).toBeNull();
+  });
+
+  // EC-5: REQUEST_SCAN must never start a second, parallel scan/connect
+  // attempt. 'connected' is deliberately not in this list (see BUG-4 test
+  // above) — there is no in-flight scan/connect call to duplicate there.
+  it.each<ConnectionState['status']>(['scanning', 'connecting', 'checking_permissions'])(
     'ignores REQUEST_SCAN while %s (no duplicate scan/connect attempt)',
     status => {
       const before = state({ status });
