@@ -10,10 +10,10 @@
 
 <!-- Vier komplett unabhängige Bereiche (Firmware-Motor, App-BLE-Client, App-Zustandsmaschine, App-Connection-Context) → alle [P]. -->
 
-- [ ] T1 [P]  Firmware: `motor.h`/`motor.cpp` — `motorSetup()` (TMCStepper-UART + FastAccelStepper-Init), `motorJog(direction, speedPercent)` (kontinuierlicher Lauf, 1–100% → 200–4000 Steps/s linear), `motorStop()`, `motorWatchdogCheck()` (1000ms-Schwelle seit letztem JOG)  · files: firmware/src/motor.h, firmware/src/motor.cpp  · → AC-1, AC-2, AC-6
-- [ ] T2 [P]  App: `sendJogCommand(device, direction, speedPercent)` + `sendStopCommand(device)` in `ble/client.ts` (Command-Characteristic-UUID, JOG als Write-ohne-Antwort, STOP als Write-mit-Antwort) + `@react-native-community/slider` installieren  · files: src/ble/client.ts, package.json  · → AC-1, AC-2, AC-3
-- [ ] T3 [P]  App: `useJogState`-Hook — reine Zustandsmaschine `idle`/`jogging_forward`/`jogging_backward`, Übergänge für Press/Release je Richtung, Beide-Tasten-gleichzeitig-Guard (sofort zurück zu `idle`, kein Richtungswechsel) + Unit-Tests, rot-geprüft  · files: src/components/useJogState.ts, src/components/useJogState.test.ts  · → AC-1, AC-2, AC-4, EC-2
-- [ ] T4 [P]  App: `ConnectionProvider` — Context um `device: Device | null` erweitert (gesetzt/genullt an denselben Stellen wie `deviceRef.current`, `null` außer im Zustand `connected`)  · files: src/connection/ConnectionProvider.tsx  · → Voraussetzung für T7 (kein eigenes AC, rein additive PROJ-1-Erweiterung)
+- [x] T1 [P]  Firmware: `motor.h`/`motor.cpp` — `motorSetup()` (TMCStepper-UART + FastAccelStepper-Init), `motorJog(direction, speedPercent)` (kontinuierlicher Lauf, 1–100% → 200–4000 Steps/s linear), `motorStop()`, `motorWatchdogCheck()` (1000ms-Schwelle seit letztem JOG)  · files: firmware/src/motor.h, firmware/src/motor.cpp  · → AC-1, AC-2, AC-6
+- [x] T2 [P]  App: `sendJogCommand(device, direction, speedPercent)` + `sendStopCommand(device)` in `ble/client.ts` (Command-Characteristic-UUID, JOG als Write-ohne-Antwort, STOP als Write-mit-Antwort) + `@react-native-community/slider` installieren  · files: src/ble/client.ts, package.json  · → AC-1, AC-2, AC-3
+- [x] T3 [P]  App: `useJogState`-Hook — reine Zustandsmaschine `idle`/`jogging_forward`/`jogging_backward`, Übergänge für Press/Release je Richtung, Beide-Tasten-gleichzeitig-Guard (sofort zurück zu `idle`, kein Richtungswechsel) + Unit-Tests, rot-geprüft  · files: src/components/useJogState.ts, src/components/useJogState.test.ts  · → AC-1, AC-2, AC-4, EC-2
+- [x] T4 [P]  App: `ConnectionProvider` — Context um `device: Device | null` erweitert (gesetzt/genullt an denselben Stellen wie `deviceRef.current`, `null` außer im Zustand `connected`)  · files: src/connection/ConnectionProvider.tsx  · → Voraussetzung für T7 (kein eigenes AC, rein additive PROJ-1-Erweiterung)
 
 ## Level 2 — Verdrahtung
 

@@ -11,12 +11,26 @@
  *    that on top of the functions exported here.
  */
 import { BleManager, type Device } from 'react-native-ble-plx';
+import { fromByteArray } from 'base64-js';
 
 /**
  * Fixed contract with the firmware — do not change without coordinating a
  * firmware update (see firmware/ in this repo).
  */
 export const SLIDER_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+
+/** Command characteristic UUID — fixed contract with the firmware (firmware/src/ble.cpp). */
+export const SLIDER_COMMAND_CHAR_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+
+const JOG_OPCODE = 0x01;
+const STOP_OPCODE = 0x05;
+
+const JOG_DIRECTION_BYTE: Record<JogDirection, number> = {
+  forward: 0x00,
+  backward: 0x01,
+};
+
+export type JogDirection = 'forward' | 'backward';
 
 const DEFAULT_SCAN_TIMEOUT_MS = 10000;
 
@@ -119,4 +133,43 @@ export function subscribeToDisconnect(
   return () => {
     subscription.remove();
   };
+}
+
+/**
+ * Sends a JOG command: direction + speed (1-100%). Meant to be called
+ * repeatedly (~every 300ms) while a direction button is held — the
+ * firmware's watchdog auto-stops if these stop arriving. Write WITHOUT
+ * response: a single lost packet is harmless since this repeats.
+ */
+export async function sendJogCommand(
+  device: Device,
+  direction: JogDirection,
+  speedPercent: number,
+): Promise<void> {
+  const payload = new Uint8Array([
+    JOG_OPCODE,
+    JOG_DIRECTION_BYTE[direction],
+    speedPercent,
+  ]);
+
+  await device.writeCharacteristicWithoutResponseForService(
+    SLIDER_SERVICE_UUID,
+    SLIDER_COMMAND_CHAR_UUID,
+    fromByteArray(payload),
+  );
+}
+
+/**
+ * Sends a STOP command (no payload). Write WITH response — this is the
+ * safety-critical path (button release, direction conflict), worth the
+ * extra round-trip for delivery confirmation.
+ */
+export async function sendStopCommand(device: Device): Promise<void> {
+  const payload = new Uint8Array([STOP_OPCODE]);
+
+  await device.writeCharacteristicWithResponseForService(
+    SLIDER_SERVICE_UUID,
+    SLIDER_COMMAND_CHAR_UUID,
+    fromByteArray(payload),
+  );
 }

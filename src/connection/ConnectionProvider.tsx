@@ -29,6 +29,8 @@ type ConnectionContextValue = {
   state: ConnectionState;
   /** Dispatches the manual "Erneut suchen" action (valid from not_found/reconnecting). */
   requestScan: () => void;
+  /** The live BLE Device while connected, null otherwise (PROJ-2: jog commands need it). */
+  device: Device | null;
 };
 
 const ConnectionContext = createContext<ConnectionContextValue | null>(null);
@@ -265,7 +267,18 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     dispatch({ type: 'REQUEST_SCAN' });
   }, []);
 
-  const value = useMemo(() => ({ state, requestScan }), [state, requestScan]);
+  // deviceRef.current is set synchronously before the dispatch that moves
+  // state.status to 'connected' (see the connecting/reconnecting effects
+  // above), so it already holds the right value by the time this memo
+  // recomputes for that state change.
+  const value = useMemo(
+    () => ({
+      state,
+      requestScan,
+      device: state.status === 'connected' ? deviceRef.current : null,
+    }),
+    [state, requestScan],
+  );
 
   return (
     <ConnectionContext.Provider value={value}>{children}</ConnectionContext.Provider>
