@@ -25,7 +25,7 @@
 
 <!-- Reine Funktion, unabhängig testbar. Baut auf keinem der vorherigen Tasks inhaltlich auf, folgt aber erst nach den Grundbausteinen. -->
 
-- [ ] T6  `connectionReducer.ts`: Zustands-Enum (`checking_permissions` … `not_found`) + alle Übergänge als reine, testbare Funktion  · files: src/connection/connectionReducer.ts, src/connection/connectionReducer.test.ts  · → AC-3, AC-4, AC-5, AC-7, AC-8, EC-1, EC-4, EC-5
+- [x] T6  `connectionReducer.ts`: Zustands-Enum (`checking_permissions` … `not_found`) + alle Übergänge als reine, testbare Funktion  · files: src/connection/connectionReducer.ts, src/connection/connectionReducer.test.ts  · → AC-3, AC-4, AC-5, AC-7, AC-8, EC-1, EC-4, EC-5
 
 ## Level 4 — Verbindungs-Orchestrierung
 

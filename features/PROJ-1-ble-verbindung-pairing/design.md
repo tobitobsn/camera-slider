@@ -39,7 +39,7 @@ Der Verbindungsstatus ist ein einziges Enum, nie mehrere unabhängige Booleans �
 
 **Verbindungsfehler und Scan-Timeout landen bewusst im selben `not_found`-Zustand** — beide lösen sich gleich (erneut suchen), eine granularere Fehlerunterscheidung bringt für ein Ein-Nutzer-Hobbygerät keinen Mehrwert.
 
-**"Erneut suchen"-Button** ist nur in `not_found`, `permission_denied` (führt dort zu den App-Einstellungen) und `bluetooth_off` (führt zu den Bluetooth-Einstellungen) aktiv/sichtbar — in `scanning`/`connecting`/`reconnecting` ist er deaktiviert oder ausgeblendet. Das verhindert EC-5 (doppelter paralleler Verbindungsversuch) rein über den UI-Zustand, ohne zusätzliche Sperr-Logik.
+**"Erneut suchen"-Button** ist in `not_found`, `permission_denied` (führt dort zu den App-Einstellungen), `bluetooth_off` (führt zu den Bluetooth-Einstellungen) **und `reconnecting`** aktiv. Nur in `scanning`/`connecting` ist er deaktiviert — dort läuft bereits ein echter Scan-/Connect-Aufruf (T4), den EC-5 nicht doppelt auslösen soll. In `reconnecting` ist ein Tap dagegen ein gültiger Abbruch: er beendet die laufende Reconnect-Schleife und startet sofort einen neuen Scan (EC-1). Korrektur gegenüber der ersten Fassung dieses Designs — die ursprüngliche "auch in reconnecting deaktiviert"-Regel widersprach EC-1 aus `spec.md`, das genau diesen Abbruch verlangt. Gefunden und korrigiert bei der Umsetzung von T6, 2026-09-22.
 
 ## Datenmodell (App)
 
