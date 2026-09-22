@@ -31,7 +31,7 @@
 
 <!-- Seiteneffekte, die den Reducer aus Level 3 ansteuern. -->
 
-- [ ] T7  `ConnectionProvider.tsx`: Permission-Check, Scan/Reconnect-Timer (3s-Intervall, 30s-Limit), Bluetooth-Adapter-Listener (Auto-Resume bei Wiedereinschalten), Foreground-Re-Check  · files: src/connection/ConnectionProvider.tsx  · → AC-1, AC-2, AC-5, AC-6, EC-1, EC-3, EC-4
+- [x] T7  `ConnectionProvider.tsx`: Permission-Check, Scan/Reconnect-Timer (3s-Intervall, 30s-Limit), Bluetooth-Adapter-Listener (Auto-Resume bei Wiedereinschalten), Foreground-Re-Check  · files: src/connection/ConnectionProvider.tsx  · → AC-1, AC-2, AC-5, AC-6, EC-1, EC-3, EC-4
 
 ## Level 5 — UI-Komponenten
 
