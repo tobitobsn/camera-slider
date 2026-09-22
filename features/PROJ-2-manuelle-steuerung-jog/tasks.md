@@ -25,7 +25,7 @@
 
 ## Level 3 — Einbindung
 
-- [ ] T8  `RootScreen.tsx` — ersetzt `ControlsPlaceholder` im Zustand `connected` durch `<JogControls />`  · files: src/screens/RootScreen.tsx  · → AC-7
+- [x] T8  `RootScreen.tsx` — ersetzt `ControlsPlaceholder` im Zustand `connected` durch `<JogControls />`  · files: src/screens/RootScreen.tsx  · → AC-7
 
 ## Parallelisierung
 

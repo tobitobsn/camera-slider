@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { ConnectionHeader } from '../components/ConnectionHeader';
 import { BluetoothOffNotice } from '../components/BluetoothOffNotice';
+import { JogControls } from '../components/JogControls';
 import { NotFoundNotice } from '../components/NotFoundNotice';
 import { PermissionDeniedNotice } from '../components/PermissionDeniedNotice';
 import { PermissionRationale } from '../components/PermissionRationale';
@@ -46,7 +47,7 @@ function renderContent(status: ReturnType<typeof useConnection>['state']['status
     case 'not_found':
       return <NotFoundNotice />;
     case 'connected':
-      return <ControlsPlaceholder />;
+      return <JogControls />;
     case 'reconnecting':
       return (
         <View style={styles.reconnectingWrap}>
@@ -60,9 +61,12 @@ function renderContent(status: ReturnType<typeof useConnection>['state']['status
 }
 
 /**
- * PROJ-2/PROJ-3 replace this with the real manual jog / start-end-point
- * controls. PROJ-1 only needs something for the connected state to show
- * and for `reconnecting` to visibly disable.
+ * PROJ-2's real jog controls (JogControls) now cover the `connected` case.
+ * This placeholder lives on only for `reconnecting`, where PROJ-1's design
+ * keeps a disabled placeholder visible under the ReconnectingBanner rather
+ * than the real controls (AC-7: not fully connected → controls stay hidden;
+ * `device` is null in this state anyway, so JogControls would render
+ * nothing here). PROJ-3 will need its own placeholder story for its screen.
  */
 function ControlsPlaceholder() {
   return (
