@@ -19,7 +19,7 @@ monitor_speed = 115200
 lib_deps =
     teemuatlut/TMCStepper @ ^0.7.3
     gin66/FastAccelStepper @ ^0.31.1
-    h2zero/NimBLE-Arduino @ ^1.4.1
+    h2zero/NimBLE-Arduino @ ^2.5.1
 ```
 
 `FastAccelStepper` statt `AccelStepper`: erzeugt die Step-Pulse über die Hardware-Timer/RMT-Peripherie des ESP32 statt per Software-Polling in `loop()` — bei einem 0,9°-Motor mit hoher Mikroschrittzahl reißt eine software-getaktete Lösung sonst bei höheren Geschwindigkeiten ab.
