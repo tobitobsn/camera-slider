@@ -13,7 +13,7 @@ const char kDeviceName[] = "CameraSlider";
 // Fixed contract UUIDs shared with the React Native app. Do not change
 // without updating the app's BLE scan/connect code as well.
 const char kServiceUUID[] = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-const char kCommandCharUUID[] = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";  // WRITE, future use
+const char kCommandCharUUID[] = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";  // WRITE, bonded/encrypted (PROJ-2)
 const char kStatusCharUUID[] = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";   // NOTIFY, future use
 
 // Command opcodes (see docs/stacks/firmware-esp32-tmc2209.md "BLE-Kommandoschicht").
@@ -45,14 +45,29 @@ class ServerCallbacks : public NimBLEServerCallbacks {
   }
 
   void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
-    (void)pServer;
     (void)connInfo;
     (void)reason;
-    gConnected = false;
     Serial.println("BLE: client disconnected, restarting advertising");
-    // AC-5/EC-3: the firmware must stop the motor independently of the app
-    // when the connection drops, not wait for a STOP that will never come.
-    motorStop();
+    // QA finding N-1 (qa-report.md): since the BUG-4 fix keeps advertising
+    // running while a central is connected, up to 3 devices can now be
+    // connected at once (NimBLE's default CONFIG_BT_NIMBLE_MAX_CONNECTIONS).
+    // Before that fix this callback firing at all meant "the one peer is
+    // gone" — now it can just as easily mean "some unrelated device that
+    // briefly connected is gone, while the app is still here." Only treat
+    // it as a real loss of control once NO central remains connected;
+    // getConnectedCount() already reflects this disconnect (the peer is
+    // removed from the server's list before onDisconnect fires — confirmed
+    // in the vendored NimBLEServer.cpp's BLE_GAP_EVENT_DISCONNECT handler).
+    // Erring toward stopping when in doubt about the app's own connection
+    // is still the safe default, just no longer triggered by an unrelated
+    // stranger's connect/disconnect.
+    if (pServer->getConnectedCount() == 0) {
+      gConnected = false;
+      // AC-5/EC-3: the firmware must stop the motor independently of the
+      // app when the connection drops, not wait for a STOP that will never
+      // come.
+      motorStop();
+    }
     // The app auto-reconnects by scanning again, so we must be discoverable
     // again as soon as the link drops.
     NimBLEDevice::startAdvertising();

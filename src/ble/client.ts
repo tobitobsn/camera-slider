@@ -106,9 +106,13 @@ export function scanForSlider(
 }
 
 /**
- * Connects to the given device (plain GATT connect, no bonding/pairing) and
- * discovers all of its services and characteristics so subsequent reads/
- * writes/notifications can be set up by callers.
+ * Connects to the given device and discovers all of its services and
+ * characteristics so subsequent reads/writes/notifications can be set up by
+ * callers. This call itself is a plain GATT connect — it does not initiate
+ * bonding. Since PROJ-2's BUG-3 fix, writing the command characteristic
+ * requires a bonded/encrypted link; the OS handles that pairing handshake
+ * transparently the first time such a write actually happens (see
+ * ConnectionProvider.tsx's post-connect sendStopCommand()).
  *
  * @returns The connected Device, with services/characteristics discovered.
  */

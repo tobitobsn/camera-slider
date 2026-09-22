@@ -14,6 +14,7 @@ import {
   bleManager,
   connectToSlider,
   scanForSlider,
+  sendStopCommand,
   subscribeToDisconnect,
 } from '../ble/client';
 import { requestBlePermissions } from '../permissions/requestBlePermissions';
@@ -137,6 +138,22 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
         disconnectSubRef.current = subscribeToDisconnect(connectedDevice, () => {
           dispatch({ type: 'UNEXPECTED_DISCONNECT' });
         });
+        // PROJ-2 QA finding I-1: the command characteristic now requires a
+        // bonded, encrypted link (firmware/src/ble.cpp, BUG-3 fix). JOG is
+        // written without response, so an unbonded first write is silently
+        // dropped by the BLE stack with no error — Android only starts
+        // on-demand bonding off an ATT error, which only a write WITH
+        // response produces. Left alone, the very first jog press after a
+        // fresh pairing would silently do nothing. Fire a harmless STOP
+        // (the motor is already idle right after connecting) in the
+        // background to force that handshake to start immediately, well
+        // before the user can realistically reach a jog button — fire-and
+        // -forget on purpose, not awaited: this file's connect timing has
+        // its own hard-won cancellation/settled guards (see BUG-3/NEU-1 in
+        // PROJ-1's qa-report.md), and blocking CONNECT_SUCCEEDED on a BLE
+        // round-trip would widen that logic's race window for a benefit
+        // this fire-and-forget call already gets in practice.
+        sendStopCommand(connectedDevice).catch(() => {});
         dispatch({
           type: 'CONNECT_SUCCEEDED',
           deviceName: connectedDevice.name ?? 'CameraSlider',
@@ -185,6 +202,11 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
           disconnectSubRef.current = subscribeToDisconnect(connectedDevice, () => {
             dispatch({ type: 'UNEXPECTED_DISCONNECT' });
           });
+          // Same reasoning as the connecting effect above (PROJ-2 QA finding
+          // I-1) — bonds persist across reconnects, so this is normally an
+          // instant no-op, but it's cheap insurance if the phone or the
+          // ESP32 ever forgot the bond independently of each other.
+          sendStopCommand(connectedDevice).catch(() => {});
           dispatch({
             type: 'RECONNECT_SUCCEEDED',
             deviceName: connectedDevice.name ?? 'CameraSlider',
