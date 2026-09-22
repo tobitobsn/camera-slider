@@ -41,6 +41,14 @@ FastAccelStepper* stepper = nullptr;
 // touch it directly.
 unsigned long lastJogMillis = 0;
 
+// Tracks whether motorJog() currently has a continuous run started, and in
+// which direction — FastAccelStepper's isRunning() only reports *whether*
+// something is moving, not *which way* (verified against the vendored
+// header, see design.md BUG-2 entry). Reset by motorStop() so the next
+// motorJog() call after a stop is always treated as "starting fresh".
+bool jogRunning = false;
+JogDirection jogRunningDirection = JogDirection::kForward;
+
 uint32_t speedPercentToStepsPerSecond(uint8_t speedPercent) {
   if (speedPercent < 1) {
     speedPercent = 1;
@@ -85,20 +93,36 @@ void motorJog(JogDirection direction, uint8_t speedPercent) {
     return;
   }
 
-  // setSpeedInHz() only takes effect on the next move()/moveTo()/
-  // runForward()/runBackward() call, so set it before (re-)issuing the run —
-  // this is what lets an already-running jog pick up a new slider value on
-  // its next 300ms heartbeat (design.md "Geschwindigkeitsregler während des
-  // Fahrens").
+  // setSpeedInHz() only takes effect once one of move()/moveTo()/
+  // runForward()/runBackward()/applySpeedAcceleration()/moveByAcceleration()
+  // is called afterwards (FastAccelStepper.h, "## Speed" doc comment) — set
+  // it before (re-)issuing whichever of those this call needs.
   stepper->setSpeedInHz(speedPercentToStepsPerSecond(speedPercent));
 
-  // runForward()/runBackward() are safe to call again while already running
-  // in the same direction (just continues), and reverse cleanly if called
-  // while running the other way.
-  if (direction == JogDirection::kForward) {
-    stepper->runForward();
+  const bool alreadyRunningSameDirection =
+      jogRunning && jogRunningDirection == direction;
+
+  if (alreadyRunningSameDirection) {
+    // Repeated 300ms JOG heartbeat while the button stays held and the run
+    // is already going the same way: only the speed may have changed.
+    // applySpeedAcceleration() is FastAccelStepper's documented mechanism
+    // for pushing a new speed/acceleration value into an already-running
+    // continuous move (FastAccelStepper.h: "This is convenient especially,
+    // if the stepper is set to continuous running.") — design.md BUG-2.
+    stepper->applySpeedAcceleration();
   } else {
-    stepper->runBackward();
+    // First call for this direction (motor idle, or running the other way):
+    // (re-)start the continuous run so it picks up the speed just set.
+    // runForward()/runBackward() reverse cleanly if the motor is currently
+    // running the other way (FastAccelStepper.h, runForward()/runBackward()
+    // doc comment).
+    if (direction == JogDirection::kForward) {
+      stepper->runForward();
+    } else {
+      stepper->runBackward();
+    }
+    jogRunning = true;
+    jogRunningDirection = direction;
   }
 
   lastJogMillis = millis();
@@ -112,6 +136,12 @@ void motorStop() {
   // immediate stop STOP/disconnect/watchdog need (design.md "sofortiges
   // Anhalten"), as opposed to stopMove()'s normal deceleration.
   stepper->forceStop();
+
+  // The next motorJog() call, whatever direction, must be treated as
+  // starting fresh (calls runForward()/runBackward()), not as "already
+  // running" — otherwise it would try applySpeedAcceleration() on a motor
+  // that isn't moving.
+  jogRunning = false;
 }
 
 void motorWatchdogCheck() {

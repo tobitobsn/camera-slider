@@ -18,6 +18,8 @@ function statusLabelFor(status: JogStatus): string {
       return 'Fährt vorwärts…';
     case 'jogging_backward':
       return 'Fährt rückwärts…';
+    case 'blocked':
+      return 'Bitte beide Tasten loslassen';
     case 'idle':
     default:
       return 'Bereit';
