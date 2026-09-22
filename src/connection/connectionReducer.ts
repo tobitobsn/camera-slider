@@ -51,6 +51,12 @@ export type ConnectionAction =
 /**
  * `BLUETOOTH_OFF` can arrive from any state (the OS can disable the adapter
  * at any time) — handled first, before the per-status switch below.
+ * **Except `permission_denied`**: that is the more fundamental blocker (BUG-2
+ * / QA finding U-1) — nothing works without the permission regardless of the
+ * adapter, and losing track of a denial because a `BLUETOOTH_OFF` event
+ * happened to land at the same moment meant the app could later resume
+ * scanning with no permission at all. `permission_denied` only ever clears
+ * via `PERMISSIONS_GRANTED`.
  *
  * `REQUEST_SCAN` is only meaningful from `not_found` and `reconnecting`
  * (EC-1: interrupts a running reconnect loop and restarts scanning). From
@@ -64,7 +70,7 @@ export function connectionReducer(
   state: ConnectionState,
   action: ConnectionAction,
 ): ConnectionState {
-  if (action.type === 'BLUETOOTH_OFF') {
+  if (action.type === 'BLUETOOTH_OFF' && state.status !== 'permission_denied') {
     return { ...state, status: 'bluetooth_off', deviceName: null };
   }
 
@@ -90,6 +96,13 @@ export function connectionReducer(
       if (action.type === 'BLUETOOTH_ON') {
         // Auto-resume — no tap required (see design.md's technical decision).
         return { ...state, status: 'scanning' };
+      }
+      if (action.type === 'PERMISSIONS_DENIED') {
+        // BUG-2: the permission result can arrive while Bluetooth happens to
+        // be off. Surface the denial now rather than silently dropping it —
+        // otherwise BLUETOOTH_ON later would resume scanning with no
+        // permission at all.
+        return { ...state, status: 'permission_denied' };
       }
       return state;
 

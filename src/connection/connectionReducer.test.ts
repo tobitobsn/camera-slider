@@ -60,7 +60,7 @@ describe('connectionReducer', () => {
     expect(next.status).toBe('not_found');
   });
 
-  // AC-5: bluetooth off from any state, auto-resume on bluetooth on
+  // AC-5: bluetooth off from (almost) any state, auto-resume on bluetooth on
   it.each<ConnectionState['status']>([
     'checking_permissions',
     'scanning',
@@ -68,10 +68,19 @@ describe('connectionReducer', () => {
     'connected',
     'reconnecting',
     'not_found',
-    'permission_denied',
   ])('moves %s -> bluetooth_off on BLUETOOTH_OFF from any state', status => {
     const next = connectionReducer(state({ status }), { type: 'BLUETOOTH_OFF' });
     expect(next.status).toBe('bluetooth_off');
+  });
+
+  // BUG-2 / QA finding U-1: permission_denied is the more fundamental
+  // blocker and must not be clobbered by a BLUETOOTH_OFF that happens to
+  // land at the same time.
+  it('does NOT move permission_denied -> bluetooth_off (permission is the more fundamental blocker)', () => {
+    const next = connectionReducer(state({ status: 'permission_denied' }), {
+      type: 'BLUETOOTH_OFF',
+    });
+    expect(next.status).toBe('permission_denied');
   });
 
   it('auto-resumes scanning when bluetooth is turned back on, without a manual tap', () => {
@@ -79,6 +88,21 @@ describe('connectionReducer', () => {
       type: 'BLUETOOTH_ON',
     });
     expect(next.status).toBe('scanning');
+  });
+
+  // BUG-2 / QA finding U-1: a PERMISSIONS_DENIED that arrives while
+  // Bluetooth is off must not be silently dropped — otherwise a later
+  // BLUETOOTH_ON would resume scanning with no permission at all.
+  it('surfaces a permission denial that arrives while bluetooth_off, instead of losing it', () => {
+    const denied = connectionReducer(state({ status: 'bluetooth_off' }), {
+      type: 'PERMISSIONS_DENIED',
+    });
+    expect(denied.status).toBe('permission_denied');
+
+    // And bluetooth turning back on afterwards must not paper over the
+    // still-missing permission.
+    const afterBluetoothOn = connectionReducer(denied, { type: 'BLUETOOTH_ON' });
+    expect(afterBluetoothOn.status).toBe('permission_denied');
   });
 
   // AC-7 + AC-8: unexpected disconnect and the reconnect loop
