@@ -19,6 +19,12 @@ function StatusProbe({ onStatus }: { onStatus: (status: string) => void }) {
   return null;
 }
 
+function RequestScanProbe({ onReady }: { onReady: (requestScan: () => void) => void }) {
+  const { requestScan } = useConnection();
+  onReady(requestScan);
+  return null;
+}
+
 async function flushMicrotasks() {
   await act(async () => {
     await Promise.resolve();
@@ -305,6 +311,96 @@ describe('ConnectionProvider', () => {
     // The re-scan really did start a new native scan (2nd call overall) —
     // not just move a status label.
     expect(bleManager.startDeviceScan).toHaveBeenCalledTimes(2);
+
+    await act(async () => renderer.unmount());
+  });
+
+  // QA finding NEU-2 (re-verification): granting the permission must not
+  // be mistaken for "Bluetooth is on" — a BLUETOOTH_OFF event that arrived
+  // while permission_denied was active (now sticky, per BUG-2) is never
+  // re-delivered by onStateChange, since that only fires on a *change*.
+  it('moves permission_denied -> bluetooth_off (not scanning) when Bluetooth is still off after granting', async () => {
+    (requestBlePermissions as jest.Mock).mockResolvedValueOnce(false); // initial mount -> permission_denied
+
+    let appStateListener: ((state: string) => void) | undefined;
+    (AppState.addEventListener as jest.Mock).mockImplementation(
+      (_event: string, listener: (state: string) => void) => {
+        appStateListener = listener;
+        return { remove: jest.fn() };
+      },
+    );
+
+    let lastStatus = '';
+    let renderer: ReactTestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = ReactTestRenderer.create(
+        <ConnectionProvider>
+          <StatusProbe onStatus={s => (lastStatus = s)} />
+        </ConnectionProvider>,
+      );
+    });
+    await flushMicrotasks();
+    expect(lastStatus).toBe('permission_denied');
+    expect(appStateListener).toBeDefined();
+
+    // User granted the permission in OS settings, but Bluetooth is still off.
+    (requestBlePermissions as jest.Mock).mockResolvedValueOnce(true);
+    (bleManager.state as jest.Mock).mockResolvedValueOnce('PoweredOff');
+
+    await act(async () => {
+      await appStateListener?.('active');
+    });
+    await flushMicrotasks();
+
+    expect(lastStatus).toBe('bluetooth_off');
+
+    await act(async () => renderer.unmount());
+  });
+
+  // QA finding NEU-3 (re-verification): REQUEST_SCAN is valid from
+  // 'connected' too (BUG-4's fix uses it) — a future caller of requestScan()
+  // while still connected must not orphan the live GATT link the way BUG-3
+  // originally did for connect/reconnect.
+  it('releases the live connection before scanning fresh when requestScan() is called while connected', async () => {
+    (requestBlePermissions as jest.Mock).mockResolvedValue(true);
+
+    const fakeDevice: Record<string, jest.Mock> = {
+      connect: jest.fn(),
+      discoverAllServicesAndCharacteristics: jest.fn(),
+      onDisconnected: jest.fn(() => ({ remove: jest.fn() })),
+      cancelConnection: jest.fn().mockResolvedValue(undefined),
+    };
+    fakeDevice.connect.mockResolvedValue(fakeDevice);
+    fakeDevice.discoverAllServicesAndCharacteristics.mockResolvedValue(fakeDevice);
+
+    (bleManager.startDeviceScan as jest.Mock).mockImplementationOnce(
+      (_uuids: string[], _options: unknown, listener: (error: unknown, device: unknown) => void) => {
+        listener(null, fakeDevice);
+      },
+    );
+
+    let lastStatus = '';
+    let requestScan: (() => void) | undefined;
+    let renderer: ReactTestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = ReactTestRenderer.create(
+        <ConnectionProvider>
+          <StatusProbe onStatus={s => (lastStatus = s)} />
+          <RequestScanProbe onReady={fn => (requestScan = fn)} />
+        </ConnectionProvider>,
+      );
+    });
+    await flushMicrotasks(); // scanning -> connecting -> connected
+    expect(lastStatus).toBe('connected');
+    expect(fakeDevice.cancelConnection).not.toHaveBeenCalled(); // the BUG-3-regression check, once more
+
+    await act(async () => {
+      requestScan?.();
+    });
+    await flushMicrotasks();
+
+    expect(lastStatus).toBe('scanning');
+    expect(fakeDevice.cancelConnection).toHaveBeenCalledTimes(1);
 
     await act(async () => renderer.unmount());
   });

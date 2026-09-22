@@ -14,6 +14,8 @@ class BleManager {
 
   stopDeviceScan = jest.fn();
 
+  state = jest.fn().mockResolvedValue('PoweredOn');
+
   destroy = jest.fn();
 }
 

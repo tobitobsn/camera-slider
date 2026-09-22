@@ -85,6 +85,14 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     if (state.status !== 'scanning') return;
 
     clearDisconnectSubscription();
+    // QA finding NEU-3: REQUEST_SCAN is valid from 'connected' too (BUG-4's
+    // foreground liveness check uses it) — release whatever device was
+    // live before starting fresh, the same way BUG-3's fix does for an
+    // interrupted connect/reconnect. Today's only caller already confirmed
+    // the link is dead first, so this is normally a no-op; it's here so a
+    // future caller of requestScan() from 'connected' can't reintroduce
+    // BUG-3's orphaned-link problem through this door instead.
+    deviceRef.current?.cancelConnection().catch(() => {});
     deviceRef.current = null;
 
     const cancel = scanForSlider(
@@ -229,6 +237,16 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
           const granted = await requestBlePermissions();
           if (granted) {
             dispatch({ type: 'PERMISSIONS_GRANTED' });
+            // BUG-2's fix made permission_denied sticky against
+            // BLUETOOTH_OFF, on purpose — but that means a BLUETOOTH_OFF
+            // event that arrived while parked here was never recorded
+            // (QA finding NEU-2). onStateChange only fires on a *change*,
+            // so it can't be trusted to have caught that. Ask the adapter
+            // directly instead of assuming "granted" also means "usable".
+            const adapterState = await bleManager.state().catch(() => null);
+            if (adapterState && adapterState !== 'PoweredOn') {
+              dispatch({ type: 'BLUETOOTH_OFF' });
+            }
           }
         }
       },
