@@ -45,3 +45,12 @@ export async function requestBlePermissions(): Promise<boolean> {
 export function openAppSettings(): void {
   Linking.openSettings();
 }
+
+/**
+ * Opens the device's Bluetooth settings screen directly (Android-specific
+ * intent — there's no cross-platform API for this). Used when Bluetooth is
+ * off and the user needs to turn it on (AC-5).
+ */
+export function openBluetoothSettings(): void {
+  Linking.sendIntent('android.settings.BLUETOOTH_SETTINGS');
+}

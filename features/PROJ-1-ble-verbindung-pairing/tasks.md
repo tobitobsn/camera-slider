@@ -37,8 +37,8 @@
 
 <!-- Disjunkte Komponenten-Dateien → beide [P]. -->
 
-- [ ] T8 [P]  `ConnectionHeader.tsx`: Status-Badge, Gerätename, "Erneut suchen"-Button (je Zustand gesperrt/aktiv)  · files: src/components/ConnectionHeader.tsx  · → AC-3, AC-7, EC-5
-- [ ] T9 [P]  Zustands-Hinweis-Komponenten: PermissionDeniedNotice, BluetoothOffNotice, ScanningIndicator, NotFoundNotice, ReconnectingBanner  · files: src/components/PermissionDeniedNotice.tsx, src/components/BluetoothOffNotice.tsx, src/components/ScanningIndicator.tsx, src/components/NotFoundNotice.tsx, src/components/ReconnectingBanner.tsx  · → AC-1, AC-4, AC-5, AC-6, AC-7, AC-8
+- [x] T8 [P]  `ConnectionHeader.tsx`: Status-Badge, Gerätename, "Erneut suchen"-Button (je Zustand gesperrt/aktiv)  · files: src/components/ConnectionHeader.tsx  · → AC-3, AC-7, EC-5
+- [x] T9 [P]  Zustands-Hinweis-Komponenten: PermissionDeniedNotice, BluetoothOffNotice, ScanningIndicator, NotFoundNotice, ReconnectingBanner  · files: src/components/PermissionDeniedNotice.tsx, src/components/BluetoothOffNotice.tsx, src/components/ScanningIndicator.tsx, src/components/NotFoundNotice.tsx, src/components/ReconnectingBanner.tsx  · → AC-1, AC-4, AC-5, AC-6, AC-7, AC-8
 
 ## Level 6 — Verdrahtung
 
