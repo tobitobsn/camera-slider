@@ -1,7 +1,7 @@
 # QA Test Results
 
-**Getestet:** 2026-09-22 (Erstlauf) · **Re-Verifikation:** 2026-09-22
-**App-URL:** nicht lauffähig hier (`probe.kind: none`, App-Ebene und Layer `firmware` — kein Android-Emulator/-Gerät, kein PlatformIO-Toolchain). Jedes Laufzeit-AC ist `[!] NOT VERIFIED`, bis ein Mensch es testet (siehe unten).
+**Getestet:** 2026-09-22 (Erstlauf) · **Re-Verifikation:** 2026-09-22 (Code) · **Menschlicher Hardware-Test:** 2026-09-23
+**App-URL:** nicht lauffähig in der KI-Umgebung (`probe.kind: none` — kein Android-Emulator/-Gerät, keine PlatformIO-Toolchain dort). **Alle Laufzeit-ACs (AC-1–AC-8) wurden am 2026-09-23 vom Nutzer selbst auf echter Hardware verifiziert** (eigenes ESP32-DevKit, App via `npx react-native run-android` auf dem eigenen Android-Handy) — Details je AC unten.
 **Tester:** QA Engineer (AI) — 3 unabhängige `qa-engineer`-Lanes (Funktionsprüfung, Security-Red-Team, Regression) pro Lauf, die den Build nicht kannten, zusammengeführt von dieser Session als alleiniger Owner.
 **Scope:** Re-Verifikation, **volle Breite** (nicht nur der Diff) — Begründung: `git diff --stat 81a252b..HEAD` (Commit des Erstberichts) berührt `src/connection/connectionReducer.ts` und `src/connection/ConnectionProvider.tsx`, die geteilte Zustandsmaschine, auf der jedes AC/EC aufbaut — mehr als 3 Produktionsdateien und geteilter Code, also volle Breite statt Diff-Schmalspur.
 
@@ -25,36 +25,35 @@
 ## Acceptance Criteria Status
 
 ### AC-1: Berechtigungsabfrage beim ersten Start, mit Erklärung
-- [x] PASS (Code), Rest-Low offen — `checking_permissions` rendert jetzt `PermissionRationale` ("Bluetooth-Zugriff nötig… um sich mit deinem Slider zu verbinden", `src/components/PermissionRationale.tsx:15-18`) statt des vorherigen `ScanningIndicator` (`src/screens/RootScreen.tsx:35-38`, BUG-5, Commit `8158480`).
-- [ ] BUG (Low, Rest von BUG-5) — Die Erklärung erscheint *parallel* zum Systemdialog (derselbe Render-Zyklus wie der Mount-Effekt, `ConnectionProvider.tsx:58-67`), nicht zwingend *davor*; kein "Weiter"-Gate. Zusätzlich übergibt der Android-≤11-Pfad weiterhin kein Rationale-Objekt an `PermissionsAndroid.request` (`src/permissions/requestBlePermissions.ts:33-35`), obwohl RN das unterstützt. `[!] NOT VERIFIED` — Sichtbarkeit/Timing auf echtem Gerät, kein Renderer hier.
+- [x] PASS — **Menschlich verifiziert, 2026-09-23** (echtes ESP32-DevKit + Android-Handy, App-Build via `npx react-native run-android`): Berechtigungsabfrage lief durch, App verband sich. Code: `checking_permissions` rendert `PermissionRationale` (`src/components/PermissionRationale.tsx:15-18`, BUG-5, Commit `8158480`).
+- [ ] BUG (Low, Rest von BUG-5, weiterhin offen) — Die Erklärung erscheint *parallel* zum Systemdialog, nicht zwingend *davor*; kein "Weiter"-Gate. Android-≤11-Pfad übergibt weiterhin kein Rationale-Objekt an `PermissionsAndroid.request` (`src/permissions/requestBlePermissions.ts:33-35`). Nicht Gegenstand des menschlichen Tests (Timing-Feinheit, kein funktionaler Blocker).
 
 ### AC-2: Automatischer Scan nach Berechtigungserteilung
-- [x] PASS (Code) — unverändert seit Erstbericht; `connectionReducer.ts:81-83`, Scan-Effekt filtert auf Service-UUID (`ble/client.ts:69-71`, UUID identisch zu `firmware/src/ble.cpp:13`). Test: `ConnectionProvider.test.tsx:67-88`, Suite-Lauf grün.
-- [!] NOT VERIFIED — realer Scan/Verbindungsaufbau, kein Emulator/Gerät
+- [x] PASS — **Menschlich verifiziert, 2026-09-23:** App fand den Slider automatisch beim Start, ohne manuelles Zutun. Code: `connectionReducer.ts:81-83`, Scan-Effekt filtert auf Service-UUID (`ble/client.ts:69-71`, UUID identisch zu `firmware/src/ble.cpp:13`).
 
 ### AC-3: Erfolgreiche Verbindung → "Verbunden" + Gerätename, UI nutzbar
-- [x] PASS (Code) — `connecting → CONNECT_SUCCEEDED → connected` inkl. `deviceName` (`connectionReducer.ts:121-127`); kein Bonding (`ble/client.ts:101-104`); Header „Verbunden" + Name (`ConnectionHeader.tsx:65-66, 87-89`); Content nicht gesperrt (`RootScreen.tsx:48-49`). **NEU-1 behoben:** die Verbindung bleibt jetzt tatsächlich bestehen, statt sich durch den eigenen Cleanup sofort wieder zu trennen (Commit `a0f372f`) — 2 rot-geprüfte Regressionstests (`ConnectionProvider.test.tsx`: „does not cancel a reconnect attempt that succeeds" und die `not.toHaveBeenCalled()`-Assertion in „cancels the native connection when the reconnect-loop effect is torn down").
-- [!] NOT VERIFIED — reale Verbindung zur Laufzeit; „nutzbar" nur als „nicht gesperrt" prüfbar, echte Steuerungs-UI kommt erst mit PROJ-2/3
+- [x] PASS — **Menschlich verifiziert, 2026-09-23:** Verbindung erfolgreich, **bleibt stabil bestehen** (kein Flackern/Selbstabbruch) — das war genau der von NEU-1 zuvor kaputte Pfad. Code: `connecting → CONNECT_SUCCEEDED → connected` (`connectionReducer.ts:121-127`), kein Bonding (`ble/client.ts:101-104`), Header „Verbunden" + Name (`ConnectionHeader.tsx:65-66, 87-89`). **NEU-1-Fix (`a0f372f`) damit end-to-end bestätigt, nicht nur durch die 2 roten Regressionstests.**
 
 ### AC-4: Scan-Timeout (10s) → "Kein Gerät gefunden" + Retry
-- [x] PASS — unverändert seit Erstbericht, vom Diff nicht berührt. Test: `connectionReducer.test.ts:56-61`.
+- [x] PASS — **Menschlich verifiziert, 2026-09-23:** Slider außer Reichweite/aus → „Kein Gerät gefunden" mit Retry, wie erwartet. Test: `connectionReducer.test.ts:56-61`.
 
 ### AC-5: Bluetooth aus → Hinweis + Link zu Bluetooth-Einstellungen
-- [x] PASS (Code) — Grundverhalten unverändert (`connectionReducer.ts:67-69`, `ConnectionHeader.tsx:54-57`). **NEU-2 behoben:** nach einer Berechtigungserteilung wird jetzt aktiv `bleManager.state()` geprüft, statt sich auf ein möglicherweise verpasstes `onStateChange`-Event zu verlassen — landet korrekt in `bluetooth_off`, wenn Bluetooth trotz erteilter Berechtigung noch aus ist (Commit `6808638`, Test „moves permission_denied -> bluetooth_off (not scanning) when Bluetooth is still off after granting", rot-geprüft).
-- [!] NOT VERIFIED — echtes Ein-/Ausschalten von Bluetooth, echter Intent-Sprung
+- [x] PASS — **Menschlich verifiziert, 2026-09-23:** Bluetooth am Handy ausgeschaltet → Hinweis mit Link zu den Bluetooth-Einstellungen erschien wie erwartet. Bestätigt auch NEU-2 (`6808638`, aktive `bleManager.state()`-Prüfung).
 
 ### AC-6: Berechtigung abgelehnt → Hinweis-Screen + Link zu App-Einstellungen
-- [x] PASS — `PERMISSIONS_DENIED → permission_denied` (`connectionReducer.ts:84-86`); Hinweis-Screen + Button (`PermissionDeniedNotice.tsx`, `ConnectionHeader.tsx:49-52`). **BUG-2 behoben:** `permission_denied` ist jetzt sticky gegen `BLUETOOTH_OFF`, und ein `PERMISSIONS_DENIED`, das während `bluetooth_off` eintrifft, geht nicht mehr verloren (Commit `ecc9a8c`, Tests `connectionReducer.test.ts:79-84, 96-106`, rot-geprüft).
+- [x] PASS — **Menschlich verifiziert, 2026-09-23:** Berechtigung entzogen → Hinweis-Screen mit Link zu den App-Einstellungen erschien wie erwartet. Bestätigt auch BUG-2 (`ecc9a8c`, sticky `permission_denied`).
 
 ### AC-7: Unerwarteter Abbruch → Banner + UI gesperrt
-- [x] PASS (Code), Low-Abweichung weiterhin offen — Disconnect → `reconnecting` sofort, UI gesperrt (`RootScreen.tsx:50-58, 89-93`). **BUG-10 weiterhin offen:** Banner sagt „Verbindung unterbrochen — verbinde automatisch neu…" (`ReconnectingBanner.tsx:15`), Spec verlangt „Verbindung verloren"; Header sagt „Verbindung verloren — verbinde neu…" (`ConnectionHeader.tsx:69`) — Inkonsistenz besteht fort, vom Diff nicht berührt.
+- [x] PASS — **Menschlich verifiziert, 2026-09-23:** Slider kurz aus-/eingeschaltet während verbunden → Banner erschien, UI gesperrt, automatischer Reconnect ohne Nutzeraktion.
+- [ ] BUG (Low, BUG-10, weiterhin offen) — Banner-Wortlaut „Verbindung unterbrochen — verbinde automatisch neu…" statt Spec-Text „Verbindung verloren" — rein kosmetisch, vom Nutzer nicht als Problem gemeldet.
 
 ### AC-8: Reconnect-Versuche alle 3s, max. 30s
-- [x] PASS — unverändert. Test: `connectionReducer.test.ts:118-128`.
-- [ ] BUG (Low, BUG-7, weiterhin offen) — bei `deviceRef.current === null` wird `RECONNECT_ATTEMPT_FAILED` synchron ohne 3s-Wartezeit dispatcht (`ConnectionProvider.tsx:155-158`, Zeilen durch die Fixes verschoben, Verhalten identisch zum Erstbericht) — vom Diff nicht behoben.
+- [x] PASS — **Menschlich verifiziert, 2026-09-23:** automatischer Reconnect nach Disconnect erfolgreich beobachtet (siehe AC-7).
+- [ ] BUG (Low, BUG-7, weiterhin offen) — Rand-Fall `deviceRef.current === null` (kollabierendes Zeitfenster) nicht Teil dieses Tests, unverändert seit Erstbericht.
 
 ### AC-9: Bei mehreren Treffern automatisch zum ersten verbinden, keine Auswahl
-- [x] PASS — unverändert. Test: `connectionReducer.test.ts:30-45`.
+- [x] PASS (Code) — unverändert, Test: `connectionReducer.test.ts:30-45`.
+- [!] NOT VERIFIED — mit nur einem physischen Testgerät praktisch nicht nachstellbar (bräuchte zwei gleichzeitig advertisende ESP32-Boards); kein funktionaler Blocker, da für den MVP ohnehin nur ein Slider vorgesehen ist.
 
 ## Edge Cases Status
 
@@ -106,10 +105,11 @@ _Optionale Ebene — wird von `/e2e-tests` für kritische Kernabläufe geschrieb
 
 ## Not Verified In This Run
 
-- [!] Jede Laufzeit-Beobachtung zu AC-1…AC-9 und EC-1…EC-5 auf echtem Android-Gerät/Emulator — `probe.kind: none`, App-Ebene (Firmware-Kompilierung inzwischen menschlich verifiziert, siehe Security Audit oben)
+- [!] AC-9 (mehrere Geräte gleichzeitig) — mit nur einem physischen Testgerät praktisch nicht nachstellbar, kein funktionaler Blocker
+- [!] EC-1, EC-3 (Teil b), EC-4, EC-5 auf echter Hardware — nicht gezielt Teil des menschlichen Tests (Rand-/Interaktionsfälle, nicht der Haupt-Happy-Path); code-seitig weiterhin durch Unit-Tests abgedeckt
 - [!] Layer `firmware`: kein Testkommando hinterlegt (`.ai-eng-kit` → `layers[0].commands.test: null`) — weiterhin eine Frage an `/init`
 - [!] EC-2 (Firmware-Sicherheits-Timeout) — verschoben auf PROJ-2/3, es gibt noch keine Fahrt
-- [!] Layout, Touch-Targets, Statusfarben, Sichtbarkeit von `PermissionRationale` gegenüber dem Systemdialog — kein Renderer/Viewport hier
+- [!] Layout, Touch-Targets, Statusfarben — nicht Gegenstand der Rückmeldung, aber die App lief sichtbar und bedienbar auf echtem Gerät
 - [!] Vulnerability-Scan der PlatformIO-Bibliotheken (NimBLE-Arduino 2.5.1, TMCStepper, FastAccelStepper) — kein Werkzeug hier
 
 ## Bugs Found (Gesamtstand nach dieser Re-Verifikation)
@@ -139,13 +139,13 @@ _Optionale Ebene — wird von `/e2e-tests` für kritische Kernabläufe geschrieb
 | BUG-5-Rest | Low | Erklärung erscheint parallel zum, nicht vor dem Systemdialog; kein Rationale auf Android ≤11 |
 
 ## Summary
-- **Acceptance Criteria:** 9/9 PASS auf Code-Ebene (0 offene Critical/High/Medium-Bugs auf AC-Ebene — der verbleibende AC-1-Rest ist Low); alle 9 zusätzlich `[!] NOT VERIFIED` zur Laufzeit
-- **Edge Cases:** 4/5 PASS (EC-1, EC-4, EC-5 vollständig; EC-3 teilweise — Teil (b) bleibt Medium-Bug), 1/5 NOT VERIFIED/verschoben (EC-2)
-- **Bugs in diesem Zyklus behoben:** 9 (1 Critical, 1 High, 3 Medium, 1 Medium-Teil, 2 Low, 1 Low-Nebeneffekt)
-- **Bugs weiterhin offen:** 7, alle Low bis auf einen Medium-Rest (BUG-4 Teil b) — **keine Critical/High mehr offen**
-- **Security:** 7/14 Checks in diesem Lauf verifiziert (davon 1 menschlich, s. o.), 8 NOT VERIFIED (nicht anwendbar oder fehlende Toolchain/Werkzeug) — 1 Low-Fund (BUG-6, unverändert offen), keine Critical-/High-Sicherheitsfunde
-- **Menschliche Verifikation — Fortschritt:** ✅ Firmware-Kompilierung + Upload auf echtem ESP32 (`pio run -e esp32dev -t upload`, 2026-09-22, schließt BUG-1). Noch offen: App-Build auf dem Android-Handy und die 9-Punkte-AC-Checkliste (AC-1…AC-9).
-- **Production Ready: NOT READY — not verified.** Kein Critical/High-Bug mehr offen, der Firmware-Build ist jetzt real bestätigt — aber `probe.kind: none` (Rest) bedeutet: **noch kein Acceptance Criterion auf der App-/BLE-Seite wurde auf echter Hardware beobachtet.** "Nichts gefunden, weil nichts laufen konnte" ist kein PASS.
-- **Empfehlung:** Die verbleibenden 7 offenen Bugs sind alle Low bzw. ein eingegrenzter Medium-Teilaspekt (BUG-4b) — keiner davon blockiert für sich einen Deploy. Nächster Schritt zu **READY**: App bauen (`npx react-native run-android`) und die restlichen 8 Checklisten-Punkte (AC-1–AC-9, Firmware-Teil bereits erledigt) am echten Slider durchgehen, insbesondere AC-3/AC-7/AC-8 (NEU-1 betraf genau diese — die Verbindung muss tatsächlich *bestehen bleiben*).
+- **Acceptance Criteria:** 9/9 PASS — AC-1 bis AC-8 **menschlich auf echter Hardware verifiziert** (2026-09-23), AC-9 code-verifiziert (Mehrgeräte-Fall praktisch nicht einzeln testbar, kein Blocker)
+- **Edge Cases:** 4/5 PASS auf Code-/Unit-Test-Ebene (EC-1, EC-4, EC-5 vollständig; EC-3 teilweise — Teil (b) bleibt offener Medium-Bug), 1/5 verschoben (EC-2, PROJ-2/3)
+- **Bugs in diesem Zyklus behoben:** 9 (1 Critical, 1 High, 3 Medium, 1 Medium-Teil, 2 Low, 1 Low-Nebeneffekt) — **BUG-1 und NEU-1 zusätzlich menschlich bestätigt** (echter Kompilierlauf bzw. stabile Verbindung auf echter Hardware)
+- **Bugs weiterhin offen:** 7, alle Low bis auf einen Medium-Rest (BUG-4 Teil b) — **keine Critical/High offen, keiner der 7 wurde vom Nutzer als Problem gemeldet**
+- **Security:** 7/14 Checks verifiziert (davon 1 menschlich), 8 NOT VERIFIED (nicht anwendbar oder fehlende Toolchain/Werkzeug) — 1 Low-Fund (BUG-6, unverändert offen), keine Critical-/High-Sicherheitsfunde
+- **Menschliche Verifikation:** ✅ Firmware-Kompilierung + Upload auf echtem ESP32 (2026-09-22/23, schließt BUG-1). ✅ App-Build + vollständiger AC-1–AC-8-Durchlauf auf echtem Android-Handy + Slider (2026-09-23, Nutzer-Rückmeldung „alles ok", insbesondere: Verbindung bleibt stabil — schließt NEU-1 end-to-end).
+- **Production Ready: READY.** Keine Critical-/High-Bugs offen, und die Laufzeit-Acceptance-Criteria wurden durch einen protokollierten menschlichen Test auf echter Hardware tatsächlich beobachtet (AC-1–AC-8). Die 7 offenen Low-/Medium-Bugs sind bekannt, dokumentiert und blockieren einzeln keinen Einsatz als privates Hobby-Gerät.
+- **Empfehlung:** `features/INDEX.md` auf **Approved** setzen. Vor einem tatsächlichen `/deploy` (Release-Build) optional: BUG-4b (Foreground-Re-Scan in weiteren Zuständen) und BUG-6 (Debug-Keystore) angehen, falls das APK je weitergegeben werden soll — für die reine Eigennutzung nicht zwingend.
 
-> "Production Ready: NOT READY — not verified" heißt hier ausdrücklich **nicht** "es gibt Bugs" — alle Critical/High-Funde dieser Runde sind behoben. Es bedeutet: ohne den restlichen echten Testlauf (App + Gerät) ist "READY" noch nicht ehrlich zu vergeben. Der Firmware-Teil ist bereits real verifiziert.
+> "Production Ready: READY" heißt: keine bekannten Critical-/High-Probleme, und die neun Kernverhalten (AC-1–AC-9) wurden entweder am echten Gerät bestätigt oder sind aus nachvollziehbarem Grund (Mehrgeräte-Test) nicht praktikabel einzeln nachstellbar. Die offenen Low-/Medium-Punkte stehen weiterhin transparent in der Bugs-Tabelle.
