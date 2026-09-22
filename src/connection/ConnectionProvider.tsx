@@ -127,6 +127,11 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
 
     return () => {
       cancelled = true;
+      // BUG-3 / QA finding U-2: setting the flag alone doesn't stop the
+      // native connect — connectToSlider(device) can still succeed after
+      // this effect tore down (e.g. EC-1 firing mid-attempt), leaving a
+      // real GATT link the app no longer tracks. Actively tear it down too.
+      device.cancelConnection().catch(() => {});
     };
   }, [state.status]);
 
@@ -162,9 +167,15 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     // Leaving `reconnecting` for any reason (success, exhausted, or a manual
     // REQUEST_SCAN per EC-1) tears this effect down and cancels the pending
     // attempt — that's what makes the manual retry an actual interrupt.
+    // BUG-3 / QA finding U-2: also actively cancel the native connection
+    // attempt, not just the setTimeout — clearTimeout alone doesn't help
+    // once the timeout has already fired and connectToSlider is in flight;
+    // cancelConnection() is what actually stops a real GATT link forming
+    // behind this effect's back. Safe to call even if nothing was pending.
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      device.cancelConnection().catch(() => {});
     };
   }, [state.status, state.reconnectAttemptsRemaining]);
 
