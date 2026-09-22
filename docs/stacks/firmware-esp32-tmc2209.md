@@ -2,6 +2,7 @@
 
 > **Gilt, wenn `.ai-eng-kit` → `layers[].name` == `firmware`.**
 > Root: `firmware/`. Sprache: C++ (Arduino-Framework), Build-System: PlatformIO.
+> MCU: klassisches ESP32 (ESP32-WROOM-32-Modul, generisches DevKit-Board, 2×19-Pin) — PlatformIO-Board `esp32dev`.
 > Motor: 42BYGHM809 (1,7 A/Phase, 0,9°/Schritt = 400 Vollschritte/Umdrehung).
 > Treiber: BIGTREETECH TMC2209 V1.3 StepStick (UART + Step/Dir, Pololu-Footprint).
 
