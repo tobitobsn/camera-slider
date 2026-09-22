@@ -1,45 +1,30 @@
 /**
- * Sample React Native App
- * https://github.com/facebook/react-native
+ * Camera Slider — control app (PROJ-1: BLE connection & pairing)
  *
  * @format
  */
 
-import { NewAppScreen } from '@react-native/new-app-screen';
-import { StatusBar, StyleSheet, useColorScheme, View } from 'react-native';
-import {
-  SafeAreaProvider,
-  useSafeAreaInsets,
-} from 'react-native-safe-area-context';
+import { StatusBar } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
+import { ConnectionProvider } from './src/connection/ConnectionProvider';
+import { RootScreen } from './src/screens/RootScreen';
+import { colors } from './src/theme/colors';
+
+// Dark is this app's only theme for now (docs/design-system.md) — a
+// photo/video tool that doesn't blend on set, not something that follows
+// the phone's system theme.
 function App() {
-  const isDarkMode = useColorScheme() === 'dark';
-
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-      <AppContent />
+      <StatusBar barStyle="light-content" />
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+        <ConnectionProvider>
+          <RootScreen />
+        </ConnectionProvider>
+      </SafeAreaView>
     </SafeAreaProvider>
   );
 }
-
-function AppContent() {
-  const safeAreaInsets = useSafeAreaInsets();
-
-  return (
-    <View style={styles.container}>
-      <NewAppScreen
-        templateFileName="App.tsx"
-        safeAreaInsets={safeAreaInsets}
-      />
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-});
 
 export default App;

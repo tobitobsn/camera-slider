@@ -42,7 +42,7 @@
 
 ## Level 6 — Verdrahtung
 
-- [ ] T10  `RootScreen.tsx` + `App.tsx`: ConnectionHeader oben, zustandsabhängiges Rendering der Notice-Komponenten, Design-Tokens aus `docs/design-system.md` angewendet, ConnectionProvider eingebunden  · files: src/screens/RootScreen.tsx, App.tsx  · → AC-1, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9
+- [x] T10  `RootScreen.tsx` + `App.tsx`: ConnectionHeader oben, zustandsabhängiges Rendering der Notice-Komponenten, Design-Tokens aus `docs/design-system.md` angewendet, ConnectionProvider eingebunden  · files: src/screens/RootScreen.tsx, App.tsx  · → AC-1, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9
 
 ## Parallelisierung
 
