@@ -96,7 +96,8 @@ _Unverändert gegenüber dem Erstbericht, wo nicht anders vermerkt — die Secur
 - [x] PASS — Android-Permission-Scope unverändert (`AndroidManifest.xml` nicht im Diff)
 - [x] PASS — Abhängigkeiten: `npm audit --omit=dev` → weiterhin **0 vulnerabilities**; keine neuen Pakete (`package.json`/`package-lock.json` nicht im Diff)
 - [ ] BUG (Low, BUG-6, weiterhin offen) — Release-Build signiert mit dem öffentlichen Debug-Keystore (`android/app/build.gradle:88-104`, nicht im Diff, unverändert)
-- [!] NOT VERIFIED — Compile-Verifikation des NimBLE-`^2.5.1`-Pins und Vulnerability-Scan der PlatformIO-Bibliotheken: keine PlatformIO-Toolchain in dieser Umgebung
+- [x] PASS — **Menschlich verifiziert, 2026-09-22:** `pio run -e esp32dev -t upload` erfolgreich (Nutzer-Rückmeldung „Upload hat funktioniert") — der NimBLE-`^2.5.1`-Pin kompiliert und läuft tatsächlich auf echter Hardware (klassisches ESP32-DevKit). Schließt BUG-1 endgültig, über die statische Analyse hinaus.
+- [!] NOT VERIFIED — Vulnerability-Scan der PlatformIO-Bibliotheken (NimBLE-Arduino 2.5.1, TMCStepper, FastAccelStepper): kein Audit-Werkzeug für PlatformIO-Bibliotheken verfügbar, unabhängig von der Toolchain-Frage
 
 ## E2E Tests
 _Optionale Ebene — wird von `/e2e-tests` für kritische Kernabläufe geschrieben._
@@ -105,8 +106,7 @@ _Optionale Ebene — wird von `/e2e-tests` für kritische Kernabläufe geschrieb
 
 ## Not Verified In This Run
 
-- [!] Jede Laufzeit-Beobachtung zu AC-1…AC-9 und EC-1…EC-5 auf echtem Android-Gerät/Emulator — `probe.kind: none`, App- und Firmware-Ebene
-- [!] Firmware-Kompilierung mit dem neuen NimBLE-`^2.5.1`-Pin — keine PlatformIO-Toolchain hier; Bewertung bleibt statisch (Versions-Constraint + offizielle API-Doku), kein beobachteter Build
+- [!] Jede Laufzeit-Beobachtung zu AC-1…AC-9 und EC-1…EC-5 auf echtem Android-Gerät/Emulator — `probe.kind: none`, App-Ebene (Firmware-Kompilierung inzwischen menschlich verifiziert, siehe Security Audit oben)
 - [!] Layer `firmware`: kein Testkommando hinterlegt (`.ai-eng-kit` → `layers[0].commands.test: null`) — weiterhin eine Frage an `/init`
 - [!] EC-2 (Firmware-Sicherheits-Timeout) — verschoben auf PROJ-2/3, es gibt noch keine Fahrt
 - [!] Layout, Touch-Targets, Statusfarben, Sichtbarkeit von `PermissionRationale` gegenüber dem Systemdialog — kein Renderer/Viewport hier
@@ -117,7 +117,7 @@ _Optionale Ebene — wird von `/e2e-tests` für kritische Kernabläufe geschrieb
 ### Behoben in diesem Zyklus
 | ID | Severity | Kurzbeschreibung | Commit |
 |---|---|---|---|
-| BUG-1 | High | NimBLE-Versionskonflikt, Firmware kompiliert vermutlich nicht | `acb369c` |
+| BUG-1 | High | NimBLE-Versionskonflikt, Firmware kompilierte nicht | `acb369c` — **menschlich verifiziert 2026-09-22: `pio run -e esp32dev -t upload` erfolgreich** |
 | BUG-2 | Medium | `bluetooth_off` verschluckt eine Berechtigungsablehnung | `ecc9a8c` |
 | BUG-3 | Medium | Abgebrochener Connect/Reconnect hinterlässt verwaisten Link | `1121695` |
 | BUG-4 (Teil a) | Medium | Kein Re-Scan bei totem Link im `connected`-Foreground-Check | `1db8e6f` |
@@ -143,8 +143,9 @@ _Optionale Ebene — wird von `/e2e-tests` für kritische Kernabläufe geschrieb
 - **Edge Cases:** 4/5 PASS (EC-1, EC-4, EC-5 vollständig; EC-3 teilweise — Teil (b) bleibt Medium-Bug), 1/5 NOT VERIFIED/verschoben (EC-2)
 - **Bugs in diesem Zyklus behoben:** 9 (1 Critical, 1 High, 3 Medium, 1 Medium-Teil, 2 Low, 1 Low-Nebeneffekt)
 - **Bugs weiterhin offen:** 7, alle Low bis auf einen Medium-Rest (BUG-4 Teil b) — **keine Critical/High mehr offen**
-- **Security:** 6/15 Checks in diesem Lauf verifiziert, 9 NOT VERIFIED (nicht anwendbar oder fehlende Toolchain) — 1 Low-Fund (BUG-6, unverändert offen), keine Critical-/High-Sicherheitsfunde
-- **Production Ready: NOT READY — not verified.** Kein Critical/High-Bug mehr offen, aber `probe.kind: none` bedeutet: **kein einziges Acceptance Criterion wurde tatsächlich auf echter Hardware beobachtet.** "Nichts gefunden, weil nichts laufen konnte" ist kein PASS.
-- **Empfehlung:** Die verbleibenden 7 offenen Bugs sind alle Low bzw. ein eingegrenzter Medium-Teilaspekt (BUG-4b) — keiner davon blockiert für sich einen Deploy. Der einzige verbleibende Weg zu **READY** ist ein protokollierter menschlicher Test (siehe Rückmeldung an den Nutzer): die 9 ACs einmal am echten ESP32 + Android-Handy durchgehen, insbesondere AC-3/AC-7/AC-8 (NEU-1 betraf genau diese — die Verbindung muss jetzt tatsächlich *bestehen bleiben*), plus einen echten `pio run -e esp32dev`-Kompilierlauf für BUG-1.
+- **Security:** 7/14 Checks in diesem Lauf verifiziert (davon 1 menschlich, s. o.), 8 NOT VERIFIED (nicht anwendbar oder fehlende Toolchain/Werkzeug) — 1 Low-Fund (BUG-6, unverändert offen), keine Critical-/High-Sicherheitsfunde
+- **Menschliche Verifikation — Fortschritt:** ✅ Firmware-Kompilierung + Upload auf echtem ESP32 (`pio run -e esp32dev -t upload`, 2026-09-22, schließt BUG-1). Noch offen: App-Build auf dem Android-Handy und die 9-Punkte-AC-Checkliste (AC-1…AC-9).
+- **Production Ready: NOT READY — not verified.** Kein Critical/High-Bug mehr offen, der Firmware-Build ist jetzt real bestätigt — aber `probe.kind: none` (Rest) bedeutet: **noch kein Acceptance Criterion auf der App-/BLE-Seite wurde auf echter Hardware beobachtet.** "Nichts gefunden, weil nichts laufen konnte" ist kein PASS.
+- **Empfehlung:** Die verbleibenden 7 offenen Bugs sind alle Low bzw. ein eingegrenzter Medium-Teilaspekt (BUG-4b) — keiner davon blockiert für sich einen Deploy. Nächster Schritt zu **READY**: App bauen (`npx react-native run-android`) und die restlichen 8 Checklisten-Punkte (AC-1–AC-9, Firmware-Teil bereits erledigt) am echten Slider durchgehen, insbesondere AC-3/AC-7/AC-8 (NEU-1 betraf genau diese — die Verbindung muss tatsächlich *bestehen bleiben*).
 
-> "Production Ready: NOT READY — not verified" heißt hier ausdrücklich **nicht** "es gibt Bugs" — alle Critical/High-Funde dieser Runde sind behoben. Es bedeutet: ohne echten Testlauf (Firmware-Kompilierung + Gerät) ist "READY" nicht ehrlich zu vergeben.
+> "Production Ready: NOT READY — not verified" heißt hier ausdrücklich **nicht** "es gibt Bugs" — alle Critical/High-Funde dieser Runde sind behoben. Es bedeutet: ohne den restlichen echten Testlauf (App + Gerät) ist "READY" noch nicht ehrlich zu vergeben. Der Firmware-Teil ist bereits real verifiziert.
