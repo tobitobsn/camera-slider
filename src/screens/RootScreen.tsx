@@ -5,6 +5,7 @@ import { ConnectionHeader } from '../components/ConnectionHeader';
 import { BluetoothOffNotice } from '../components/BluetoothOffNotice';
 import { NotFoundNotice } from '../components/NotFoundNotice';
 import { PermissionDeniedNotice } from '../components/PermissionDeniedNotice';
+import { PermissionRationale } from '../components/PermissionRationale';
 import { ReconnectingBanner } from '../components/ReconnectingBanner';
 import { ScanningIndicator } from '../components/ScanningIndicator';
 import { useConnection } from '../connection/ConnectionProvider';
@@ -32,7 +33,9 @@ export function RootScreen() {
 function renderContent(status: ReturnType<typeof useConnection>['state']['status']) {
   switch (status) {
     case 'checking_permissions':
-      return <ScanningIndicator />;
+      // BUG-5 / BUG-9: was the (wrong) ScanningIndicator — no scan has
+      // started yet at this point, only the permission dialog is pending.
+      return <PermissionRationale />;
     case 'permission_denied':
       return <PermissionDeniedNotice />;
     case 'bluetooth_off':
