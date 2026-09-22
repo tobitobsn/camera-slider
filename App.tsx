@@ -4,7 +4,7 @@
  * @format
  */
 
-import { StatusBar } from 'react-native';
+import { StatusBar, StyleSheet } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import { ConnectionProvider } from './src/connection/ConnectionProvider';
@@ -18,7 +18,7 @@ function App() {
   return (
     <SafeAreaProvider>
       <StatusBar barStyle="light-content" />
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+      <SafeAreaView style={styles.safeArea}>
         <ConnectionProvider>
           <RootScreen />
         </ConnectionProvider>
@@ -26,5 +26,12 @@ function App() {
     </SafeAreaProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+});
 
 export default App;
