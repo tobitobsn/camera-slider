@@ -109,8 +109,19 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     }
 
     let cancelled = false;
+    // Tracks whether connectToSlider(device) has already settled (resolved
+    // OR rejected) by the time this effect tears down. Cleanup runs not
+    // only on a genuine interrupt (EC-1) but also on the ordinary SUCCESS
+    // path: CONNECT_SUCCEEDED moves state.status to 'connected', and since
+    // this effect depends on [state.status], React tears it down right
+    // after. Without this guard the cleanup would call cancelConnection()
+    // on the device it had JUST successfully connected — instantly undoing
+    // every connection and looping connect → cancel → disconnect →
+    // reconnect forever. Only cancel while the attempt is still pending.
+    let settled = false;
     connectToSlider(device)
       .then(connectedDevice => {
+        settled = true;
         if (cancelled) return;
         deviceRef.current = connectedDevice;
         disconnectSubRef.current = subscribeToDisconnect(connectedDevice, () => {
@@ -122,6 +133,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
         });
       })
       .catch(() => {
+        settled = true;
         if (!cancelled) dispatch({ type: 'CONNECT_FAILED' });
       });
 
@@ -130,8 +142,11 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       // BUG-3 / QA finding U-2: setting the flag alone doesn't stop the
       // native connect — connectToSlider(device) can still succeed after
       // this effect tore down (e.g. EC-1 firing mid-attempt), leaving a
-      // real GATT link the app no longer tracks. Actively tear it down too.
-      device.cancelConnection().catch(() => {});
+      // real GATT link the app no longer tracks. Actively tear it down —
+      // but only while still pending; see the `settled` comment above.
+      if (!settled) {
+        device.cancelConnection().catch(() => {});
+      }
     };
   }, [state.status]);
 
@@ -146,9 +161,15 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     }
 
     let cancelled = false;
+    // Same guard as the connecting effect above, and for the same reason:
+    // RECONNECT_SUCCEEDED moves status to 'connected', which tears this
+    // effect down too — without this flag its cleanup would cancel the
+    // connection it had just re-established.
+    let settled = false;
     const timer = setTimeout(() => {
       connectToSlider(device)
         .then(connectedDevice => {
+          settled = true;
           if (cancelled) return;
           deviceRef.current = connectedDevice;
           disconnectSubRef.current = subscribeToDisconnect(connectedDevice, () => {
@@ -160,6 +181,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
           });
         })
         .catch(() => {
+          settled = true;
           if (!cancelled) dispatch({ type: 'RECONNECT_ATTEMPT_FAILED' });
         });
     }, RECONNECT_INTERVAL_MS);
@@ -171,11 +193,13 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     // attempt, not just the setTimeout — clearTimeout alone doesn't help
     // once the timeout has already fired and connectToSlider is in flight;
     // cancelConnection() is what actually stops a real GATT link forming
-    // behind this effect's back. Safe to call even if nothing was pending.
+    // behind this effect's back. Only while still pending — see `settled`.
     return () => {
       cancelled = true;
       clearTimeout(timer);
-      device.cancelConnection().catch(() => {});
+      if (!settled) {
+        device.cancelConnection().catch(() => {});
+      }
     };
   }, [state.status, state.reconnectAttemptsRemaining]);
 

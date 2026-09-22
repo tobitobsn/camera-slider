@@ -165,7 +165,11 @@ describe('ConnectionProvider', () => {
     await flushMicrotasks(); // scanning -> connecting -> connected (connect() resolves immediately)
 
     expect(capturedDisconnectListener).toBeDefined();
-    fakeDevice.cancelConnection.mockClear(); // clear the initial-connect-effect's own (unrelated) cleanup noise
+    // Regression check for the self-cancellation bug the security re-audit
+    // found: connecting -> connected is itself a status change, which tears
+    // the connecting effect down — its cleanup must NOT cancel the
+    // connection it just successfully established.
+    expect(fakeDevice.cancelConnection).not.toHaveBeenCalled();
 
     // Simulate an unexpected disconnect -> 'reconnecting', which schedules a
     // 3s-delayed retry but hasn't called connect() again yet.
@@ -178,6 +182,70 @@ describe('ConnectionProvider', () => {
     await act(async () => renderer.unmount());
 
     expect(fakeDevice.cancelConnection).toHaveBeenCalled();
+  });
+
+  // Regression check for the same self-cancellation bug (see the test
+  // above), specifically for the reconnect-loop effect's own `settled`
+  // guard: a *successful* reconnect must not cancel itself either.
+  it('does not cancel a reconnect attempt that succeeds', async () => {
+    jest.useFakeTimers();
+    try {
+      (requestBlePermissions as jest.Mock).mockResolvedValue(true);
+
+      let capturedDisconnectListener: (() => void) | undefined;
+      const fakeDevice: Record<string, jest.Mock> = {
+        connect: jest.fn(),
+        discoverAllServicesAndCharacteristics: jest.fn(),
+        onDisconnected: jest.fn((listener: () => void) => {
+          capturedDisconnectListener = listener;
+          return { remove: jest.fn() };
+        }),
+        cancelConnection: jest.fn().mockResolvedValue(undefined),
+      };
+      fakeDevice.connect.mockResolvedValue(fakeDevice);
+      fakeDevice.discoverAllServicesAndCharacteristics.mockResolvedValue(fakeDevice);
+
+      (bleManager.startDeviceScan as jest.Mock).mockImplementation(
+        (_uuids: string[], _options: unknown, listener: (error: unknown, device: unknown) => void) => {
+          listener(null, fakeDevice);
+        },
+      );
+
+      let lastStatus = '';
+      await act(async () => {
+        ReactTestRenderer.create(
+          <ConnectionProvider>
+            <StatusProbe onStatus={s => (lastStatus = s)} />
+          </ConnectionProvider>,
+        );
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      }); // scanning -> connecting -> connected
+      expect(lastStatus).toBe('connected');
+
+      await act(async () => {
+        capturedDisconnectListener?.();
+      }); // connected -> reconnecting, schedules the 3s retry
+      await act(async () => {
+        await Promise.resolve();
+      });
+      fakeDevice.cancelConnection.mockClear(); // discard the (now correctly absent) initial-connect noise
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(3000);
+      }); // the retry fires, connect() resolves -> RECONNECT_SUCCEEDED -> 'connected'
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(lastStatus).toBe('connected');
+      expect(fakeDevice.cancelConnection).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   // BUG-4 / QA finding EC-3: returning to the foreground with a dead link
