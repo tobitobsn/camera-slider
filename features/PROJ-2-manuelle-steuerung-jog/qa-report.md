@@ -132,40 +132,17 @@ Nach dem menschlichen Hardware-Test (siehe oben) bleiben nur noch wenige, klar b
 
 ## Bugs Found
 
-#### BUG-1: AC-4/EC-2 — Zweite Richtungstaste "gewinnt" nach Zwischenloslassen, ohne dass beide je gemeinsam losgelassen wurden
-- **Status: BEHOBEN** (siehe AC-4 oben für Evidenz)
-- **Severity:** Medium
-- **Steps to Reproduce:**
-  1. Rückwärts-Taste halten (Motor fährt rückwärts)
-  2. Zusätzlich Vorwärts-Taste drücken → Motor stoppt (korrekt, AC-4 Kernaussage)
-  3. Vorwärts-Taste wieder loslassen — **Rückwärts bleibt weiter gehalten**
-  4. Vorwärts-Taste erneut drücken
-  5. Erwartet (spec.md AC-4 / design.md:34): keine Richtung fährt, solange nicht beide Tasten zwischenzeitlich gemeinsam losgelassen wurden
-  6. Tatsächlich: Zustand wird `jogging_forward`, der Slider fährt vorwärts — der Reducer (`useJogState.ts:34-37`) kennt keinen Merker für eine noch physisch gehaltene Taste, `idle + PRESS_FORWARD` wird bedingungslos zu `jogging_forward`
-- **Risiko:** begrenzt — die gefahrene Richtung entspricht stets der zuletzt gedrückten Taste, Loslassen stoppt weiterhin sofort; kein Kontrollverlust, aber eine dokumentierte Sicherheitsgarantie fehlt.
-- **Priority:** Fix in next sprint
+### Previously Fixed
+_Volle Reproduktions-/Begründungsdetails bleiben in den AC/EC-Ergebnissen und im Security-Audit oben erhalten — hier nur der Kurzverweis._
 
-#### BUG-2: AC-3 — Firmware-seitiger Geschwindigkeitswechsel während laufender Fahrt unbestätigt
-- **Status: BEHOBEN** (siehe AC-3 oben für Evidenz)
-- **Severity:** Medium
-- **Beschreibung:** `motor.cpp:88-93` verlässt sich darauf, dass `setSpeedInHz()` gefolgt von einem erneuten `runForward()`/`runBackward()`-Aufruf die neue Geschwindigkeit auf eine bereits laufende Bewegung anwendet. FastAccelStepper (`gin66/FastAccelStepper @ ^0.31.1`) dokumentiert für eine Geschwindigkeitsänderung während einer laufenden Fahrt `applySpeedAcceleration()` als den vorgesehenen Weg — ob ein wiederholter `run*()`-Aufruf denselben Effekt hat, ließ sich ohne installierte Bibliothek/Kompilierung nicht bestätigen.
-- **Auswirkung falls falsch:** AC-3 würde auf echter Hardware fehlschlagen — der Regler würde erst nach Loslassen + erneutem Drücken wirken, nicht live während des Haltens.
-- **Priority:** Vor dem geplanten Hardware-Test klären (Doku/Quellcode von FastAccelStepper prüfen oder direkt am Gerät testen)
-
-#### BUG-3: Command-Characteristic ohne Authentifizierung — jetzt mit physischer Wirkung
-- **Status: BEHOBEN** — Nutzerentscheidung: "Fix einplanen" (siehe Security-Audit oben für Evidenz)
-- **Severity:** Medium (Begründung, kein Reflex-Label — siehe unten)
-- **Beschreibung:** `firmware/src/ble.cpp:99-101` — die Command-Characteristic trägt nur `WRITE | WRITE_NR`, kein `WRITE_ENC`/`WRITE_AUTHEN`, kein Bonding, keine Peer-Whitelist. Jedes BLE-fähige Gerät in Funkreichweite kann sich ohne Kopplung verbinden und JOG/STOP schreiben — den Motor **physisch fahren lassen**, wiederholt beliebig lange (siehe Watchdog-Grenze unten).
-- **Warum Medium und nicht Critical/High:** Kein Datenverlust, keine PII, kein Netzwerkzugriff nötig (Funkreichweite ~10–30m), Einzelnutzer-Hobbygerät, nur während eines Drehs eingeschaltet, Besitzer typischerweise in der Nähe. **Aber:** Der Slider hat laut spec.md ausdrücklich **keine Endanschläge** (Out of Scope), und dies ist das erste Feature, in dem ein unauthentifizierter Write real etwas bewegt — Worst Case ist Sachschaden an montiertem Kamera-Equipment, nicht nur ein wackelnder Schlitten.
-- **Wichtig:** PROJ-1s Entscheidung „keine BLE-PIN, kein Schutzbedarf" (`features/PROJ-1-ble-verbindung-pairing/spec.md:49`) wurde getroffen, als die Command-Characteristic noch **keine Wirkung hatte** (`firmware/src/ble.h:6-8`: „not yet wired to any behavior"). PROJ-2 ändert diese Faktenlage. Das ist nur dann weiterhin ein akzeptiertes Risiko, wenn du es in Kenntnis der neuen Lage bestätigst — siehe Frage unten.
-- **Priority:** Nutzerentscheidung nötig vor Approved (siehe Frage am Ende dieses Berichts)
-
-#### BUG-4: Kein Re-Advertising bei erfolgreichem Connect — Connection-Squatting möglich
-- **Status: BEHOBEN** (siehe Security-Audit oben für Evidenz)
-- **Severity:** Medium
-- **Beschreibung:** `firmware/src/ble.cpp` startet Advertising nur beim Boot (`:110`) und nach Disconnect (`:45`). Bei erfolgreichem Connect startet NimBLE es **nicht** neu (bestätigt im NimBLE-Quellcode selbst: `NimBLEServer.cpp:447-475`, der `startAdvertising()`-Aufruf im Connect-Event liegt nur im Fehlerpfad). Ein fremdes Central, das sich zuerst verbindet, belegt den Slider und macht ihn für die App unsichtbar — die App zeigt PROJ-1s „Kein Gerät gefunden", nicht „jemand anderes ist verbunden".
-- **Auswirkung:** verhindert die Kernfunktion für den legitimen Nutzer vollständig, solange der Angreifer verbunden bleibt — typischerweise mitten in einem Dreh am unpraktischsten.
-- **Priority:** Fix in next sprint (hängt an derselben Ursache wie BUG-3 — eine Pairing-/Bonding-Lösung würde beides zugleich schließen)
+| ID | Severity | Kurzbeschreibung |
+|---|---|---|
+| BUG-1 | Medium | AC-4/EC-2 — zweite Richtungstaste "gewinnt" nach Zwischenloslassen, ohne dass beide je gemeinsam losgelassen wurden |
+| BUG-2 | Medium | AC-3 — firmwareseitiger Geschwindigkeitswechsel während laufender Fahrt unbestätigt |
+| BUG-3 | Medium | Command-Characteristic ohne Authentifizierung, jetzt mit physischer Wirkung |
+| BUG-4 | Medium | Kein Re-Advertising bei erfolgreichem Connect — Connection-Squatting möglich |
+| BUG-10 | High | App nie an die neue Bonding-Pflicht angepasst — erster Jog-Versuch nach frischem Pairing brach still ab |
+| BUG-11 | Medium | Fremdes Gerät konnte durch bloßes Verbinden+Trennen die laufende Fahrt stoppen |
 
 #### BUG-5: StatusLine zeigt "Bereit" statt der in design.md spezifizierten leeren Zeile im Idle-Zustand
 - **Severity:** Low
@@ -191,18 +168,6 @@ Nach dem menschlichen Hardware-Test (siehe oben) bleiben nur noch wenige, klar b
 - **Severity:** Low
 - **Beschreibung:** `ble.cpp:50-83` verarbeitet jeden Write sofort, ohne Drosselung. Schnelles Wechseln der Richtung könnte wiederholte Beschleunigungs-/Bremsrampen erzwingen — mechanisch durch `kAcceleration = 8000` Steps/s² (`motor.cpp:24`) entschärft (kein Sprung, immer eine Rampe), und ohnehin durch BUG-3 abgedeckt: wer das kann, kann auch einfach durchfahren.
 - **Priority:** Nice to have
-
-#### BUG-10 (war I-1/BUG-R2): App nie an die neue Bonding-Pflicht angepasst — erster Jog-Versuch nach frischem Pairing bricht still ab
-- **Status: BEHOBEN** (siehe Security-Audit oben für Evidenz)
-- **Severity:** High
-- **Beschreibung:** Von der Security-Re-Verifikation gefunden, unabhängig von der Regression-Lane bestätigt (dort als BUG-R2). JOG wird ohne Antwort geschrieben; ein unbondeter Write wird vom BLE-Stack ohne Fehlerantwort verworfen, und Android löst On-Demand-Bonding nur über eine Fehlerantwort aus — die kommt nur von STOP (mit Antwort). Erster Tastendruck nach frischer Installation/vergessenem Pairing hätte also stumm nichts bewirkt.
-- **Priority:** Fix before deployment (war blockierend, jetzt behoben)
-
-#### BUG-11 (war N-1): Fremdes Gerät konnte durch bloßes Verbinden+Trennen die laufende Fahrt stoppen
-- **Status: BEHOBEN** (siehe Security-Audit oben für Evidenz)
-- **Severity:** Medium
-- **Beschreibung:** Erst durch den BUG-4-Fix möglich (mehrere gleichzeitige Verbindungen) — `onDisconnect` stoppte bislang bei jedem Disconnect, unabhängig davon, welches Gerät ging.
-- **Priority:** Fix in next sprint (jetzt behoben)
 
 #### BUG-12 (war N-2): Kein Schutz vor mehreren gleichzeitig steuernden, gebondeten Geräten
 - **Status: Akzeptierte Grenze, nicht behoben** — konsistent mit der Just-Works-Entscheidung (siehe Security-Audit oben)

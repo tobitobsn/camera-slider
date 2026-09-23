@@ -73,17 +73,6 @@
 ### EC-5: Kein doppelter Verbindungsversuch
 - [x] PASS, Evidenz aktualisiert — Reducer behandelt `REQUEST_SCAN` in `scanning`/`connecting`/`checking_permissions` weiterhin als No-op (3 parametrisierte Tests, vorher 4 — `connected` ist mit BUG-4 bewusst kein No-op mehr, siehe EC-3). UI zeigt in `scanning`/`connecting` einen Spinner statt Button. **NEU-3 behoben:** ein künftiger `REQUEST_SCAN`-Aufruf aus `connected` (heute nur vom Foreground-Check ausgelöst, der die Verbindung schon als tot bestätigt hat) räumt jetzt vor dem Scan-Start eine noch gesetzte Geräte-Referenz sauber ab (Commit `6808638`, Test „releases the live connection before scanning fresh…", rot-geprüft) — verhindert, dass ein späterer Aufrufer denselben verwaisten-Link-Fehler wie BUG-3 reproduziert.
 
-## Weitere Befunde dieser Re-Verifikation
-
-### NEU-1: Selbst-Abbruch der gerade aufgebauten Verbindung — BEHOBEN
-- Ursprünglich **Critical** — unabhängig von Security- und Regressions-Lane gefunden (siehe Commits oben). Der BUG-3-Fix rief in beiden Effekt-Cleanups (`ConnectionProvider.tsx`) `device.cancelConnection()` **bedingungslos** auf; da Cleanup auch beim *Erfolg* läuft (`CONNECT_SUCCEEDED`/`RECONNECT_SUCCEEDED` ändern `state.status`, was denselben Effekt abreißen lässt), kappte die App jede gerade aufgebaute Verbindung sofort wieder → Connect→Cancel→Disconnect→Reconnect-Endlosschleife, `reconnectAttemptsRemaining` wird bei jedem Erfolg zurückgesetzt, die Schleife hätte nie geendet. **Behoben in `a0f372f`** durch ein `settled`-Flag pro Effekt.
-
-### NEU-2: Bluetooth-Status nach Berechtigungserteilung nicht neu geprüft — BEHOBEN
-- Ursprünglich **Medium** — direkte Nebenwirkung von BUG-2s Fix (permission_denied sticky). **Behoben in `6808638`**, siehe AC-5.
-
-### NEU-3: `REQUEST_SCAN` aus `connected` räumt keine bestehende Verbindung auf — BEHOBEN
-- Ursprünglich **Low** (heute nicht real auslösbar, da der einzige Aufrufer die Verbindung schon als tot bestätigt hat) — **behoben in `6808638`** als Absicherung gegen einen künftigen Aufrufer, siehe EC-5.
-
 ## Security Audit Results
 
 _Unverändert gegenüber dem Erstbericht, wo nicht anders vermerkt — die Security-Lane hat jeden Punkt gegen den Diff erneut geprüft, nicht nur übernommen._
