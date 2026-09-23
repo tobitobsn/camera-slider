@@ -25,8 +25,8 @@
 
 | ID | Feature | Description | Status | Spec | Created |
 |----|---------|-------------|--------|------|---------|
-| PROJ-1 | BLE-Verbindung & Pairing | App verbindet sich per Bluetooth mit dem ESP32 und zeigt den Verbindungsstatus | Approved | [features/PROJ-1-ble-verbindung-pairing/](PROJ-1-ble-verbindung-pairing/) | 2026-09-22 |
-| PROJ-2 | Manuelle Steuerung (Jog) | Slider per App manuell in beide Richtungen fahren, mit einstellbarer Geschwindigkeit | Approved | [features/PROJ-2-manuelle-steuerung-jog/](PROJ-2-manuelle-steuerung-jog/) | 2026-09-22 |
+| PROJ-1 | BLE-Verbindung & Pairing | App verbindet sich per Bluetooth mit dem ESP32 und zeigt den Verbindungsstatus | Deployed | [features/PROJ-1-ble-verbindung-pairing/](PROJ-1-ble-verbindung-pairing/) | 2026-09-22 |
+| PROJ-2 | Manuelle Steuerung (Jog) | Slider per App manuell in beide Richtungen fahren, mit einstellbarer Geschwindigkeit | Deployed | [features/PROJ-2-manuelle-steuerung-jog/](PROJ-2-manuelle-steuerung-jog/) | 2026-09-22 |
 | PROJ-3 | Start-/Endpunkt & Auto-Fahrt | Start- und Endpunkt setzen und automatische Fahrt dazwischen mit einstellbarer Geschwindigkeit/Dauer auslösen | Roadmap | — | 2026-09-22 |
 | PROJ-4 | Presets verwalten | Mehrere benannte Fahrt-Profile lokal speichern, laden und löschen | Roadmap | — | 2026-09-22 |
 | PROJ-5 | Zeitraffer-Modus | Schrittweise Fahrt mit automatischer Kameraauslösung für Zeitraffer-Aufnahmen | Roadmap | — | 2026-09-22 |
@@ -39,6 +39,8 @@
 
 > One line per release, written by `/deploy` — **the single deployment record**: tag · date · production URL · the features it shipped. `/security-check` reads the production URL here, `/audit` expects every Deployed feature on one line. A feature that was live before the kit arrived (reconstructed from code) gets its line from `/qa`: `live before the kit — verified by /qa on <date> · PROJ-X`.
 
-- _v1.0.0 · 2026-01-31 · https://app.example.com · PROJ-1, PROJ-2_
+- _v1.0.0 · 2026-09-23 · lokaler Release-Build (APK), kein Hosting/Play-Store — `android/app/build/outputs/apk/release/app-release.apk` · PROJ-1, PROJ-2_
+
+_(Die vorherige Zeile hier — `v1.0.0 · 2026-01-31 · https://app.example.com` — war ein nie bereinigter Kit-Platzhalter aus dem Scaffolding, kein echter Release; siehe BUG-11 in PROJ-1s `qa-report.md`. Ersetzt durch die echte erste Deployment-Zeile oben.)_
 
 ## Next Available ID: PROJ-6
