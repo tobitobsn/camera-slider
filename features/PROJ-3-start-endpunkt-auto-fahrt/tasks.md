@@ -25,7 +25,7 @@
 
 <!-- Einzelner Task, braucht sowohl T2 (Befehle senden) als auch T5 (Status lesen) — kann nicht parallel zu T5 laufen, deshalb eigene Ebene. -->
 
-- [ ] T6  App: `AutoDriveControls`-Komponente — `PointButtons` ("Als Start setzen"/"Als Ende setzen"), `DurationInput` (Sekunden, Live-Validierung gegen den aus `distanceSteps` berechneten erlaubten Bereich), `DriveButtonRow` ("Start → Ende"/"Ende → Start", aktiviert je nach `hasStart`/`hasEnd`/`atStart`/`atEnd`/`distanceSteps > 0`), `StopButton` (nur während `driving` aktiv), `StatusLine`; nutzt `useSliderStatus` (T5) für den Zustand und `sendSetStartCommand`/`sendSetEndCommand`/`sendAutoDriveCommand`/`sendStopCommand` (T2, STOP wiederverwendet aus PROJ-2) zum Senden  · files: src/components/AutoDriveControls.tsx  · → AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, EC-1
+- [x] T6  App: `AutoDriveControls`-Komponente — `PointButtons` ("Als Start setzen"/"Als Ende setzen"), `DurationInput` (Sekunden, Live-Validierung gegen den aus `distanceSteps` berechneten erlaubten Bereich), `DriveButtonRow` ("Start → Ende"/"Ende → Start", aktiviert je nach `hasStart`/`hasEnd`/`atStart`/`atEnd`/`distanceSteps > 0`), `StopButton` (nur während `driving` aktiv), `StatusLine`; nutzt `useSliderStatus` (T5) für den Zustand und `sendSetStartCommand`/`sendSetEndCommand`/`sendAutoDriveCommand`/`sendStopCommand` (T2, STOP wiederverwendet aus PROJ-2) zum Senden  · files: src/components/AutoDriveControls.tsx  · → AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, EC-1
 
 ## Level 4 — Einbindung
 
