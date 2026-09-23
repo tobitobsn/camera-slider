@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { AutoDriveControls } from '../components/AutoDriveControls';
 import { ConnectionHeader } from '../components/ConnectionHeader';
 import { BluetoothOffNotice } from '../components/BluetoothOffNotice';
 import { JogControls } from '../components/JogControls';
@@ -10,6 +11,7 @@ import { PermissionRationale } from '../components/PermissionRationale';
 import { ReconnectingBanner } from '../components/ReconnectingBanner';
 import { ScanningIndicator } from '../components/ScanningIndicator';
 import { useConnection } from '../connection/ConnectionProvider';
+import { useSliderStatus } from '../components/useSliderStatus';
 import { colors, spacing, typography } from '../theme/colors';
 
 /**
@@ -21,17 +23,28 @@ import { colors, spacing, typography } from '../theme/colors';
  * visible per the design, it just isn't interactive yet.
  */
 export function RootScreen() {
-  const { state } = useConnection();
+  const { state, device } = useConnection();
+  // Called once here rather than separately inside JogControls — its
+  // `disabled` prop needs the `driving` flag too, so both controls share
+  // this one subscription's status instead of each maintaining their own.
+  // (AutoDriveControls also calls useSliderStatus(device) internally for
+  // its own status needs — see its own file for why that duplication was
+  // left as-is: a second lightweight JS listener on the same already-active
+  // BLE notify subscription, not a second native subscription.)
+  const status = useSliderStatus(device);
 
   return (
     <View style={styles.container}>
       <ConnectionHeader />
-      <View style={styles.content}>{renderContent(state.status)}</View>
+      <View style={styles.content}>{renderContent(state.status, status.driving)}</View>
     </View>
   );
 }
 
-function renderContent(status: ReturnType<typeof useConnection>['state']['status']) {
+function renderContent(
+  status: ReturnType<typeof useConnection>['state']['status'],
+  driving: boolean,
+) {
   switch (status) {
     case 'checking_permissions':
       // BUG-5 / BUG-9: was the (wrong) ScanningIndicator — no scan has
@@ -47,7 +60,15 @@ function renderContent(status: ReturnType<typeof useConnection>['state']['status
     case 'not_found':
       return <NotFoundNotice />;
     case 'connected':
-      return <JogControls />;
+      // AC-9 (PROJ-3): JogControls locks its buttons/slider while an
+      // auto-drive is in progress — AutoDriveControls manages its own
+      // locked state internally.
+      return (
+        <View style={styles.connectedStack}>
+          <JogControls disabled={driving} />
+          <AutoDriveControls />
+        </View>
+      );
     case 'reconnecting':
       return (
         <View style={styles.reconnectingWrap}>
@@ -61,12 +82,13 @@ function renderContent(status: ReturnType<typeof useConnection>['state']['status
 }
 
 /**
- * PROJ-2's real jog controls (JogControls) now cover the `connected` case.
- * This placeholder lives on only for `reconnecting`, where PROJ-1's design
- * keeps a disabled placeholder visible under the ReconnectingBanner rather
- * than the real controls (AC-7: not fully connected → controls stay hidden;
- * `device` is null in this state anyway, so JogControls would render
- * nothing here). PROJ-3 will need its own placeholder story for its screen.
+ * PROJ-2's real jog controls (JogControls) and PROJ-3's auto-drive controls
+ * (AutoDriveControls) now cover the `connected` case together. This
+ * placeholder lives on only for `reconnecting`, where PROJ-1's design keeps
+ * a disabled placeholder visible under the ReconnectingBanner rather than
+ * the real controls (AC-7: not fully connected → controls stay hidden;
+ * `device` is null in this state anyway, so both components would render
+ * nothing here regardless).
  */
 function ControlsPlaceholder() {
   return (
@@ -86,6 +108,9 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     padding: spacing.lg,
+  },
+  connectedStack: {
+    flex: 1,
   },
   reconnectingWrap: {
     flex: 1,

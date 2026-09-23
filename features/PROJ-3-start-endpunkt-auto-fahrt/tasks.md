@@ -29,7 +29,7 @@
 
 ## Level 4 — Einbindung
 
-- [ ] T7  `RootScreen.tsx` — rendert `<AutoDriveControls />` neben `<JogControls disabled={status.driving} />` im Zustand `connected`; `useSliderStatus` wird hier (oder in einer gemeinsamen Stelle) einmal aufgerufen und an beide Komponenten weitergereicht  · files: src/screens/RootScreen.tsx  · → AC-9
+- [x] T7  `RootScreen.tsx` — rendert `<AutoDriveControls />` neben `<JogControls disabled={status.driving} />` im Zustand `connected`; `useSliderStatus` wird hier (oder in einer gemeinsamen Stelle) einmal aufgerufen und an beide Komponenten weitergereicht  · files: src/screens/RootScreen.tsx  · → AC-9
 
 ## Parallelisierung
 
