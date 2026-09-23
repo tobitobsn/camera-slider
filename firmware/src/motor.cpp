@@ -49,6 +49,28 @@ unsigned long lastJogMillis = 0;
 bool jogRunning = false;
 JogDirection jogRunningDirection = JogDirection::kForward;
 
+// --- PROJ-3: start/end points & automatic drive ---------------------------
+
+// Start-/end reference points, in the stepper's absolute step coordinate
+// (FastAccelStepper::getCurrentPosition()). Only meaningful while the
+// matching hasStart/hasEnd flag is true — see motorClearPoints() (EC-3).
+bool hasStart = false;
+bool hasEnd = false;
+int32_t startPosition = 0;
+int32_t endPosition = 0;
+
+// True from a validated motorAutoDrive() call until motorAutoDriveCheck()
+// notices the stepper has arrived (isRunning() becomes false), or until
+// motorStop() cancels it early. motorWatchdogCheck() must not trigger while
+// this is true (EC-4 — auto-drive doesn't need a continuous heartbeat like
+// jog does).
+bool autoDriving = false;
+
+// The shared 200-4000 steps/s range (spec.md Technical Requirements: "muss
+// innerhalb 200-4000 Steps/s liegen (derselbe Bereich wie PROJ-2s Jog)") is
+// already captured by kJogSpeedMinHz/kJogSpeedMaxHz above — reused here
+// as-is rather than duplicated under a second name.
+
 uint32_t speedPercentToStepsPerSecond(uint8_t speedPercent) {
   if (speedPercent < 1) {
     speedPercent = 1;
@@ -142,13 +164,136 @@ void motorStop() {
   // running" — otherwise it would try applySpeedAcceleration() on a motor
   // that isn't moving.
   jogRunning = false;
+
+  // Whichever mode was running (jog or auto-drive), it just got stopped —
+  // the next motorAutoDrive() call must always be treated as starting
+  // fresh, and motorWatchdogCheck()'s jog-guard must not keep thinking an
+  // auto-drive is still active (design.md motorStop() entry).
+  autoDriving = false;
 }
 
 void motorWatchdogCheck() {
   if (stepper == nullptr || !stepper->isRunning()) {
     return;
   }
+  if (autoDriving) {
+    // EC-4: an auto-drive is a terminating, self-contained move — it
+    // doesn't send a continuous heartbeat like jog does, so the jog
+    // watchdog must stay quiet while it's in progress.
+    return;
+  }
   if (millis() - lastJogMillis > kWatchdogTimeoutMs) {
     motorStop();
   }
+}
+
+// --- PROJ-3: start/end points & automatic drive ---------------------------
+
+void motorSetStart() {
+  // getCurrentPosition() is only precise in standstill on ESP32 (see the
+  // doc comment on the vendored FastAccelStepper header) — refuse to read
+  // it while something is moving rather than remember a wrong position.
+  if (stepper == nullptr || stepper->isRunning()) {
+    return;
+  }
+  startPosition = stepper->getCurrentPosition();
+  hasStart = true;
+}
+
+void motorSetEnd() {
+  if (stepper == nullptr || stepper->isRunning()) {
+    return;
+  }
+  endPosition = stepper->getCurrentPosition();
+  hasEnd = true;
+}
+
+void motorClearPoints() {
+  hasStart = false;
+  hasEnd = false;
+}
+
+void motorAutoDrive(JogDirection direction, uint16_t durationDeciseconds) {
+  if (stepper == nullptr || autoDriving || !hasStart || !hasEnd ||
+      stepper->isRunning() || durationDeciseconds == 0) {
+    // autoDriving true covers EC-2 (no overlapping auto-drive requests).
+    // stepper->isRunning() true also rejects a request that arrives while
+    // a jog is still going — reading getCurrentPosition() while running
+    // isn't precise enough to validate "stands exactly at the point".
+    return;
+  }
+
+  const bool startToEnd = direction == JogDirection::kForward;
+  const int32_t requiredCurrentPosition =
+      startToEnd ? startPosition : endPosition;
+  const int32_t targetPosition = startToEnd ? endPosition : startPosition;
+
+  if (stepper->getCurrentPosition() != requiredCurrentPosition) {
+    // Not standing exactly at the starting point for this direction
+    // (AC-8/design.md "Auto-Fahrt nur auslösbar ... exakt am Startpunkt").
+    return;
+  }
+
+  const int32_t signedDistance = targetPosition - requiredCurrentPosition;
+  const uint32_t distanceSteps = static_cast<uint32_t>(
+      signedDistance < 0 ? -signedDistance : signedDistance);
+  if (distanceSteps == 0) {
+    // EC-1: start and end are identical.
+    return;
+  }
+
+  const float durationSeconds =
+      static_cast<float>(durationDeciseconds) / 10.0f;
+  const float speedHz = static_cast<float>(distanceSteps) / durationSeconds;
+  if (speedHz < kJogSpeedMinHz || speedHz > kJogSpeedMaxHz) {
+    // AC-6: requested duration would need a speed outside 200-4000 steps/s.
+    return;
+  }
+
+  // setSpeedInHz() only takes effect once move()/moveTo()/... is called
+  // afterwards (see motorJog() above and FastAccelStepper.h) — set it
+  // before moveTo().
+  stepper->setSpeedInHz(static_cast<uint32_t>(speedHz + 0.5f));
+  autoDriving = true;
+  stepper->moveTo(targetPosition, /*blocking=*/false);
+}
+
+void motorAutoDriveCheck() {
+  if (stepper == nullptr || !autoDriving) {
+    return;
+  }
+  if (!stepper->isRunning()) {
+    // Arrived at the target on its own — no signal from the app needed.
+    autoDriving = false;
+  }
+}
+
+MotorStatus motorGetStatus() {
+  MotorStatus status{};
+  status.hasStart = hasStart;
+  status.hasEnd = hasEnd;
+  status.driving = autoDriving;
+
+  if (hasStart && hasEnd) {
+    const int32_t signedDistance = endPosition - startPosition;
+    status.distanceSteps = static_cast<uint32_t>(
+        signedDistance < 0 ? -signedDistance : signedDistance);
+  } else {
+    status.distanceSteps = 0;
+  }
+
+  // Only read/compare the live position in standstill — same precision
+  // caveat as motorSetStart()/motorSetEnd(). While running, the stepper
+  // can't meaningfully be "at" either point anyway.
+  const bool canReadPosition = stepper != nullptr && !stepper->isRunning();
+  if (canReadPosition) {
+    const int32_t currentPosition = stepper->getCurrentPosition();
+    status.atStart = hasStart && currentPosition == startPosition;
+    status.atEnd = hasEnd && currentPosition == endPosition;
+  } else {
+    status.atStart = false;
+    status.atEnd = false;
+  }
+
+  return status;
 }

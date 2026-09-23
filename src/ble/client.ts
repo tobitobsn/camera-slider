@@ -11,7 +11,7 @@
  *    that on top of the functions exported here.
  */
 import { BleManager, type Device } from 'react-native-ble-plx';
-import { fromByteArray } from 'base64-js';
+import { fromByteArray, toByteArray } from 'base64-js';
 
 /**
  * Fixed contract with the firmware — do not change without coordinating a
@@ -22,7 +22,13 @@ export const SLIDER_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
 /** Command characteristic UUID — fixed contract with the firmware (firmware/src/ble.cpp). */
 export const SLIDER_COMMAND_CHAR_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
 
+/** Status characteristic UUID (Notify) — fixed contract with the firmware (firmware/src/ble.cpp). */
+export const SLIDER_STATUS_CHAR_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+
 const JOG_OPCODE = 0x01;
+const SET_START_OPCODE = 0x02;
+const SET_END_OPCODE = 0x03;
+const AUTO_DRIVE_OPCODE = 0x04;
 const STOP_OPCODE = 0x05;
 
 const JOG_DIRECTION_BYTE: Record<JogDirection, number> = {
@@ -30,7 +36,29 @@ const JOG_DIRECTION_BYTE: Record<JogDirection, number> = {
   backward: 0x01,
 };
 
+const AUTO_DRIVE_DIRECTION_BYTE: Record<AutoDriveDirection, number> = {
+  startToEnd: 0x00,
+  endToStart: 0x01,
+};
+
 export type JogDirection = 'forward' | 'backward';
+
+/** Direction for an automatic drive between the set start/end points. */
+export type AutoDriveDirection = 'startToEnd' | 'endToStart';
+
+/**
+ * Decoded status snapshot as sent by the firmware's Status characteristic
+ * (Notify). See parseStatusPayload() for the wire format.
+ */
+export type SliderStatus = {
+  hasStart: boolean;
+  hasEnd: boolean;
+  atStart: boolean;
+  atEnd: boolean;
+  driving: boolean;
+  /** Distance in steps between start and end. Null unless both hasStart and hasEnd are true. */
+  distanceSteps: number | null;
+};
 
 const DEFAULT_SCAN_TIMEOUT_MS = 10000;
 
@@ -176,4 +204,129 @@ export async function sendStopCommand(device: Device): Promise<void> {
     SLIDER_COMMAND_CHAR_UUID,
     fromByteArray(payload),
   );
+}
+
+/**
+ * Sends a SET_START command (no payload): the firmware records its current
+ * position as the start point. Write WITH response — safety-relevant,
+ * one-shot command, not a repeated heartbeat like JOG.
+ */
+export async function sendSetStartCommand(device: Device): Promise<void> {
+  const payload = new Uint8Array([SET_START_OPCODE]);
+
+  await device.writeCharacteristicWithResponseForService(
+    SLIDER_SERVICE_UUID,
+    SLIDER_COMMAND_CHAR_UUID,
+    fromByteArray(payload),
+  );
+}
+
+/**
+ * Sends a SET_END command (no payload): the firmware records its current
+ * position as the end point. Write WITH response — same rationale as
+ * sendSetStartCommand.
+ */
+export async function sendSetEndCommand(device: Device): Promise<void> {
+  const payload = new Uint8Array([SET_END_OPCODE]);
+
+  await device.writeCharacteristicWithResponseForService(
+    SLIDER_SERVICE_UUID,
+    SLIDER_COMMAND_CHAR_UUID,
+    fromByteArray(payload),
+  );
+}
+
+/**
+ * Sends an AUTO_DRIVE command: direction + duration. The firmware computes
+ * the required speed itself from its own start/end distance, so only the
+ * direction and the target duration are sent. Write WITH response — same
+ * safety rationale as sendSetStartCommand/sendSetEndCommand.
+ *
+ * @param durationSeconds Target duration in seconds. Rounded to the nearest
+ *   tenth of a second and encoded as a uint16 in tenths of a second (e.g.
+ *   10.5s -> 105), clamped defensively to the uint16 range.
+ */
+export async function sendAutoDriveCommand(
+  device: Device,
+  direction: AutoDriveDirection,
+  durationSeconds: number,
+): Promise<void> {
+  const durationDeciseconds = Math.min(
+    65535,
+    Math.max(0, Math.round(durationSeconds * 10)),
+  );
+
+  const payload = new Uint8Array([
+    AUTO_DRIVE_OPCODE,
+    AUTO_DRIVE_DIRECTION_BYTE[direction],
+    durationDeciseconds & 0xff,
+    (durationDeciseconds >> 8) & 0xff,
+  ]);
+
+  await device.writeCharacteristicWithResponseForService(
+    SLIDER_SERVICE_UUID,
+    SLIDER_COMMAND_CHAR_UUID,
+    fromByteArray(payload),
+  );
+}
+
+/**
+ * Pure decoder for the Status characteristic's Notify payload — no BLE calls,
+ * just bytes in, SliderStatus out. Exported separately so it's directly
+ * unit-testable without mocking BLE.
+ *
+ * Wire format (firmware/src/ble.cpp):
+ *  - byte 0: flags bitfield — bit 0 hasStart, bit 1 hasEnd, bit 2 atStart,
+ *    bit 3 atEnd, bit 4 driving
+ *  - bytes 1-4: distance in steps between start and end (uint32,
+ *    little-endian) — only meaningful when hasStart && hasEnd are both true
+ */
+export function parseStatusPayload(base64Value: string): SliderStatus {
+  const bytes = toByteArray(base64Value);
+  const flags = bytes[0] ?? 0;
+
+  const hasStart = (flags & 0x01) !== 0;
+  const hasEnd = (flags & 0x02) !== 0;
+  const atStart = (flags & 0x04) !== 0;
+  const atEnd = (flags & 0x08) !== 0;
+  const driving = (flags & 0x10) !== 0;
+
+  let distanceSteps: number | null = null;
+  if (hasStart && hasEnd) {
+    // Combine as an unsigned 32-bit little-endian value.
+    distanceSteps =
+      ((bytes[1] ?? 0) |
+        ((bytes[2] ?? 0) << 8) |
+        ((bytes[3] ?? 0) << 16) |
+        ((bytes[4] ?? 0) << 24)) >>>
+      0;
+  }
+
+  return { hasStart, hasEnd, atStart, atEnd, driving, distanceSteps };
+}
+
+/**
+ * Subscribes to the Status characteristic's notifications, decoding each
+ * incoming payload with parseStatusPayload() and forwarding it to callback.
+ *
+ * @returns An unsubscribe function, matching subscribeToDisconnect()'s shape.
+ */
+export function subscribeToStatus(
+  device: Device,
+  callback: (status: SliderStatus) => void,
+): () => void {
+  const subscription = device.monitorCharacteristicForService(
+    SLIDER_SERVICE_UUID,
+    SLIDER_STATUS_CHAR_UUID,
+    (error, characteristic) => {
+      if (error || !characteristic || characteristic.value === null) {
+        return;
+      }
+      callback(parseStatusPayload(characteristic.value));
+    },
+  );
+
+  return () => {
+    subscription.remove();
+  };
 }

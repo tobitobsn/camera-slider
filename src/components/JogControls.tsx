@@ -37,6 +37,16 @@ function directionFor(status: JogStatus): JogDirection | null {
   }
 }
 
+type JogControlsProps = {
+  /**
+   * AC-9: while an Auto-Fahrt is running, jog input must not respond — only
+   * the (separate, not-yet-built) Stop button stays live. The value comes
+   * from a status hook wired in RootScreen (a later task); this component
+   * only applies it to its own interactive elements.
+   */
+  disabled?: boolean;
+};
+
 /**
  * Manual jog controls (AC-1..AC-4, AC-7, EC-1) — speed slider + hold-to-jog
  * direction buttons + a plain-text status line. Rendered only while
@@ -55,7 +65,7 @@ function directionFor(status: JogStatus): JogDirection | null {
  * once per "was jogging, now isn't" transition, and never on mount since the
  * initial status is always 'idle'.
  */
-export function JogControls() {
+export function JogControls({ disabled = false }: JogControlsProps) {
   const { device } = useConnection();
   const { status, pressForward, releaseForward, pressBackward, releaseBackward } =
     useJogState();
@@ -100,6 +110,7 @@ export function JogControls() {
           step={1}
           value={speedPercent}
           onValueChange={setSpeedPercent}
+          disabled={disabled}
           minimumTrackTintColor={colors.primary}
           maximumTrackTintColor={colors.border}
           thumbTintColor={colors.primary}
@@ -110,14 +121,24 @@ export function JogControls() {
         <Pressable
           onPressIn={pressBackward}
           onPressOut={releaseBackward}
-          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+          disabled={disabled}
+          style={({ pressed }) => [
+            styles.button,
+            pressed && styles.buttonPressed,
+            disabled && styles.buttonDisabled,
+          ]}
         >
           <Text style={styles.buttonLabel}>▼ Rückwärts</Text>
         </Pressable>
         <Pressable
           onPressIn={pressForward}
           onPressOut={releaseForward}
-          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+          disabled={disabled}
+          style={({ pressed }) => [
+            styles.button,
+            pressed && styles.buttonPressed,
+            disabled && styles.buttonDisabled,
+          ]}
         >
           <Text style={styles.buttonLabel}>▲ Vorwärts</Text>
         </Pressable>
@@ -167,6 +188,9 @@ const styles = StyleSheet.create({
   buttonPressed: {
     backgroundColor: colors.primarySubtleBg,
     borderColor: colors.primary,
+  },
+  buttonDisabled: {
+    opacity: 0.4,
   },
   buttonLabel: {
     fontSize: typography.size.base,
