@@ -39,32 +39,61 @@ FastAccelStepper* stepper = nullptr;
 // Timestamp (millis()) of the last motorJog() call. Owned entirely by this
 // module — motorWatchdogCheck() compares against it, callers (ble.cpp) never
 // touch it directly.
-unsigned long lastJogMillis = 0;
+//
+// PROJ-3 bug hunt: this and every other flag/value below is written from the
+// NimBLE host task's onWrite()/onConnect() callbacks (ble.cpp) and read from
+// the main loop() task (motorWatchdogCheck(), motorAutoDriveCheck(),
+// bleNotifyStatusIfChanged() -> motorGetStatus()) — two different FreeRTOS
+// tasks. Without `volatile`, the compiler is free to cache a value read
+// earlier in one task instead of re-reading it after the other task wrote a
+// new one, and nothing guarantees the write is even visible across cores
+// promptly. This was flagged as a low-risk theoretical concern for this
+// exact variable during PROJ-2's QA (BUG-6) and dismissed as unlikely to
+// matter — PROJ-3's own hardware test then hit the *same* class of bug for
+// real on startPosition/endPosition/hasStart/hasEnd (a stale distance value
+// sent right after motorSetEnd(), see qa-report.md), so this fixes it here
+// too rather than carrying the same risk forward silently a second time.
+volatile unsigned long lastJogMillis = 0;
 
 // Tracks whether motorJog() currently has a continuous run started, and in
 // which direction — FastAccelStepper's isRunning() only reports *whether*
 // something is moving, not *which way* (verified against the vendored
 // header, see design.md BUG-2 entry). Reset by motorStop() so the next
 // motorJog() call after a stop is always treated as "starting fresh".
-bool jogRunning = false;
-JogDirection jogRunningDirection = JogDirection::kForward;
+volatile bool jogRunning = false;
+volatile JogDirection jogRunningDirection = JogDirection::kForward;
 
 // --- PROJ-3: start/end points & automatic drive ---------------------------
 
 // Start-/end reference points, in the stepper's absolute step coordinate
 // (FastAccelStepper::getCurrentPosition()). Only meaningful while the
 // matching hasStart/hasEnd flag is true — see motorClearPoints() (EC-3).
-bool hasStart = false;
-bool hasEnd = false;
-int32_t startPosition = 0;
-int32_t endPosition = 0;
+volatile bool hasStart = false;
+volatile bool hasEnd = false;
+volatile int32_t startPosition = 0;
+volatile int32_t endPosition = 0;
 
 // True from a validated motorAutoDrive() call until motorAutoDriveCheck()
 // notices the stepper has arrived (isRunning() becomes false), or until
 // motorStop() cancels it early. motorWatchdogCheck() must not trigger while
 // this is true (EC-4 — auto-drive doesn't need a continuous heartbeat like
 // jog does).
-bool autoDriving = false;
+volatile bool autoDriving = false;
+
+// millis() timestamp of the motorAutoDrive() call that set autoDriving=true.
+// PROJ-3 bug hunt: `autoDriving = true` is set *before* `moveTo()` is
+// called, and moveTo() likely only schedules the move (ramp generator/ISR)
+// rather than making isRunning() true synchronously within the same
+// function call — on the loop() task, motorAutoDriveCheck() could
+// theoretically run in that brief gap, see isRunning()==false, and
+// misinterpret "hasn't started yet" as "already arrived", clearing
+// autoDriving early. Once that happens, motorWatchdogCheck() then sees a
+// genuinely running stepper with autoDriving now (wrongly) false and a
+// stale lastJogMillis, and stops it — the motor is heard only briefly
+// before an unrelated watchdog stop cuts it off. kAutoDriveStartGraceMs
+// below closes this window.
+volatile unsigned long autoDriveStartMillis = 0;
+constexpr unsigned long kAutoDriveStartGraceMs = 100;
 
 // The shared 200-4000 steps/s range (spec.md Technical Requirements: "muss
 // innerhalb 200-4000 Steps/s liegen (derselbe Bereich wie PROJ-2s Jog)") is
@@ -173,13 +202,18 @@ void motorStop() {
 }
 
 void motorWatchdogCheck() {
-  if (stepper == nullptr || !stepper->isRunning()) {
+  if (stepper == nullptr) {
     return;
   }
   if (autoDriving) {
     // EC-4: an auto-drive is a terminating, self-contained move — it
     // doesn't send a continuous heartbeat like jog does, so the jog
-    // watchdog must stay quiet while it's in progress.
+    // watchdog must stay quiet while it's in progress. Checked before
+    // isRunning() (PROJ-3 bug hunt) so this guard depends on a single
+    // variable's visibility, not on isRunning() and autoDriving agreeing.
+    return;
+  }
+  if (!stepper->isRunning()) {
     return;
   }
   if (millis() - lastJogMillis > kWatchdogTimeoutMs) {
@@ -227,8 +261,9 @@ void motorAutoDrive(JogDirection direction, uint16_t durationDeciseconds) {
   const int32_t requiredCurrentPosition =
       startToEnd ? startPosition : endPosition;
   const int32_t targetPosition = startToEnd ? endPosition : startPosition;
+  const int32_t actualCurrentPosition = stepper->getCurrentPosition();
 
-  if (stepper->getCurrentPosition() != requiredCurrentPosition) {
+  if (actualCurrentPosition != requiredCurrentPosition) {
     // Not standing exactly at the starting point for this direction
     // (AC-8/design.md "Auto-Fahrt nur auslösbar ... exakt am Startpunkt").
     return;
@@ -254,12 +289,30 @@ void motorAutoDrive(JogDirection direction, uint16_t durationDeciseconds) {
   // afterwards (see motorJog() above and FastAccelStepper.h) — set it
   // before moveTo().
   stepper->setSpeedInHz(static_cast<uint32_t>(speedHz + 0.5f));
+  // Write order matters across the loop()/BLE-host task boundary (PROJ-3
+  // bug hunt, second race found on hardware): autoDriveStartMillis is
+  // written *before* autoDriving is published, so any task that observes
+  // autoDriving==true is guaranteed to see a fresh autoDriveStartMillis too
+  // — never the previous drive's stale timestamp, which would let
+  // motorAutoDriveCheck()'s grace-period check read a huge elapsed time and
+  // wrongly clear autoDriving before moveTo() below ever starts the move
+  // (observed on hardware: the watchdog then stops the motor within one
+  // loop() iteration — heard as a brief twitch). autoDriving is still
+  // published before moveTo() so motorWatchdogCheck()'s guard is already
+  // active once the stepper can possibly start running.
+  autoDriveStartMillis = millis();
   autoDriving = true;
   stepper->moveTo(targetPosition, /*blocking=*/false);
 }
 
 void motorAutoDriveCheck() {
   if (stepper == nullptr || !autoDriving) {
+    return;
+  }
+  // Grace period (see autoDriveStartMillis above): don't trust
+  // isRunning()==false as "arrived" until the move has genuinely had a
+  // chance to start.
+  if (millis() - autoDriveStartMillis < kAutoDriveStartGraceMs) {
     return;
   }
   if (!stepper->isRunning()) {
@@ -269,13 +322,29 @@ void motorAutoDriveCheck() {
 }
 
 MotorStatus motorGetStatus() {
-  MotorStatus status{};
-  status.hasStart = hasStart;
-  status.hasEnd = hasEnd;
-  status.driving = autoDriving;
+  // Snapshot every shared flag/value into plain locals with a single read
+  // each, right at the top — belt-and-suspenders on top of `volatile` above.
+  // `volatile` fixes the cross-task staleness that actually caused the
+  // observed bug (a whole stale value surviving across loop() iterations);
+  // this snapshot additionally closes the much narrower window where a
+  // write from the BLE host task could land *between* two separate reads
+  // within this one function (e.g. endPosition read once for the distance
+  // calculation, then read again for the atEnd comparison, with a write
+  // landing in between) — every calculation below now reads each shared
+  // variable exactly once and reuses the same local value throughout.
+  const bool snapHasStart = hasStart;
+  const bool snapHasEnd = hasEnd;
+  const bool snapAutoDriving = autoDriving;
+  const int32_t snapStartPosition = startPosition;
+  const int32_t snapEndPosition = endPosition;
 
-  if (hasStart && hasEnd) {
-    const int32_t signedDistance = endPosition - startPosition;
+  MotorStatus status{};
+  status.hasStart = snapHasStart;
+  status.hasEnd = snapHasEnd;
+  status.driving = snapAutoDriving;
+
+  if (snapHasStart && snapHasEnd) {
+    const int32_t signedDistance = snapEndPosition - snapStartPosition;
     status.distanceSteps = static_cast<uint32_t>(
         signedDistance < 0 ? -signedDistance : signedDistance);
   } else {
@@ -288,8 +357,8 @@ MotorStatus motorGetStatus() {
   const bool canReadPosition = stepper != nullptr && !stepper->isRunning();
   if (canReadPosition) {
     const int32_t currentPosition = stepper->getCurrentPosition();
-    status.atStart = hasStart && currentPosition == startPosition;
-    status.atEnd = hasEnd && currentPosition == endPosition;
+    status.atStart = snapHasStart && currentPosition == snapStartPosition;
+    status.atEnd = snapHasEnd && currentPosition == snapEndPosition;
   } else {
     status.atStart = false;
     status.atEnd = false;
