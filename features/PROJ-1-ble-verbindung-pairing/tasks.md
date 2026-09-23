@@ -10,39 +10,39 @@
 
 <!-- Fundament für App und Firmware. Beide Bereiche sind komplett disjunkt (App-Root vs. firmware/) → beide [P]. -->
 
-- [ ] T1 [P]  React-Native-Projekt "CameraSliderApp" (TypeScript-Template) initialisieren  · files: package.json, App.tsx, tsconfig.json  · → AC-1–AC-9 (Voraussetzung)
-- [ ] T2 [P]  PlatformIO-Firmware-Projekt in `firmware/` anlegen (platformio.ini, main.cpp-Grundgerüst)  · files: firmware/platformio.ini, firmware/src/main.cpp  · → AC-1–AC-9 (Voraussetzung)
+- [x] T1 [P]  React-Native-Projekt "CameraSliderApp" (TypeScript-Template) initialisieren  · files: package.json, App.tsx, tsconfig.json  · → AC-1–AC-9 (Voraussetzung)
+- [x] T2 [P]  PlatformIO-Firmware-Projekt in `firmware/` anlegen (platformio.ini, main.cpp-Grundgerüst)  · files: firmware/platformio.ini, firmware/src/main.cpp  · → AC-1–AC-9 (Voraussetzung)
 
 ## Level 2 — BLE-Grundbausteine
 
 <!-- Firmware-Advertising, App-BLE-Client und App-Berechtigungen sind drei disjunkte Bereiche → alle drei [P]. -->
 
-- [ ] T3 [P]  Firmware: NimBLE-Server mit SERVICE_UUID + Gerätename, Advertising starten, kein Bonding/Verschlüsselung, onConnect/onDisconnect-Callbacks  · files: firmware/src/ble.h, firmware/src/ble.cpp, firmware/src/main.cpp  · → AC-2, AC-3, AC-9
-- [ ] T4 [P]  `react-native-ble-plx` einbinden; BLE-Client-Singleton mit Scan gefiltert nach SERVICE_UUID, verbindet automatisch zum ersten Treffer  · files: package.json, src/ble/client.ts  · → AC-2, AC-9
-- [ ] T5 [P]  Android-Manifest-Berechtigungen (BLUETOOTH_SCAN/CONNECT, ACCESS_FINE_LOCATION maxSdk 30) + Laufzeit-Request-Funktion mit Versions-Weiche (Android 12+ vs. ≤11)  · files: android/app/src/main/AndroidManifest.xml, src/permissions/requestBlePermissions.ts  · → AC-1, AC-6
+- [x] T3 [P]  Firmware: NimBLE-Server mit SERVICE_UUID + Gerätename, Advertising starten, kein Bonding/Verschlüsselung, onConnect/onDisconnect-Callbacks  · files: firmware/src/ble.h, firmware/src/ble.cpp, firmware/src/main.cpp  · → AC-2, AC-3, AC-9
+- [x] T4 [P]  `react-native-ble-plx` einbinden; BLE-Client-Singleton mit Scan gefiltert nach SERVICE_UUID, verbindet automatisch zum ersten Treffer  · files: package.json, src/ble/client.ts  · → AC-2, AC-9
+- [x] T5 [P]  Android-Manifest-Berechtigungen (BLUETOOTH_SCAN/CONNECT, ACCESS_FINE_LOCATION maxSdk 30) + Laufzeit-Request-Funktion mit Versions-Weiche (Android 12+ vs. ≤11)  · files: android/app/src/main/AndroidManifest.xml, src/permissions/requestBlePermissions.ts  · → AC-1, AC-6
 
 ## Level 3 — Zustandslogik
 
 <!-- Reine Funktion, unabhängig testbar. Baut auf keinem der vorherigen Tasks inhaltlich auf, folgt aber erst nach den Grundbausteinen. -->
 
-- [ ] T6  `connectionReducer.ts`: Zustands-Enum (`checking_permissions` … `not_found`) + alle Übergänge als reine, testbare Funktion  · files: src/connection/connectionReducer.ts, src/connection/connectionReducer.test.ts  · → AC-3, AC-4, AC-5, AC-7, AC-8, EC-1, EC-4, EC-5
+- [x] T6  `connectionReducer.ts`: Zustands-Enum (`checking_permissions` … `not_found`) + alle Übergänge als reine, testbare Funktion  · files: src/connection/connectionReducer.ts, src/connection/connectionReducer.test.ts  · → AC-3, AC-4, AC-5, AC-7, AC-8, EC-1, EC-4, EC-5
 
 ## Level 4 — Verbindungs-Orchestrierung
 
 <!-- Seiteneffekte, die den Reducer aus Level 3 ansteuern. -->
 
-- [ ] T7  `ConnectionProvider.tsx`: Permission-Check, Scan/Reconnect-Timer (3s-Intervall, 30s-Limit), Bluetooth-Adapter-Listener (Auto-Resume bei Wiedereinschalten), Foreground-Re-Check  · files: src/connection/ConnectionProvider.tsx  · → AC-1, AC-2, AC-5, AC-6, EC-1, EC-3, EC-4
+- [x] T7  `ConnectionProvider.tsx`: Permission-Check, Scan/Reconnect-Timer (3s-Intervall, 30s-Limit), Bluetooth-Adapter-Listener (Auto-Resume bei Wiedereinschalten), Foreground-Re-Check  · files: src/connection/ConnectionProvider.tsx  · → AC-1, AC-2, AC-5, AC-6, EC-1, EC-3, EC-4
 
 ## Level 5 — UI-Komponenten
 
 <!-- Disjunkte Komponenten-Dateien → beide [P]. -->
 
-- [ ] T8 [P]  `ConnectionHeader.tsx`: Status-Badge, Gerätename, "Erneut suchen"-Button (je Zustand gesperrt/aktiv)  · files: src/components/ConnectionHeader.tsx  · → AC-3, AC-7, EC-5
-- [ ] T9 [P]  Zustands-Hinweis-Komponenten: PermissionDeniedNotice, BluetoothOffNotice, ScanningIndicator, NotFoundNotice, ReconnectingBanner  · files: src/components/PermissionDeniedNotice.tsx, src/components/BluetoothOffNotice.tsx, src/components/ScanningIndicator.tsx, src/components/NotFoundNotice.tsx, src/components/ReconnectingBanner.tsx  · → AC-1, AC-4, AC-5, AC-6, AC-7, AC-8
+- [x] T8 [P]  `ConnectionHeader.tsx`: Status-Badge, Gerätename, "Erneut suchen"-Button (je Zustand gesperrt/aktiv)  · files: src/components/ConnectionHeader.tsx  · → AC-3, AC-7, EC-5
+- [x] T9 [P]  Zustands-Hinweis-Komponenten: PermissionDeniedNotice, BluetoothOffNotice, ScanningIndicator, NotFoundNotice, ReconnectingBanner  · files: src/components/PermissionDeniedNotice.tsx, src/components/BluetoothOffNotice.tsx, src/components/ScanningIndicator.tsx, src/components/NotFoundNotice.tsx, src/components/ReconnectingBanner.tsx  · → AC-1, AC-4, AC-5, AC-6, AC-7, AC-8
 
 ## Level 6 — Verdrahtung
 
-- [ ] T10  `RootScreen.tsx` + `App.tsx`: ConnectionHeader oben, zustandsabhängiges Rendering der Notice-Komponenten, Design-Tokens aus `docs/design-system.md` angewendet, ConnectionProvider eingebunden  · files: src/screens/RootScreen.tsx, App.tsx  · → AC-1, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9
+- [x] T10  `RootScreen.tsx` + `App.tsx`: ConnectionHeader oben, zustandsabhängiges Rendering der Notice-Komponenten, Design-Tokens aus `docs/design-system.md` angewendet, ConnectionProvider eingebunden  · files: src/screens/RootScreen.tsx, App.tsx  · → AC-1, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9
 
 ## Parallelisierung
 
