@@ -31,13 +31,14 @@ lib_deps =
 |---|---|---|
 | VM | 12–24 V Netzteil (+) | Motorspannung — **nicht** über den ESP32-5V-Pin |
 | GND | gemeinsame Masse mit ESP32 | Motor- und Logik-GND **müssen verbunden sein** |
-| VIO | 3V3 | Logikversorgung des Treibers |
-| STEP | GPIO (frei wählbar, z. B. 25) | Schrittpuls |
-| DIR | GPIO (z. B. 26) | Richtung |
-| EN | GPIO (z. B. 27) | Enable, **LOW-aktiv** — HIGH schaltet den Treiber stromlos (wichtig für den Not-Halt) |
-| PDN_UART | GPIO (z. B. 16, per 1kΩ-Widerstand) | UART Single-Wire zu TMCStepper — Strom & Modus werden hierüber gesetzt, kein Trimpoti nötig |
-| 1A/1B, 2A/2B | Motorspulen (42BYGHM809, 4 Adern) | Spulenpaare per Multimeter/Datenblatt zuordnen, sonst dreht der Motor nicht rund |
-| MS1/MS2 | offen lassen | im UART-Modus per Software gesetzt, nicht per Pin |
+| VDD/VIO | 3V3 | Logikversorgung des Treibers |
+| STEP | GPIO25 | Schrittpuls |
+| DIR | GPIO26 | Richtung |
+| EN | GPIO27 | Enable, **LOW-aktiv** — HIGH schaltet den Treiber stromlos (wichtig für den Not-Halt) |
+| PDN „TX" | GPIO16 (ESP32 TX/Serial2), **direkt, kein externer Widerstand** | Auf dem BTT TMC2209 V1.3 sind die beiden PDN-Pads werkseitig über 1 kΩ verbunden und zusätzlich mit „RX"/„TX" beschriftet — der Widerstand ist schon auf dem Board, nicht selbst ergänzen |
+| PDN „RX" | GPIO17 (ESP32 RX/Serial2), direkt | siehe oben |
+| A1/A2, B1/B2 | Motorspulen (42BYGHM809, 4 Adern) | Spulenpaare per Multimeter (Durchgang) zuordnen, sonst dreht der Motor nicht rund |
+| MS1/MS2, CLK | offen lassen | MS1/MS2 werden im UART-Modus per Software gesetzt; CLK nur für einen externen Takt nötig, sonst nutzt der Treiber seinen internen Oszillator |
 
 **Nie Motorstecker bei eingeschaltetem Treiber abziehen/stecken** — das zerstört die TMC2209-Endstufe zuverlässig.
 
