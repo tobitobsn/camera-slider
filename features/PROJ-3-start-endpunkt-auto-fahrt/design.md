@@ -76,12 +76,14 @@ Alle drei neuen Opcodes sind *Write mit Antwort*, wie STOP — einmalige, sicher
 firmware/src/ble.cpp (PROJ-1/2, erweitert)
 +-- Command-Callback um SET_START/SET_END/AUTO_DRIVE erweitert (neben JOG/STOP)
 +-- Status-Characteristic sendet jetzt echte notify()-Aufrufe (Payload aus motor.cpp)
++-- onConnect (PROJ-1, bestehend) ruft zusätzlich motorClearPoints() auf — siehe unten
 
 firmware/src/motor.h / motor.cpp (PROJ-2, erweitert)
 +-- motorSetStart() / motorSetEnd() — merkt sich stepper->getCurrentPosition() als Referenzpunkt (nur gültig/aussagekräftig im Stillstand, siehe Technische Entscheidungen)
 +-- motorAutoDrive(direction, durationDeciseconds) — berechnet Geschwindigkeit aus eigener Distanz-Kenntnis und Dauer, validiert 200–4000 Steps/s unabhängig von der App, startet moveTo() zum jeweiligen Zielpunkt
 +-- motorAutoDriveCheck() — in loop() aufgerufen: erkennt Zielankunft (isRunning() wird false, während intern `autoDriving` gesetzt ist), löst Status-Update aus
 +-- motorGetStatus() — liefert die Flags + Distanz für die Status-Characteristic
++-- motorClearPoints() — setzt `hasStart`/`hasEnd` (und damit implizit `atStart`/`atEnd`/`distanceSteps`) zurück; aufgerufen von `onConnect`
 +-- motorWatchdogCheck() — erweitert: greift nur noch, wenn NICHT `autoDriving` (EC-4 aus spec.md)
 +-- motorStop() — erweitert: setzt auch `autoDriving = false` zurück, egal ob Jog oder Auto-Fahrt gerade lief
 ```
@@ -115,6 +117,7 @@ _Keine — kein Backend, kein Provider-Dashboard betroffen._
 | Firmware validiert AUTO_DRIVE unabhängig von der App erneut (hasStart/hasEnd, steht exakt am richtigen Punkt, berechnete Geschwindigkeit im Bereich) und ignoriert eine ungültige Anfrage still (kein Fahrtstart) | Verteidigung in der Tiefe, wie schon bei PROJ-2 (z. B. Geschwindigkeits-Klemmung unabhängig von der App) — die App verhindert ungültige Anfragen zwar schon über die UI (aus `useSliderStatus` abgeleitet), die Firmware verlässt sich aber nicht darauf | Nur App-seitige Validierung | Etwas mehr Prüf-Code in der Firmware, dafür ein Sicherheitsnetz | 2026-09-23 |
 | Neuer Hook `useSliderStatus(device)` abonniert die Status-Characteristic, statt `ConnectionProvider` um Auto-Fahrt-spezifischen Zustand zu erweitern | Hält `ConnectionProvider` bei seiner bestehenden Verantwortung (reiner Verbindungs-Lebenszyklus) — dasselbe Muster wie PROJ-2s `useJogState`, ein eigener, fokussierter Hook pro Feature-Zustand | Status-Werte direkt in `ConnectionProvider`s Context aufnehmen | `JogControls` und `AutoDriveControls` abonnieren beide denselben Hook statt über den Verbindungs-Context zu koppeln — ein Import mehr, dafür bleibt der Verbindungs-Context fokussiert | 2026-09-23 |
 | `JogControls` bekommt eine neue `disabled`-Prop (aus `useSliderStatus`s `driving`-Flag), statt während Auto-Fahrt unmontiert zu werden | Die Steuerung bleibt sichtbar, nur nicht bedienbar — der Nutzer sieht jederzeit den vollständigen Bildschirm, konsistent mit AC-9 ("reagieren nicht", nicht "verschwinden") | `JogControls` bei `driving=true` unmontieren | Eine zusätzliche Prop und ein paar bedingte Styles in `JogControls`, dafür kein Layout-Sprung während der Fahrt | 2026-09-23 |
+| `onConnect` (PROJ-1, bestehend) ruft zusätzlich `motorClearPoints()` auf, statt Start/Ende nur beim ESP32-Neustart zu verlieren | **Korrektur beim Task-Review gefunden:** EC-3 (spec.md) verlangt „kein Start/Ende" sowohl nach einem App-Neustart **als auch** nach einem bloßen Reconnect — reines RAM-Verhalten hätte die Punkte über einen Reconnect hinweg behalten, da der ESP32 dabei nicht neu startet | Start/Ende nur beim ESP32-Boot löschen (`motorSetup()`) | Keiner — jede neue Verbindung ist ohnehin der Moment, in dem die App ihre eigene Sicht auf Start/Ende neu aufbaut (Notify-on-Subscribe), ein Zurücksetzen genau dort ist konsistent | 2026-09-23 |
 
 ## Open Questions
 
