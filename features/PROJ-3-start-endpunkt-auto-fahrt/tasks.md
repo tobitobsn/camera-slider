@@ -18,8 +18,8 @@
 
 <!-- Zwei unabhängige Bereiche, je auf genau einem Level-1-Baustein aufbauend (Firmware-BLE auf T1, App-Status-Hook auf T2) → beide [P]. -->
 
-- [ ] T4 [P]  Firmware: Command-Callback um Opcodes `0x02` SET_START, `0x03` SET_END, `0x04` AUTO_DRIVE erweitert (neben bestehendem JOG/STOP), ruft die neuen `motor.cpp`-Funktionen auf; Status-Characteristic sendet echte `notify()`-Aufrufe aus `loop()` bei Zustandsänderung (Payload aus `motorGetStatus()`); `onConnect` (PROJ-1, bestehend) ruft zusätzlich `motorClearPoints()` auf (EC-3)  · files: firmware/src/ble.cpp, firmware/src/ble.h, firmware/src/main.cpp  · → AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, EC-1, EC-2, EC-3
-- [ ] T5 [P]  App: `useSliderStatus(device)`-Hook — abonniert die Status-Characteristic über `client.ts`s `subscribeToStatus`, hält `{hasStart, hasEnd, atStart, atEnd, driving, distanceSteps}` als React-State + Unit-Tests  · files: src/components/useSliderStatus.ts, src/components/useSliderStatus.test.ts  · → AC-7, AC-8, AC-9
+- [x] T4 [P]  Firmware: Command-Callback um Opcodes `0x02` SET_START, `0x03` SET_END, `0x04` AUTO_DRIVE erweitert (neben bestehendem JOG/STOP), ruft die neuen `motor.cpp`-Funktionen auf; Status-Characteristic sendet echte `notify()`-Aufrufe aus `loop()` bei Zustandsänderung (Payload aus `motorGetStatus()`); `onConnect` (PROJ-1, bestehend) ruft zusätzlich `motorClearPoints()` auf (EC-3)  · files: firmware/src/ble.cpp, firmware/src/ble.h, firmware/src/main.cpp  · → AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, EC-1, EC-2, EC-3
+- [x] T5 [P]  App: `useSliderStatus(device)`-Hook — abonniert die Status-Characteristic über `client.ts`s `subscribeToStatus`, hält `{hasStart, hasEnd, atStart, atEnd, driving, distanceSteps}` als React-State + Unit-Tests  · files: src/components/useSliderStatus.ts, src/components/useSliderStatus.test.ts  · → AC-7, AC-8, AC-9
 
 ## Level 3 — AutoDriveControls
 

@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <NimBLEDevice.h>
 
+#include <cstring>
+
 #include "motor.h"
 
 namespace {
@@ -14,14 +16,49 @@ const char kDeviceName[] = "CameraSlider";
 // without updating the app's BLE scan/connect code as well.
 const char kServiceUUID[] = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const char kCommandCharUUID[] = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";  // WRITE, bonded/encrypted (PROJ-2)
-const char kStatusCharUUID[] = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";   // NOTIFY, future use
+const char kStatusCharUUID[] = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";   // NOTIFY (PROJ-3)
 
-// Command opcodes (see docs/stacks/firmware-esp32-tmc2209.md "BLE-Kommandoschicht").
-// Byte 0 of every write is the opcode.
-constexpr uint8_t kOpcodeJog = 0x01;   // <opcode> <direction> <speedPercent> — 3 bytes total
-constexpr uint8_t kOpcodeStop = 0x05;  // <opcode> — 1 byte total
+// Command opcodes (see docs/stacks/firmware-esp32-tmc2209.md "BLE-Kommandoschicht"
+// and design.md "Grenze zur Firmware"). Byte 0 of every write is the opcode.
+constexpr uint8_t kOpcodeJog = 0x01;        // <opcode> <direction> <speedPercent> — 3 bytes total
+constexpr uint8_t kOpcodeSetStart = 0x02;   // <opcode> — 1 byte total
+constexpr uint8_t kOpcodeSetEnd = 0x03;     // <opcode> — 1 byte total
+constexpr uint8_t kOpcodeAutoDrive = 0x04;  // <opcode> <direction> <durationDeciseconds LE u16> — 4 bytes total
+constexpr uint8_t kOpcodeStop = 0x05;       // <opcode> — 1 byte total
 
 volatile bool gConnected = false;
+
+// Status characteristic, promoted from bleSetup()'s local scope so
+// bleNotifyStatusIfChanged() (called every loop() iteration from main.cpp)
+// and the onSubscribe callback below can reach it. Same pattern as
+// gConnected above — file-scope state in this anonymous namespace.
+NimBLECharacteristic* gStatusChar = nullptr;
+
+// Last 5-byte Status-Characteristic payload actually sent (see
+// bleNotifyStatusIfChanged()), so repeated identical polls from loop()
+// don't spam notify(). Zero-initialized; the very first differing status
+// (including right after boot) will therefore always notify.
+uint8_t gLastStatusPayload[5] = {0, 0, 0, 0, 0};
+bool gHasSentStatus = false;
+
+// Packs a MotorStatus snapshot into the 5-byte wire payload design.md
+// specifies: byte 0 is the flags bitfield (bit0 hasStart, bit1 hasEnd,
+// bit2 atStart, bit3 atEnd, bit4 driving), bytes 1-4 are distanceSteps as
+// little-endian uint32 (matches src/ble/client.ts's parseStatusPayload()).
+void packStatusPayload(const MotorStatus& status, uint8_t out[5]) {
+  uint8_t flags = 0;
+  if (status.hasStart) flags |= 0x01;
+  if (status.hasEnd) flags |= 0x02;
+  if (status.atStart) flags |= 0x04;
+  if (status.atEnd) flags |= 0x08;
+  if (status.driving) flags |= 0x10;
+
+  out[0] = flags;
+  out[1] = static_cast<uint8_t>(status.distanceSteps & 0xff);
+  out[2] = static_cast<uint8_t>((status.distanceSteps >> 8) & 0xff);
+  out[3] = static_cast<uint8_t>((status.distanceSteps >> 16) & 0xff);
+  out[4] = static_cast<uint8_t>((status.distanceSteps >> 24) & 0xff);
+}
 
 class ServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
@@ -29,6 +66,12 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     (void)connInfo;
     gConnected = true;
     Serial.println("BLE: client connected");
+    // EC-3 (spec.md): every new connection — app restart or a bare
+    // reconnect, the ESP32 itself doesn't reboot for either — must reset
+    // the firmware's start/end points, since the app's own idea of them
+    // resets too and nothing here is persisted (design.md's added
+    // Technical Decision row on this exact gap).
+    motorClearPoints();
     // BUG-4 fix (qa-report.md): NimBLE only restarts advertising after a
     // disconnect or a *failed* connection attempt, never after a successful
     // one (confirmed in the vendored NimBLEServer.cpp — the connect event's
@@ -97,6 +140,35 @@ class CommandCharacteristicCallbacks : public NimBLECharacteristicCallbacks {
         motorJog(direction, speedByte);
         break;
       }
+      case kOpcodeSetStart: {
+        if (len != 1) {
+          return;  // malformed SET_START write — ignore
+        }
+        motorSetStart();
+        break;
+      }
+      case kOpcodeSetEnd: {
+        if (len != 1) {
+          return;  // malformed SET_END write — ignore
+        }
+        motorSetEnd();
+        break;
+      }
+      case kOpcodeAutoDrive: {
+        if (len != 4) {
+          return;  // malformed AUTO_DRIVE write — ignore rather than read out of bounds
+        }
+        const uint8_t directionByte = value[1];
+        const JogDirection direction =
+            (directionByte == 0x00) ? JogDirection::kForward : JogDirection::kBackward;
+        // Little-endian uint16, low byte first — matches
+        // src/ble/client.ts's sendAutoDriveCommand() encoding
+        // (durationDeciseconds & 0xff, then >> 8 & 0xff).
+        const uint16_t durationDeciseconds =
+            static_cast<uint16_t>(value[2]) | (static_cast<uint16_t>(value[3]) << 8);
+        motorAutoDrive(direction, durationDeciseconds);
+        break;
+      }
       case kOpcodeStop: {
         if (len != 1) {
           return;  // malformed STOP write — ignore
@@ -105,9 +177,39 @@ class CommandCharacteristicCallbacks : public NimBLECharacteristicCallbacks {
         break;
       }
       default:
-        // No other opcodes are defined yet (PROJ-3 will add more later).
+        // No other opcodes are defined (PROJ-3's three new ones above cover
+        // the full protocol design.md specifies — no speculative future
+        // opcodes).
         break;
     }
+  }
+};
+
+// Notify-on-Subscribe (design.md "Status-Characteristic"): send the current
+// status once, immediately, when a central subscribes — so the app has the
+// right state right after connecting without waiting for the next loop()
+// diff-check to happen to find a change (it might not, if nothing changed
+// since boot). Verified against the vendored header: onSubscribe(...) is a
+// real virtual override point on NimBLECharacteristicCallbacks
+// (NimBLECharacteristic.h:299); the server passes
+// `event->subscribe.cur_notify + (event->subscribe.cur_indicate << 1)` as
+// subValue (NimBLEServer.cpp:537-539), so bit 0 set means "notify enabled"
+// — the case both on subscribe (cur_notify=1) and unsubscribe
+// (cur_notify=0), hence the explicit check below.
+class StatusCharacteristicCallbacks : public NimBLECharacteristicCallbacks {
+  void onSubscribe(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo,
+                    uint16_t subValue) override {
+    (void)connInfo;
+    if ((subValue & 0x01) == 0) {
+      return;  // unsubscribed, or an indicate-only subscribe — nothing to send
+    }
+    const MotorStatus status = motorGetStatus();
+    uint8_t payload[5];
+    packStatusPayload(status, payload);
+    pCharacteristic->setValue(payload, sizeof(payload));
+    pCharacteristic->notify();
+    memcpy(gLastStatusPayload, payload, sizeof(payload));
+    gHasSentStatus = true;
   }
 };
 
@@ -180,8 +282,12 @@ void bleSetup() {
                              NIMBLE_PROPERTY::WRITE_ENC);
   pCommandChar->setCallbacks(new CommandCharacteristicCallbacks());
 
-  // Status characteristic (notify-only for now, no values are sent yet).
-  pService->createCharacteristic(kStatusCharUUID, NIMBLE_PROPERTY::NOTIFY);
+  // Status characteristic — notify-only, real payloads sent from
+  // bleNotifyStatusIfChanged() (called every loop() from main.cpp) and once
+  // immediately on subscribe (StatusCharacteristicCallbacks::onSubscribe
+  // below).
+  gStatusChar = pService->createCharacteristic(kStatusCharUUID, NIMBLE_PROPERTY::NOTIFY);
+  gStatusChar->setCallbacks(new StatusCharacteristicCallbacks());
 
   pService->start();
 
@@ -194,4 +300,27 @@ void bleSetup() {
 
 bool bleIsConnected() {
   return gConnected;
+}
+
+void bleNotifyStatusIfChanged() {
+  if (gStatusChar == nullptr) {
+    return;  // called before bleSetup() finished — shouldn't happen, defensive only
+  }
+
+  const MotorStatus status = motorGetStatus();
+  uint8_t payload[5];
+  packStatusPayload(status, payload);
+
+  if (gHasSentStatus && memcmp(payload, gLastStatusPayload, sizeof(payload)) == 0) {
+    return;  // unchanged since the last notify — nothing to send
+  }
+
+  // setValue()/notify(): NimBLELocalValueAttribute::setValue(const uint8_t*,
+  // size_t) — NimBLELocalValueAttribute.h:68; NimBLECharacteristic::notify()
+  // (no-arg, sends the value already set via setValue()) —
+  // NimBLECharacteristic.h:61. Both verified against the vendored header.
+  gStatusChar->setValue(payload, sizeof(payload));
+  gStatusChar->notify();
+  memcpy(gLastStatusPayload, payload, sizeof(payload));
+  gHasSentStatus = true;
 }

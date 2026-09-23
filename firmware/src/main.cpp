@@ -11,4 +11,6 @@ void setup() {
 
 void loop() {
   motorWatchdogCheck();
+  motorAutoDriveCheck();
+  bleNotifyStatusIfChanged();
 }
