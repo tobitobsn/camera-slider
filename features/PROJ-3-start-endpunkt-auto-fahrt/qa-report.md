@@ -163,45 +163,20 @@ Gesamte Suite nach der Ergänzung erneut komplett gelaufen (Owner, Step 5-Nachtr
 
 ## Bugs Found
 
-### BUG-1: JOG während laufender Auto-Fahrt hebelt Watchdog UND Auto-Fahrt-Ankunftserkennung aus
-- **Severity:** High (von zwei der drei Lanes unabhängig so eingestuft; die Security-Lane hält Critical für vertretbar, da die Schiene keine Endanschläge hat — die Entscheidung, ob das für den Nutzer geschäftskritisch genug ist, liegt beim Owner/Nutzer)
-- **Steps to Reproduce** (aus dem Code, nicht auf Hardware ausgeführt):
-  1. Start und Ende setzen, zum Startpunkt joggen
-  2. „Start → Ende" antippen
-  3. Innerhalb von ca. 100 ms (vor Eintreffen des `driving=true`-Notify) „▲ Vorwärts" gedrückt halten, dann loslassen — ODER die App währenddessen einfrieren/das folgende STOP unterdrücken
-  4. Erwartet: Fahrt läuft plangemäß zu Ende, oder JOG wird abgelehnt/wirkungslos
-  5. Tatsächlich (laut Code): `moveTo()` wird zu einem unbegrenzten Dauerlauf, weder Watchdog noch Ankunftserkennung greifen mehr
-- **Priority:** Fix before deployment
+### Previously Fixed
+- **BUG-1** — JOG während laufender Auto-Fahrt hebelt Watchdog UND Auto-Fahrt-Ankunftserkennung aus — Severity: High
+- **BUG-2** — Auto-Fahrt kommt wegen ignorierter Beschleunigungsrampe später an als die eingegebene Dauer — Severity: Medium
+- **BUG-3** — App validiert die Dauer ungerundet, Firmware gerundet — Grenzwerte scheitern stillschweigend — Severity: Medium
+- **BUG-5** — Disconnect-Stopp-Garantie (AC-10) durch unbeteiligtes Zweitgerät aushebelbar — Severity: Medium
+- **BUG-6** — Jeder BLE-Connect löscht Start-/Endpunkt, nicht nur ein Reconnect der eigenen App — Severity: Medium
+- **BUG-7** — Bond-Verdrängung (Just Works, max. 3 Bonds) kann die App aussperren, auch für STOP — Severity: Medium
 
-### BUG-2: Auto-Fahrt kommt wegen ignorierter Beschleunigungsrampe später an als die eingegebene Dauer
-- **Severity:** Medium
-- **Steps to Reproduce:** Punkte 40 000 Steps auseinander setzen, Dauer „10" eingeben, Fahrt auslösen, Ankunftszeit messen. Erwartet: 10,0 s. Laut Formel: ca. 10,5 s (5 % Abweichung, wächst mit der Speed).
-- **Priority:** Fix before deployment (spec.md schließt „stille Abweichung" explizit aus)
-
-### BUG-3: App validiert die Dauer ungerundet, Firmware gerundet — Grenzwerte scheitern stillschweigend
-- **Severity:** Medium
-- **Steps to Reproduce:** Distanz 50100 Steps, Dauer „12.53" eingeben (App zeigt keinen Fehler), Fahrt auslösen. Erwartet: Fahrt startet oder App zeigt Fehler. Tatsächlich: Firmware lehnt (gerundet 125 ds → 4008 steps/s > 4000) kommentarlos ab, nichts passiert.
-- **Priority:** Fix before deployment
+Details und Fix-Verlauf: siehe „Re-Verifikation" unten.
 
 ### BUG-4: Angezeigter Dauer-Bereich in der Fehlermeldung ist an den Grenzen widersprüchlich
 - **Severity:** Low
 - **Steps to Reproduce:** Distanz 50100 Steps, ungültige Dauer eingeben → Meldung „erlaubt: 12.5–250.5 s" erscheint, obwohl genau 12,5 s (wegen BUG-3) tatsächlich abgelehnt wird.
 - **Priority:** Nice to have (hängt an BUG-3s Fix)
-
-### BUG-5: Disconnect-Stopp-Garantie (AC-10) durch unbeteiligtes Zweitgerät aushebelbar
-- **Severity:** Medium
-- **Steps to Reproduce:** Ein zweites BLE-Gerät verbindet sich mit dem Slider (kein Bonding nötig), während die App eine Auto-Fahrt fährt. App-Verbindung trennen. Erwartet: Firmware stoppt sofort (AC-10). Tatsächlich: `getConnectedCount() != 0`, kein Stopp — Fahrt läuft bis zum Ziel weiter.
-- **Priority:** Fix before deployment
-
-### BUG-6: Jeder BLE-Connect löscht Start-/Endpunkt, nicht nur ein Reconnect der eigenen App
-- **Severity:** Medium
-- **Steps to Reproduce:** Punkte setzen, ein beliebiges zweites BLE-Gerät verbindet sich mit dem Slider. Erwartet: Punkte bleiben (EC-3 meint nur echte App-Reconnects). Tatsächlich: `onConnect` löscht sie für jede neue Verbindung.
-- **Priority:** Fix before deployment
-
-### BUG-7: Bond-Verdrängung (Just Works, max. 3 Bonds) kann die App aussperren, auch für STOP
-- **Severity:** Medium
-- **Steps to Reproduce:** Drei fremde BLE-Geräte pairen nacheinander mit dem Slider. Erwartet: App bleibt bedienbar. Tatsächlich: App-Bond wird verdrängt, alle Writes (inkl. STOP) scheitern an `WRITE_ENC`, bis der Nutzer die Kopplung in Android manuell entfernt.
-- **Priority:** Fix in next sprint
 
 ### BUG-8: AUTO_DRIVE-Richtungsbyte nicht streng validiert
 - **Severity:** Low
