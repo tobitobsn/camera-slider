@@ -256,8 +256,12 @@ void bleSetup(bool resetBonds) {
     // and overflow now rejected rather than evicted (below), a slot
     // occupied by the wrong device had no way back except erasing flash.
     // Called before anything can connect, so it can't race a real pairing.
-    NimBLEDevice::deleteAllBonds();
-    Serial.println("BLE: BOOT button held at startup - all stored bonds deleted");
+    // qa-report.md BUG-7 re-verification round 3 (NEU-B): check the result
+    // instead of always claiming success — deleteAllBonds() can fail on an
+    // underlying NVS error.
+    const bool deleted = NimBLEDevice::deleteAllBonds();
+    Serial.println(deleted ? "BLE: BOOT button pressed - all stored bonds deleted"
+                            : "BLE: BOOT button pressed - deleting stored bonds FAILED");
   }
 
   // qa-report.md BUG-7: reject a bond-storage overflow instead of the

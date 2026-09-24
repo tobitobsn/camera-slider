@@ -35,7 +35,7 @@ const ACCELERATION_STEPS_PER_SEC2 = 8000;
  * exact value sits right on it, independent of the numerically-stable form
  * below. Keeping both sides' tolerance identical is what makes them agree.
  */
-const AUTO_DRIVE_SPEED_TOLERANCE_STEPS_PER_SEC = 0.1;
+const AUTO_DRIVE_SPEED_TOLERANCE_STEPS_PER_SEC = 0.01;
 
 const DEFAULT_DURATION_TEXT = '10';
 

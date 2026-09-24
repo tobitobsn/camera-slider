@@ -41,7 +41,13 @@ constexpr float kJogSpeedMaxHz = 4000.0f;
 // AutoDriveControls.tsx, absorbs that; it doesn't move the actual
 // commanded speed (motorAutoDrive() rounds to the nearest integer Hz
 // before calling setSpeedInHz() — well inside a 0.5 Hz margin).
-constexpr float kAutoDriveSpeedToleranceHz = 0.1f;
+// qa-report.md BUG-7 re-verification round 3 (NEU-D): 0.01 still clears
+// the actual float32 error (roughly 1e-5 to 4e-4 across the 200-4000
+// range) by a wide margin, while barely nudging the duration range
+// AutoDriveControls.tsx displays to the user away from what it actually
+// accepts — a larger tolerance (0.1, the first value tried) widened that
+// gap far more than the precision problem it was closing required.
+constexpr float kAutoDriveSpeedToleranceHz = 0.01f;
 
 // Watchdog — design.md AC-6/EC-4: more than ~3 missed 300ms JOG heartbeats
 // (1000ms) while running stops the motor on its own.

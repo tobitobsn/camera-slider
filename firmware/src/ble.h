@@ -22,8 +22,11 @@
 // swap, or a leftover bond from firmware built before this fix with a
 // higher MAX_BONDS), there is otherwise no way back short of erasing the
 // whole flash. Pass true to wipe all stored bonds before anything can
-// connect — main.cpp wires this to the BOOT button held during power-on,
-// the standard ESP32 escape hatch for exactly this kind of reset.
+// connect — main.cpp wires this to the BOOT button pressed within a short
+// window right after power-on (never *during* power-on itself: GPIO0 is
+// also a strapping pin the ROM bootloader reads at that exact instant, so
+// holding it then would boot into UART download mode instead of running
+// this firmware at all — see main.cpp's kBootButtonWindowMs).
 void bleSetup(bool resetBonds);
 
 // Returns true if a central (the paired app) is currently connected.
