@@ -65,6 +65,18 @@ void motorWatchdogCheck();
 void motorSetStart();
 void motorSetEnd();
 
+// PROJ-4: derives the end point from the already-set start point plus a
+// distance, instead of reading the carriage's current physical position
+// (unlike motorSetEnd() above) — for loading a saved preset, where the
+// preset remembers a distance and the user only re-jogs to a fresh start
+// point; the firmware computes where the end must be from there.
+// endPosition = startPosition +/- distanceSteps, depending on
+// endIsAfterStart. No-op (refuses, doesn't set hasEnd) if:
+//   - the stepper isn't initialized, or is currently running
+//   - autoDriving is true
+//   - there is no start point yet (!hasStart)
+void motorSetEndFromDistance(bool endIsAfterStart, uint32_t distanceSteps);
+
 // Clears hasStart/hasEnd (and therefore makes atStart/atEnd/distanceSteps
 // meaningless until re-set). Called by ble.cpp's onConnect per design.md
 // (EC-3: no persistence across an app restart or a BLE reconnect).
@@ -114,6 +126,8 @@ void motorAutoDriveCheck();
 //   driving              — an auto-drive is currently in progress
 //   distanceSteps        — |endPosition - startPosition|; only meaningful
 //                          when both hasStart and hasEnd are true
+//   endIsAfterStart      — true when endPosition >= startPosition; only
+//                          meaningful when both hasStart and hasEnd are true
 struct MotorStatus {
   bool hasStart;
   bool hasEnd;
@@ -121,6 +135,7 @@ struct MotorStatus {
   bool atEnd;
   bool driving;
   uint32_t distanceSteps;
+  bool endIsAfterStart;
 };
 
 MotorStatus motorGetStatus();
