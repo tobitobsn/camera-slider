@@ -28,7 +28,7 @@
 | PROJ-1 | BLE-Verbindung & Pairing | App verbindet sich per Bluetooth mit dem ESP32 und zeigt den Verbindungsstatus | Deployed | [features/PROJ-1-ble-verbindung-pairing/](PROJ-1-ble-verbindung-pairing/) | 2026-09-22 |
 | PROJ-2 | Manuelle Steuerung (Jog) | Slider per App manuell in beide Richtungen fahren, mit einstellbarer Geschwindigkeit | Deployed | [features/PROJ-2-manuelle-steuerung-jog/](PROJ-2-manuelle-steuerung-jog/) | 2026-09-22 |
 | PROJ-3 | Start-/Endpunkt & Auto-Fahrt | Start- und Endpunkt setzen und automatische Fahrt dazwischen mit einstellbarer Geschwindigkeit/Dauer auslösen | Deployed | [features/PROJ-3-start-endpunkt-auto-fahrt/](PROJ-3-start-endpunkt-auto-fahrt/) | 2026-09-22 |
-| PROJ-4 | Presets verwalten | Mehrere benannte Fahrt-Profile lokal speichern, laden und löschen | Roadmap | — | 2026-09-22 |
+| PROJ-4 | Presets verwalten | Mehrere benannte Fahrt-Profile lokal speichern, laden und löschen | Planned | [features/PROJ-4-presets-verwalten/](PROJ-4-presets-verwalten/) | 2026-09-22 |
 | PROJ-5 | Zeitraffer-Modus | Schrittweise Fahrt mit automatischer Kameraauslösung für Zeitraffer-Aufnahmen | Roadmap | — | 2026-09-22 |
 
 **Build order:** _P0 (MVP): PROJ-1 → PROJ-2 → PROJ-3 · P1: PROJ-4 (needs PROJ-3), PROJ-5 (needs PROJ-3)_
