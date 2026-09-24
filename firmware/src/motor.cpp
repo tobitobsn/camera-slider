@@ -4,6 +4,8 @@
 #include <FastAccelStepper.h>
 #include <TMCStepper.h>
 
+#include <math.h>
+
 namespace {
 
 // Wiring — docs/stacks/firmware-esp32-tmc2209.md "Verkabelung TMC2209 ↔
@@ -140,7 +142,16 @@ void motorSetup() {
 }
 
 void motorJog(JogDirection direction, uint8_t speedPercent) {
-  if (stepper == nullptr) {
+  // qa-report.md BUG-1: a JOG arriving while an auto-drive is in progress
+  // used to turn moveTo()'s targeted move into an unbounded continuous run
+  // (runForward()/runBackward() supersede a moveTo(), FastAccelStepper.h),
+  // and since autoDriving stayed true, both motorAutoDriveCheck()'s arrival
+  // detection (isRunning() never goes false again) and
+  // motorWatchdogCheck()'s 1s timeout (returns early while autoDriving) went
+  // silent — the motor then only stopped on an explicit STOP or a full
+  // disconnect. Same defense-in-depth the firmware already applies to
+  // motorSetStart()/motorSetEnd() via their isRunning() guard.
+  if (stepper == nullptr || autoDriving) {
     return;
   }
 
@@ -279,7 +290,31 @@ void motorAutoDrive(JogDirection direction, uint16_t durationDeciseconds) {
 
   const float durationSeconds =
       static_cast<float>(durationDeciseconds) / 10.0f;
-  const float speedHz = static_cast<float>(distanceSteps) / durationSeconds;
+
+  // qa-report.md BUG-2: speed = distance/duration ignores the acceleration
+  // ramp, so the real trapezoidal move (accelerate, cruise, decelerate)
+  // takes longer than the requested duration by roughly speed/kAcceleration
+  // on each end — spec.md's Decision Log explicitly rules out a silent
+  // deviation from the entered duration. Solve for the cruise speed that
+  // makes the *actual* trapezoidal time equal durationSeconds instead:
+  //   durationSeconds = distance/speed + speed/a
+  //   speed^2 - (a*durationSeconds)*speed + a*distance = 0
+  // The smaller root is the physically valid one (keeps speed^2/a <=
+  // distance, i.e. a genuine trapezoidal profile with a flat cruise
+  // portion rather than a triangular one); it converges to the old
+  // distance/duration formula as the ramp time becomes negligible. A
+  // negative discriminant means durationSeconds is below the absolute
+  // minimum time reachable at this acceleration for this distance
+  // (2*sqrt(distance/a), the pure-triangular case) — impossible at any
+  // speed, not just outside the 200-4000 steps/s range.
+  const float aTimesDuration = static_cast<float>(kAcceleration) * durationSeconds;
+  const float discriminant = aTimesDuration * aTimesDuration -
+      4.0f * static_cast<float>(kAcceleration) * static_cast<float>(distanceSteps);
+  if (discriminant < 0.0f) {
+    // AC-6: duration too short to reach even at the fastest possible speed.
+    return;
+  }
+  const float speedHz = (aTimesDuration - sqrtf(discriminant)) / 2.0f;
   if (speedHz < kJogSpeedMinHz || speedHz > kJogSpeedMaxHz) {
     // AC-6: requested duration would need a speed outside 200-4000 steps/s.
     return;

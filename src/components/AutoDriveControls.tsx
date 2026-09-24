@@ -21,7 +21,83 @@ import { useSliderStatus } from './useSliderStatus';
 const MIN_SPEED_STEPS_PER_SEC = 200;
 const MAX_SPEED_STEPS_PER_SEC = 4000;
 
+/**
+ * Mirrors firmware/src/motor.cpp's kAcceleration (steps/s^2) — needed here
+ * (qa-report.md BUG-2) so the app's notion of "what duration is achievable"
+ * matches what the firmware will actually do, not just distance/speed.
+ */
+const ACCELERATION_STEPS_PER_SEC2 = 8000;
+
 const DEFAULT_DURATION_TEXT = '10';
+
+/**
+ * Mirrors firmware/src/motor.cpp's motorAutoDrive() speed-solving exactly
+ * (qa-report.md BUG-2): distance/duration ignores that the real move
+ * accelerates and decelerates, so it silently arrives later than the
+ * entered duration (spec.md's Decision Log rules that out). Solving
+ * `duration = distance/speed + speed/acceleration` for speed instead makes
+ * the actual trapezoidal move land on the entered duration exactly. Returns
+ * null when durationSeconds is below the physical minimum for this distance
+ * at this acceleration (2*sqrt(distance/acceleration), the pure-triangular
+ * case) — impossible at any speed, not just out of the 200-4000 range.
+ */
+export function solveAutoDriveSpeedStepsPerSec(
+  distanceSteps: number,
+  durationSeconds: number,
+): number | null {
+  const accelTimesDuration = ACCELERATION_STEPS_PER_SEC2 * durationSeconds;
+  const discriminant =
+    accelTimesDuration * accelTimesDuration - 4 * ACCELERATION_STEPS_PER_SEC2 * distanceSteps;
+  if (discriminant < 0) {
+    return null;
+  }
+  return (accelTimesDuration - Math.sqrt(discriminant)) / 2;
+}
+
+/**
+ * The fastest a move of this distance can ever complete, given the 4000
+ * steps/s cap and the shared acceleration — used as the lower bound of the
+ * displayed valid-duration range. Below the cap-relevant distance
+ * (MAX_SPEED_STEPS_PER_SEC^2 / ACCELERATION_STEPS_PER_SEC2 = 2000 steps),
+ * the move never reaches the speed cap at all (a pure triangular profile),
+ * so the achievable minimum is the physical floor
+ * `2*sqrt(distance/acceleration)`, not distance/maxSpeed + maxSpeed/accel.
+ */
+export function minAutoDriveDurationSeconds(distanceSteps: number): number {
+  const peakSpeedIfUncapped = Math.sqrt(ACCELERATION_STEPS_PER_SEC2 * distanceSteps);
+  if (peakSpeedIfUncapped <= MAX_SPEED_STEPS_PER_SEC) {
+    return 2 * Math.sqrt(distanceSteps / ACCELERATION_STEPS_PER_SEC2);
+  }
+  return (
+    distanceSteps / MAX_SPEED_STEPS_PER_SEC + MAX_SPEED_STEPS_PER_SEC / ACCELERATION_STEPS_PER_SEC2
+  );
+}
+
+/**
+ * The slowest a move of this distance can go at the 200 steps/s floor —
+ * used as the upper bound of the displayed valid-duration range. Always the
+ * plain trapezoidal formula: for any real slider distance, 200 steps/s is
+ * far below the unconstrained-optimum speed, so the move always actually
+ * cruises at 200 steps/s rather than falling short of it (the triangular
+ * case from the minimum side doesn't have an analogous case up here).
+ */
+export function maxAutoDriveDurationSeconds(distanceSteps: number): number {
+  return (
+    distanceSteps / MIN_SPEED_STEPS_PER_SEC + MIN_SPEED_STEPS_PER_SEC / ACCELERATION_STEPS_PER_SEC2
+  );
+}
+
+/**
+ * Rounds to the same precision sendAutoDriveCommand() (src/ble/client.ts)
+ * actually transmits (tenths of a second) — qa-report.md BUG-3: validating
+ * the raw, unrounded input let values right at the boundary look valid in
+ * the UI while the firmware, which only ever sees the rounded value,
+ * silently rejected them with no feedback. Validating this rounded value
+ * instead keeps the UI's verdict and the firmware's verdict in sync.
+ */
+function roundToDeciseconds(seconds: number): number {
+  return Math.round(seconds * 10) / 10;
+}
 
 /**
  * Parses the duration text field into seconds. Accepts both '.' and ',' as
@@ -82,19 +158,28 @@ export function AutoDriveControls() {
     status.distanceSteps > 0;
 
   const minDurationSeconds = rangeAvailable
-    ? (status.distanceSteps as number) / MAX_SPEED_STEPS_PER_SEC
+    ? minAutoDriveDurationSeconds(status.distanceSteps as number)
     : null;
   const maxDurationSeconds = rangeAvailable
-    ? (status.distanceSteps as number) / MIN_SPEED_STEPS_PER_SEC
+    ? maxAutoDriveDurationSeconds(status.distanceSteps as number)
     : null;
+
+  // BUG-2/BUG-3 fix: validate the same rounded value the firmware will
+  // actually see, via the same speed-solving formula the firmware uses —
+  // not a naive min/max-range comparison against the unrounded input.
+  const requestedSpeedStepsPerSec =
+    rangeAvailable && durationSeconds !== null
+      ? solveAutoDriveSpeedStepsPerSec(
+          status.distanceSteps as number,
+          roundToDeciseconds(durationSeconds),
+        )
+      : null;
 
   const durationValid =
     rangeAvailable &&
-    durationSeconds !== null &&
-    minDurationSeconds !== null &&
-    maxDurationSeconds !== null &&
-    durationSeconds >= minDurationSeconds &&
-    durationSeconds <= maxDurationSeconds;
+    requestedSpeedStepsPerSec !== null &&
+    requestedSpeedStepsPerSec >= MIN_SPEED_STEPS_PER_SEC &&
+    requestedSpeedStepsPerSec <= MAX_SPEED_STEPS_PER_SEC;
 
   // AC-6: only complain once the range is actually known and the user has
   // typed something — an empty field or missing points aren't "an invalid

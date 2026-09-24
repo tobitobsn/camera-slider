@@ -1,4 +1,11 @@
-import { formatSeconds, parseDurationSeconds, statusLabelFor } from './AutoDriveControls';
+import {
+  formatSeconds,
+  maxAutoDriveDurationSeconds,
+  minAutoDriveDurationSeconds,
+  parseDurationSeconds,
+  solveAutoDriveSpeedStepsPerSec,
+  statusLabelFor,
+} from './AutoDriveControls';
 import type { SliderStatus } from '../ble/client';
 
 const BASE_STATUS: SliderStatus = {
@@ -63,6 +70,61 @@ describe('formatSeconds', () => {
 
   it('formats a whole number with a trailing .0', () => {
     expect(formatSeconds(10)).toBe('10.0');
+  });
+});
+
+describe('solveAutoDriveSpeedStepsPerSec', () => {
+  it('solves a higher speed than naive distance/duration to compensate for the ramp', () => {
+    // qa-report.md BUG-2 repro: naively distance/duration = 2000 steps/s,
+    // which would actually arrive at 4000/2000 + 2000/8000 = 2.25s, late.
+    const speed = solveAutoDriveSpeedStepsPerSec(4000, 2);
+    expect(speed).not.toBeNull();
+    expect(speed as number).toBeCloseTo(2343.1457505076196, 6);
+  });
+
+  it('returns exactly the min-speed boundary at maxAutoDriveDurationSeconds', () => {
+    const speed = solveAutoDriveSpeedStepsPerSec(4000, maxAutoDriveDurationSeconds(4000));
+    expect(speed).not.toBeNull();
+    expect(speed as number).toBeCloseTo(200, 6);
+  });
+
+  it('returns exactly the max-speed boundary at minAutoDriveDurationSeconds (cap-limited distance)', () => {
+    const speed = solveAutoDriveSpeedStepsPerSec(4000, minAutoDriveDurationSeconds(4000));
+    expect(speed).not.toBeNull();
+    expect(speed as number).toBeCloseTo(4000, 6);
+  });
+
+  it('returns null when the duration is below the physical minimum for the distance', () => {
+    // qa-report.md BUG-2: 1000 steps can never complete in 0.1s at 8000
+    // steps/s^2 acceleration, no matter how fast the cruise speed — the
+    // physical floor is 2*sqrt(1000/8000) ≈ 0.707s.
+    expect(solveAutoDriveSpeedStepsPerSec(1000, 0.1)).toBeNull();
+  });
+
+  it('would previously have silently accepted a too-short duration (regression guard)', () => {
+    // The old distance/duration formula gave exactly 4000 steps/s here —
+    // inside the valid range — even though the real trapezoidal move takes
+    // 10.5s, not 10s. The fixed formula must reject it instead.
+    expect(solveAutoDriveSpeedStepsPerSec(40000, 10)).toBeGreaterThan(4000);
+  });
+});
+
+describe('minAutoDriveDurationSeconds / maxAutoDriveDurationSeconds', () => {
+  it('uses the trapezoidal-at-max-speed formula once the cap is reachable', () => {
+    // 4000 steps: peak speed sqrt(8000*4000) = 5656.8 > 4000, so the cap is
+    // reachable and binding.
+    expect(minAutoDriveDurationSeconds(4000)).toBeCloseTo(1.5, 6);
+  });
+
+  it('falls back to the physical (triangular) floor below the cap-relevant distance', () => {
+    // 1000 steps: peak speed sqrt(8000*1000) ≈ 2828 < 4000, so the move
+    // never reaches the cap — the floor is the pure acceleration/deceleration
+    // profile, not distance/maxSpeed + maxSpeed/acceleration.
+    expect(minAutoDriveDurationSeconds(1000)).toBeCloseTo(2 * Math.sqrt(1000 / 8000), 6);
+  });
+
+  it('computes the slowest duration at the 200 steps/s floor', () => {
+    expect(maxAutoDriveDurationSeconds(4000)).toBeCloseTo(20.025, 6);
   });
 });
 

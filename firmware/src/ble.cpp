@@ -62,7 +62,6 @@ void packStatusPayload(const MotorStatus& status, uint8_t out[5]) {
 
 class ServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
-    (void)pServer;
     (void)connInfo;
     gConnected = true;
     Serial.println("BLE: client connected");
@@ -71,7 +70,15 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     // the firmware's start/end points, since the app's own idea of them
     // resets too and nothing here is persisted (design.md's added
     // Technical Decision row on this exact gap).
-    motorClearPoints();
+    // qa-report.md BUG-6: only clear on the connect that starts a fresh
+    // session (0 -> 1 connected centrals), not on every onConnect — up to
+    // 3 centrals can be connected at once (see the BUG-4 note below), so
+    // without this guard an unrelated second device connecting alongside
+    // an already-connected app would silently wipe the app's own points
+    // mid-session, including mid-drive.
+    if (pServer->getConnectedCount() == 1) {
+      motorClearPoints();
+    }
     // BUG-4 fix (qa-report.md): NimBLE only restarts advertising after a
     // disconnect or a *failed* connection attempt, never after a successful
     // one (confirmed in the vendored NimBLEServer.cpp — the connect event's
@@ -91,25 +98,19 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     (void)connInfo;
     (void)reason;
     Serial.println("BLE: client disconnected, restarting advertising");
-    // QA finding N-1 (qa-report.md): since the BUG-4 fix keeps advertising
-    // running while a central is connected, up to 3 devices can now be
-    // connected at once (NimBLE's default CONFIG_BT_NIMBLE_MAX_CONNECTIONS).
-    // Before that fix this callback firing at all meant "the one peer is
-    // gone" — now it can just as easily mean "some unrelated device that
-    // briefly connected is gone, while the app is still here." Only treat
-    // it as a real loss of control once NO central remains connected;
-    // getConnectedCount() already reflects this disconnect (the peer is
-    // removed from the server's list before onDisconnect fires — confirmed
-    // in the vendored NimBLEServer.cpp's BLE_GAP_EVENT_DISCONNECT handler).
-    // Erring toward stopping when in doubt about the app's own connection
-    // is still the safe default, just no longer triggered by an unrelated
-    // stranger's connect/disconnect.
+    // AC-5/EC-3/AC-10: the firmware must stop the motor independently of
+    // the app when the connection drops, not wait for a STOP that will
+    // never come. qa-report.md BUG-5: this used to be gated on
+    // getConnectedCount() == 0 — since the BUG-4 fix keeps advertising
+    // running while a central is connected, up to 3 devices can be
+    // connected at once, and an unrelated second device staying connected
+    // silently suppressed the safety stop AC-10 promises whenever the
+    // app's own connection dropped. A stop is always safe to issue even
+    // when nothing is moving, so it now runs unconditionally on every
+    // disconnect, regardless of who else is still connected.
+    motorStop();
     if (pServer->getConnectedCount() == 0) {
       gConnected = false;
-      // AC-5/EC-3: the firmware must stop the motor independently of the
-      // app when the connection drops, not wait for a STOP that will never
-      // come.
-      motorStop();
     }
     // The app auto-reconnects by scanning again, so we must be discoverable
     // again as soon as the link drops.
