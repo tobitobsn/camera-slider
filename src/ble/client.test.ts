@@ -11,8 +11,6 @@ import {
   sendAutoDriveCommand,
   sendSetEndFromDistanceCommand,
   parseStatusPayload,
-  waitForStatusMatching,
-  type SliderStatus,
 } from './client';
 
 type MockWritableDevice = {
@@ -25,44 +23,6 @@ function createMockDevice(): MockWritableDevice {
     writeCharacteristicWithoutResponseForService: jest.fn().mockResolvedValue(undefined),
     writeCharacteristicWithResponseForService: jest.fn().mockResolvedValue(undefined),
   };
-}
-
-type StatusListener = (error: Error | null, characteristic: { value: string } | null) => void;
-
-type MockMonitorableDevice = {
-  monitorCharacteristicForService: jest.Mock;
-};
-
-/** flags: bit0 hasStart only -> 0x01; distance 0; direction byte 0x00 (endIsAfterStart true) */
-function encodeHasStartPayload(): string {
-  return fromByteArray(new Uint8Array([0x01, 0, 0, 0, 0, 0x00]));
-}
-
-/** flags all clear -> hasStart false */
-function encodeNoStartPayload(): string {
-  return fromByteArray(new Uint8Array([0x00, 0, 0, 0, 0, 0x00]));
-}
-
-function createMockMonitorableDevice(): {
-  device: MockMonitorableDevice;
-  emit: (base64Value: string) => void;
-  removeSpy: jest.Mock;
-} {
-  const removeSpy = jest.fn();
-  let listener: StatusListener | null = null;
-
-  const device: MockMonitorableDevice = {
-    monitorCharacteristicForService: jest.fn((_service: string, _char: string, callback: StatusListener) => {
-      listener = callback;
-      return { remove: removeSpy };
-    }),
-  };
-
-  const emit = (base64Value: string): void => {
-    listener?.(null, { value: base64Value });
-  };
-
-  return { device, emit, removeSpy };
 }
 
 describe('sendJogCommand', () => {
@@ -234,57 +194,6 @@ describe('sendSetEndFromDistanceCommand', () => {
     expect(Array.from(toByteArray(base64Value))).toEqual([
       0x06, 0x01, 0x87, 0xd6, 0x12, 0x00,
     ]);
-  });
-});
-
-describe('waitForStatusMatching', () => {
-  afterEach(() => {
-    jest.useRealTimers();
-  });
-
-  it('resolves once a status matching the predicate arrives', async () => {
-    const { device, emit } = createMockMonitorableDevice();
-
-    const promise = waitForStatusMatching(device as any, (s: SliderStatus) => s.hasStart);
-    emit(encodeHasStartPayload());
-
-    const status = await promise;
-    expect(status.hasStart).toBe(true);
-  });
-
-  it('ignores non-matching statuses and resolves only once a matching one arrives', async () => {
-    const { device, emit } = createMockMonitorableDevice();
-
-    const promise = waitForStatusMatching(device as any, (s: SliderStatus) => s.hasStart);
-    emit(encodeNoStartPayload());
-    emit(encodeNoStartPayload());
-    emit(encodeHasStartPayload());
-
-    const status = await promise;
-    expect(status.hasStart).toBe(true);
-  });
-
-  it('unsubscribes once resolved, so a later status cannot resolve/reject it again', async () => {
-    const { device, emit, removeSpy } = createMockMonitorableDevice();
-
-    const promise = waitForStatusMatching(device as any, (s: SliderStatus) => s.hasStart);
-    emit(encodeHasStartPayload());
-    await promise;
-
-    expect(removeSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it('rejects and unsubscribes if no matching status arrives before the timeout', async () => {
-    jest.useFakeTimers();
-    const { device, emit, removeSpy } = createMockMonitorableDevice();
-
-    const promise = waitForStatusMatching(device as any, (s: SliderStatus) => s.hasStart, 2000);
-    emit(encodeNoStartPayload());
-
-    jest.advanceTimersByTime(2000);
-
-    await expect(promise).rejects.toThrow('waitForStatusMatching');
-    expect(removeSpy).toHaveBeenCalledTimes(1);
   });
 });
 

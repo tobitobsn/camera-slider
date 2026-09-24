@@ -66,13 +66,22 @@ constexpr unsigned long kWatchdogTimeoutMs = 1000;
 // "Software-Endanschläge" describes the latter — a minSteps/maxSteps clamp
 // on every moveTo(), from an actual home position; that is a larger,
 // separate change this fix does not attempt). Measured 2026-09-24: 480mm
-// usable travel, GT2 20-tooth pulley, 200 full steps x 16 microsteps -> 80
-// steps/mm (docs/stacks/firmware-esp32-tmc2209.md "Kalibrierung /
-// Steps-pro-mm"): 480 * 80 = 38400 steps. A side effect: this also closes
-// qa-report.md BUG-2 (the unchecked static_cast<int32_t> of a uint32_t
-// distanceSteps that could exceed INT32_MAX) — any value large enough to
-// overflow is already far past this bound and rejected first.
-constexpr uint32_t kMaxPlausibleDistanceSteps = 38400;
+// usable travel, GT2 20-tooth pulley. qa-report.md re-verification NEU-1:
+// the first version of this constant used the stack pack's generic example
+// formula literally ("200 full steps x 16") instead of this project's own,
+// already-documented motor — the 42BYGHM809 is 0.9 deg/step, i.e. 400 full
+// steps/rev (docs/PRD.md, and this file's own kMicrosteps comment above:
+// "400 full steps x 16 = 6400 steps/rev") — a 2x error that silently
+// rejected any preset past ~240mm. Correct: 6400 steps/rev / (20 teeth * 2mm
+// GT2 pitch) = 160 steps/mm; 480 * 160 = 76800 steps. (The stack pack's own
+// formula at docs/stacks/firmware-esp32-tmc2209.md's "Kalibrierung /
+// Steps-pro-mm" section still says 200 and contradicts that same file's
+// motor spec a few lines above it — worth fixing there too, out of scope
+// for this constant.) A side effect: this also closes qa-report.md BUG-2
+// (the unchecked static_cast<int32_t> of a uint32_t distanceSteps that
+// could exceed INT32_MAX) — any value large enough to overflow is already
+// far past this bound and rejected first.
+constexpr uint32_t kMaxPlausibleDistanceSteps = 76800;
 
 TMC2209Stepper driver(&Serial2, kRSense, kDriverAddress);
 FastAccelStepperEngine engine = FastAccelStepperEngine();

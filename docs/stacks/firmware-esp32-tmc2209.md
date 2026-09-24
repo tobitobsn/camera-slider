@@ -123,7 +123,7 @@ Die Umrechnung Schritte↔mm hängt von der Mechanik ab (Riemen-Zähnezahl, GT2-
 
 ```
 steps_per_mm = (Vollschritte_pro_Umdrehung × Mikroschritte) / (Zähnezahl_Riemenrad × Riementeilung_mm)
-             = (200 × 16) / (Zähnezahl × 2)
+             = (400 × 16) / (Zähnezahl × 2)
 ```
 
 Der konkrete Wert ist eine Kalibrierungs-Konstante in der Firmware, kein Architektur-Thema — wird gemessen (Sollstrecke fahren, tatsächliche Strecke messen, Wert korrigieren), sobald die Mechanik steht.
