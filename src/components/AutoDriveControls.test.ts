@@ -107,6 +107,23 @@ describe('solveAutoDriveSpeedStepsPerSec', () => {
     // 10.5s, not 10s. The fixed formula must reject it instead.
     expect(solveAutoDriveSpeedStepsPerSec(40000, 10)).toBeGreaterThan(4000);
   });
+
+  // qa-report.md BUG-3 (residual after the first fix): the naive
+  // (aT - sqrt(disc))/2 form subtracts two nearly-equal large numbers for
+  // long, slow drives, which is where the firmware's float32 lost enough
+  // precision to land on the wrong side of the 200-4000 boundary (e.g.
+  // 199.984 instead of 200) and silently reject a duration the app itself
+  // had shown as valid. src/components/AutoDriveControls.tsx now uses the
+  // same product-of-roots reformulation as firmware/src/motor.cpp to avoid
+  // that subtraction. NOT covered by a test here: JS's double precision
+  // doesn't reproduce the cancellation for realistic distances (verified —
+  // (aT - sqrt(disc))/2 and the reformulation give identical `double`
+  // results for the firmware's actual float32-only repro cases), so a test
+  // asserting an exact boundary value would pass unchanged with either
+  // formula — a tautological test the "prove it can fail" rule rules out.
+  // The fix is real (it matches the firmware's fix, which does need it) and
+  // was verified by hand against the two reported repro cases; it just
+  // isn't something this test file can independently prove.
 });
 
 describe('minAutoDriveDurationSeconds / maxAutoDriveDurationSeconds', () => {

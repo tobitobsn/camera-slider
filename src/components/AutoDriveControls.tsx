@@ -51,7 +51,18 @@ export function solveAutoDriveSpeedStepsPerSec(
   if (discriminant < 0) {
     return null;
   }
-  return (accelTimesDuration - Math.sqrt(discriminant)) / 2;
+  // qa-report.md BUG-3 (residual after the first fix): (aT - sqrt(disc))/2
+  // subtracts two nearly-equal large values whenever the ramp time is small
+  // relative to durationSeconds (long, slow drives near the 200 steps/s
+  // floor) — the exact regime the boundary-mismatch repros landed in,
+  // since the firmware's float32 and this function's double lose precision
+  // differently on that subtraction. Mirrors motor.cpp's fix: the
+  // product-of-roots identity (v_small * v_large = acceleration*distance,
+  // Vieta's formulas) avoids the subtraction — the sum
+  // accelTimesDuration + sqrt(discriminant) never cancels.
+  return (
+    (2 * ACCELERATION_STEPS_PER_SEC2 * distanceSteps) / (accelTimesDuration + Math.sqrt(discriminant))
+  );
 }
 
 /**

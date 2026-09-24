@@ -314,7 +314,18 @@ void motorAutoDrive(JogDirection direction, uint16_t durationDeciseconds) {
     // AC-6: duration too short to reach even at the fastest possible speed.
     return;
   }
-  const float speedHz = (aTimesDuration - sqrtf(discriminant)) / 2.0f;
+  // qa-report.md BUG-3 (residual after the first fix): (aT - sqrt(disc))/2
+  // subtracts two nearly-equal large values whenever the ramp time is small
+  // relative to durationSeconds (the common case — long, slow drives near
+  // the 200 steps/s floor), losing precision to catastrophic cancellation.
+  // The app (src/components/AutoDriveControls.tsx) validates the identical
+  // duration against the identical formula, so any extra imprecision here
+  // is exactly what makes a value the app accepted get silently rejected.
+  // Using the product-of-roots identity (v_small * v_large = a*distance,
+  // Vieta's formulas) instead avoids the subtraction entirely — the sum
+  // aTimesDuration + sqrt(discriminant) never cancels.
+  const float speedHz = (2.0f * static_cast<float>(kAcceleration) * static_cast<float>(distanceSteps)) /
+      (aTimesDuration + sqrtf(discriminant));
   if (speedHz < kJogSpeedMinHz || speedHz > kJogSpeedMaxHz) {
     // AC-6: requested duration would need a speed outside 200-4000 steps/s.
     return;

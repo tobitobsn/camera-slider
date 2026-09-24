@@ -95,20 +95,28 @@ class ServerCallbacks : public NimBLEServerCallbacks {
   }
 
   void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
-    (void)connInfo;
     (void)reason;
     Serial.println("BLE: client disconnected, restarting advertising");
     // AC-5/EC-3/AC-10: the firmware must stop the motor independently of
     // the app when the connection drops, not wait for a STOP that will
-    // never come. qa-report.md BUG-5: this used to be gated on
-    // getConnectedCount() == 0 — since the BUG-4 fix keeps advertising
-    // running while a central is connected, up to 3 devices can be
-    // connected at once, and an unrelated second device staying connected
-    // silently suppressed the safety stop AC-10 promises whenever the
-    // app's own connection dropped. A stop is always safe to issue even
-    // when nothing is moving, so it now runs unconditionally on every
-    // disconnect, regardless of who else is still connected.
-    motorStop();
+    // never come. qa-report.md BUG-5, first fix attempt: gating this on
+    // getConnectedCount() == 0 let an unrelated second device staying
+    // connected suppress the stop. That fix's own replacement — stopping
+    // unconditionally on every disconnect — went too far the other way
+    // (qa-report.md re-verification, independently found by two lanes): it
+    // let *any* nearby device interrupt a running jog or drive with a bare,
+    // unauthenticated connect+disconnect, no pairing required — a regression
+    // of PROJ-2's own N-1 fix. The command characteristic requires WRITE_ENC
+    // (BUG-3 fix, PROJ-2), so only a peer that actually completed the
+    // Just-Works encryption handshake could ever have been the one driving
+    // the motor — checking that this specific disconnecting connection was
+    // encrypted (not the aggregate connected count) covers the real AC-10
+    // case (the controlling peer drops, regardless of who else is still
+    // connected) without reacting to an unauthenticated stranger's
+    // connect/disconnect.
+    if (connInfo.isEncrypted()) {
+      motorStop();
+    }
     if (pServer->getConnectedCount() == 0) {
       gConnected = false;
     }
@@ -214,10 +222,39 @@ class StatusCharacteristicCallbacks : public NimBLECharacteristicCallbacks {
   }
 };
 
+// qa-report.md BUG-7: NimBLEDeviceCallbacks' default onStoreStatus()
+// (NimBLEDevice.cpp:1393-1395) delegates to ble_store_util_status_rr(),
+// which on a BLE_STORE_EVENT_OVERFLOW for a security record evicts the
+// *oldest* stored bond to make room (ble_store_util.c) and disconnects it
+// (ble_gap_unpair() -> ble_gap_terminate_with_conn(), vendored ble_gap.c) —
+// with CONFIG_BT_NIMBLE_MAX_BONDS=1 (platformio.ini) that oldest bond is
+// always the app's own, so a single unrelated Just-Works pairing attempt
+// would silently evict and disconnect it. This is a single-owner device
+// (docs/PRD.md) with exactly one intended bond: once that one slot is
+// taken, a later pairing attempt should be refused, not swap it out.
+// Returning a non-zero status from the overflow event makes
+// ble_store_write() fail the *new* peer's write instead of trying again
+// after the application "made room" (verified against the vendored
+// ble_store.c: ble_store_write()'s BLE_HS_ESTORE_CAP branch only retries
+// when ble_store_overflow_event()'s return value is 0).
+class DeviceCallbacks : public NimBLEDeviceCallbacks {
+  int onStoreStatus(struct ble_store_status_event* event, void* arg) override {
+    if (event->event_code == BLE_STORE_EVENT_OVERFLOW) {
+      return BLE_HS_ESTORE_CAP;  // reject the new bond instead of evicting the old one
+    }
+    return NimBLEDeviceCallbacks::onStoreStatus(event, arg);
+  }
+};
+
 }  // namespace
 
 void bleSetup() {
   NimBLEDevice::init(kDeviceName);
+
+  // qa-report.md BUG-7: reject a bond-storage overflow instead of the
+  // library's default (evict the oldest bond) — see DeviceCallbacks above.
+  // Registered right after init(), before anything can connect.
+  NimBLEDevice::setDeviceCallbacks(new DeviceCallbacks());
 
   // BUG-3 fix (qa-report.md): the command characteristic now actually drives
   // the motor, and this slider has no physical end stops (spec.md → Out of
