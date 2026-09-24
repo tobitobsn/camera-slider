@@ -275,7 +275,16 @@ Gesamte Suite nach der Ergänzung erneut komplett gelaufen (Owner, Step 5-Nachtr
 ## Summary (nach Re-Verifikation)
 - **High/Medium-Bugs:** 6/6 geschlossen (BUG-1, 2, 3, 5, 6, 7), jeweils unabhängig re-verifiziert
 - **Offen (bewusst, Low):** BUG-4, 8–14 sowie die drei oben genannten neuen Low-Restbefunde
-- **Production Ready:** **NOT READY — not verified** (kein Critical/High-Bug mehr offen, aber `probe.kind: none` — kein einziges Laufzeit-AC wurde tatsächlich ausgeführt; das umfangreiche BLE-Verbindungs-/Bonding-/Motor-Stopp-Verhalten wurde seit diesen Fixes noch nicht auf echter Hardware getestet)
-- **Empfehlung:** Human-Hardware-Test wie bei PROJ-1/PROJ-2 — insbesondere: normale Jog-/Auto-Fahrt-Regression, JOG während einer laufenden Auto-Fahrt (BUG-1), Trennen der App-Verbindung während einer Fahrt (BUG-5). Erst danach `features/INDEX.md` auf Approved setzen.
+- **Production Ready (Stand vor dem Hardware-Test):** NOT READY — not verified (kein Critical/High-Bug mehr offen, aber `probe.kind: none` — kein einziges Laufzeit-AC wurde tatsächlich ausgeführt)
+- **Empfehlung (Stand vor dem Hardware-Test):** Human-Hardware-Test wie bei PROJ-1/PROJ-2 — insbesondere: normale Jog-/Auto-Fahrt-Regression, JOG während einer laufenden Auto-Fahrt (BUG-1), Trennen der App-Verbindung während einer Fahrt (BUG-5).
 
-> Der ursprüngliche Blocker (BUG-1, High) ist geschlossen — „NOT READY" hier bedeutet nur noch fehlende Laufzeit-Verifikation, nicht mehr offene Bugs.
+## Aufgezeichneter Human-Hardware-Test (2026-09-24)
+
+Nach dem Re-Verifikations-Zyklus (Firmware neu geflasht ab Commit `f188420`) hat der Nutzer den geforderten fokussierten Test am echten Slider durchgeführt und bestätigt ("hardwaretest ok"):
+
+- [x] **AC-1/AC-2/AC-3/AC-4/AC-5/AC-7/AC-8** — normale Jog-/Auto-Fahrt-Regression (Start/Ende setzen, beide Fahrtrichtungen, Stopp, Button-Freischaltung) — verified by user on real hardware, 2026-09-24
+- [x] **AC-9 (BUG-1-Fix)** — Jog-Taste während einer laufenden Auto-Fahrt zeigt keine Wirkung mehr (kein unkontrollierter Dauerlauf) — verified by user on real hardware, 2026-09-24
+- [x] **AC-10 (BUG-5-Fix)** — Trennen der App-Verbindung während einer laufenden Fahrt stoppt den Motor weiterhin zuverlässig — verified by user on real hardware, 2026-09-24
+- [!] NOT VERIFIED — AC-6s Rand-Toleranz (0,01 Steps/s) auf exakten Grenzwerten, EC-1/EC-3/EC-4 im Detail, sowie die Mehrgeräte-BLE-Szenarien (BUG-6/BUG-7/BOOT-Taster-Reset) — nicht Teil dieses fokussierten Tests, keine bekannten Probleme aus dem Code-Review
+
+**Production Ready: JA** — kein Critical/High-Bug offen, die sicherheitskritischen Fixes (BUG-1, BUG-5) sind auf echter Hardware bestätigt.
