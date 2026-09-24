@@ -17,6 +17,7 @@ const INITIAL_STATUS: SliderStatus = {
   atStart: false,
   atEnd: false,
   driving: false,
+  endIsAfterStart: null,
   distanceSteps: null,
 };
 
@@ -26,6 +27,7 @@ const OTHER_STATUS: SliderStatus = {
   atStart: true,
   atEnd: false,
   driving: false,
+  endIsAfterStart: true,
   distanceSteps: 12345,
 };
 

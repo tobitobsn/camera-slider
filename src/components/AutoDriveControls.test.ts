@@ -14,6 +14,7 @@ const BASE_STATUS: SliderStatus = {
   atStart: false,
   atEnd: false,
   driving: false,
+  endIsAfterStart: null,
   distanceSteps: null,
 };
 

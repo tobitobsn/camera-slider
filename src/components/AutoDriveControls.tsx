@@ -1,9 +1,19 @@
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  Alert,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  ToastAndroid,
+  View,
+} from 'react-native';
 
 import {
   sendAutoDriveCommand,
   sendSetEndCommand,
+  sendSetEndFromDistanceCommand,
   sendSetStartCommand,
   sendStopCommand,
   type AutoDriveDirection,
@@ -12,6 +22,7 @@ import {
 import { useConnection } from '../connection/ConnectionProvider';
 import { colors, minTouchTarget, radius, spacing, typography } from '../theme/colors';
 import { useSliderStatus } from './useSliderStatus';
+import { usePresets, type Preset } from './usePresets';
 
 /**
  * Same 200-4000 steps/s range as PROJ-2's jog — verified against
@@ -167,9 +178,27 @@ export function statusLabelFor(status: SliderStatus): string {
 export function AutoDriveControls() {
   const { device } = useConnection();
   const status = useSliderStatus(device);
+  const { presets, save: savePresetToStorage, remove: removePresetFromStorage } = usePresets();
 
   const [durationText, setDurationText] = useState(DEFAULT_DURATION_TEXT);
   const durationSeconds = parseDurationSeconds(durationText);
+
+  // AC-4/AC-5: the distance + direction of a tapped preset row, remembered
+  // so "Als Start setzen" can derive the end point from it. Discarded again
+  // per design.md's Technische Entscheidungen: a manual "Als Ende setzen"
+  // (EC-3), loading a different preset (just overwritten below, no special
+  // code needed), or a disconnect (EC-5). Unlike useSliderStatus's own
+  // reset-on-null-device effect, no explicit disconnect-reset is needed
+  // here: RootScreen.tsx's switch only renders AutoDriveControls for the
+  // `connected` case, so leaving it unmounts this component entirely — a
+  // fresh mount already starts with loadedPreset === null.
+  const [loadedPreset, setLoadedPreset] = useState<{
+    distanceSteps: number;
+    endIsAfterStart: boolean;
+  } | null>(null);
+
+  const [saveDialogVisible, setSaveDialogVisible] = useState(false);
+  const [presetNameText, setPresetNameText] = useState('');
 
   const rangeAvailable =
     status.hasStart &&
@@ -221,15 +250,49 @@ export function AutoDriveControls() {
   const startToEndEnabled = autoDriveBaseEnabled && status.atStart;
   const endToStartEnabled = autoDriveBaseEnabled && status.atEnd;
 
+  // AC-1: unlike autoDriveBaseEnabled, saving a preset doesn't need the
+  // carriage to currently be at either endpoint (atStart/atEnd) — only that
+  // a complete, valid drive configuration exists to snapshot. Still locked
+  // while driving (via status.driving below), consistent with every other
+  // control in this component (AC-8's spirit).
+  const presetPreconditionMet =
+    status.hasStart &&
+    status.hasEnd &&
+    status.distanceSteps !== null &&
+    status.distanceSteps > 0 &&
+    durationValid;
+
   if (!device) {
     return null;
   }
 
-  const handleSetStart = () => {
-    sendSetStartCommand(device).catch(() => {});
+  // AC-5: when a preset is loaded, deriving the end point from it must wait
+  // for SET_START's own response before firing SET_END_FROM_DISTANCE — the
+  // firmware only knows the new start position once it has applied and
+  // acknowledged the first write (design.md's Technische Entscheidungen).
+  // Both writes share a single fire-and-forget error boundary, same as
+  // every other handler here: a failed SET_START must not also attempt to
+  // derive an end point from a start position that was never actually set.
+  const handleSetStart = async (): Promise<void> => {
+    try {
+      await sendSetStartCommand(device);
+      if (loadedPreset !== null) {
+        await sendSetEndFromDistanceCommand(
+          device,
+          loadedPreset.endIsAfterStart,
+          loadedPreset.distanceSteps,
+        );
+      }
+    } catch {
+      // fire-and-forget, matching this file's existing .catch(() => {})
+      // convention on every other handler
+    }
   };
 
   const handleSetEnd = () => {
+    // EC-3: a deliberate manual end-set always wins over a stale
+    // preset-derived one, regardless of whether the write itself succeeds.
+    setLoadedPreset(null);
     sendSetEndCommand(device).catch(() => {});
   };
 
@@ -242,6 +305,76 @@ export function AutoDriveControls() {
 
   const handleStop = () => {
     sendStopCommand(device).catch(() => {});
+  };
+
+  // AC-4: loading a preset always replaces whatever was loaded before —
+  // just overwriting loadedPreset covers that, no special-case code needed.
+  const handleLoadPreset = (preset: Preset) => {
+    setLoadedPreset({
+      distanceSteps: preset.distanceSteps,
+      endIsAfterStart: preset.endIsAfterStart,
+    });
+    setDurationText(formatSeconds(preset.durationSeconds));
+  };
+
+  const handleDeletePreset = (preset: Preset) => {
+    // AC-6: only confirming "Löschen" actually removes it.
+    Alert.alert('Preset löschen', `„${preset.name}“ wirklich löschen?`, [
+      { text: 'Abbrechen', style: 'cancel' },
+      {
+        text: 'Löschen',
+        style: 'destructive',
+        onPress: () => {
+          removePresetFromStorage(preset.id).catch(() => {
+            ToastAndroid.show('Preset konnte nicht gelöscht werden', ToastAndroid.SHORT);
+          });
+        },
+      },
+    ]);
+  };
+
+  const handleOpenSaveDialog = () => {
+    setSaveDialogVisible(true);
+  };
+
+  const handleCancelSavePreset = () => {
+    setSaveDialogVisible(false);
+    setPresetNameText('');
+  };
+
+  // AC-1/AC-2: only reachable once presetPreconditionMet is true (the
+  // button that calls this is only rendered then) and the trimmed name is
+  // non-empty (the dialog's Save button is disabled otherwise) — still
+  // guarded here defensively since status/durationSeconds are read fresh.
+  const handleConfirmSavePreset = () => {
+    const trimmedName = presetNameText.trim();
+    if (
+      trimmedName === '' ||
+      status.distanceSteps === null ||
+      status.endIsAfterStart === null ||
+      durationSeconds === null
+    ) {
+      return;
+    }
+
+    // Same rounding sendAutoDriveCommand() actually transmits (tenths of a
+    // second) — keeps a saved preset's duration consistent with what a
+    // drive triggered right now would actually use.
+    savePresetToStorage(
+      trimmedName,
+      status.distanceSteps,
+      status.endIsAfterStart,
+      roundToDeciseconds(durationSeconds),
+    )
+      .then(() => {
+        setSaveDialogVisible(false);
+        setPresetNameText('');
+        ToastAndroid.show('Preset gespeichert', ToastAndroid.SHORT);
+      })
+      .catch(() => {
+        // EC-4: keep the dialog open with the typed name still in it.
+        ToastAndroid.show('Preset konnte nicht gespeichert werden', ToastAndroid.SHORT);
+      });
   };
 
   return (
@@ -328,6 +461,98 @@ export function AutoDriveControls() {
       )}
 
       <Text style={styles.statusLine}>{statusLabelFor(status)}</Text>
+
+      {presetPreconditionMet && (
+        <Pressable
+          onPress={handleOpenSaveDialog}
+          disabled={status.driving}
+          style={({ pressed }) => [
+            styles.button,
+            styles.savePresetButton,
+            pressed && !status.driving && styles.buttonPressed,
+            status.driving && styles.buttonDisabled,
+          ]}
+        >
+          <Text style={styles.buttonLabel}>Als Preset speichern</Text>
+        </Pressable>
+      )}
+
+      <View style={styles.presetSection}>
+        <Text style={styles.sectionTitle}>Presets</Text>
+        {presets.length === 0 ? (
+          <Text style={styles.emptyText}>Noch keine Presets gespeichert</Text>
+        ) : (
+          presets.map(preset => (
+            <View key={preset.id} style={styles.presetRow}>
+              <Pressable
+                onPress={() => handleLoadPreset(preset)}
+                disabled={status.driving}
+                style={({ pressed }) => [
+                  styles.presetInfo,
+                  pressed && !status.driving && styles.presetInfoPressed,
+                  status.driving && styles.buttonDisabled,
+                ]}
+              >
+                <Text style={styles.presetName}>{preset.name}</Text>
+                <Text style={styles.presetDuration}>
+                  {formatSeconds(preset.durationSeconds)} s
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => handleDeletePreset(preset)}
+                disabled={status.driving}
+                style={({ pressed }) => [
+                  styles.deleteButton,
+                  pressed && !status.driving && styles.deleteButtonPressed,
+                  status.driving && styles.buttonDisabled,
+                ]}
+              >
+                <Text style={styles.deleteButtonLabel}>Löschen</Text>
+              </Pressable>
+            </View>
+          ))
+        )}
+      </View>
+
+      <Modal
+        visible={saveDialogVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCancelSavePreset}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Preset speichern</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={presetNameText}
+              onChangeText={setPresetNameText}
+              placeholder="Name"
+              placeholderTextColor={colors.mutedForeground}
+              autoFocus
+            />
+            <View style={styles.modalButtonRow}>
+              <Pressable
+                onPress={handleCancelSavePreset}
+                style={({ pressed }) => [styles.modalButton, pressed && styles.buttonPressed]}
+              >
+                <Text style={styles.buttonLabel}>Abbrechen</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleConfirmSavePreset}
+                disabled={presetNameText.trim() === ''}
+                style={({ pressed }) => [
+                  styles.modalButton,
+                  pressed && presetNameText.trim() !== '' && styles.buttonPressed,
+                  presetNameText.trim() === '' && styles.buttonDisabled,
+                ]}
+              >
+                <Text style={styles.buttonLabel}>Speichern</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -419,5 +644,118 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: typography.size.sm,
     color: colors.mutedForeground,
+  },
+  savePresetButton: {
+    marginTop: spacing.lg,
+    marginHorizontal: 0,
+  },
+  presetSection: {
+    marginTop: spacing.lg,
+  },
+  sectionTitle: {
+    marginBottom: spacing.sm,
+    fontSize: typography.size.base,
+    fontWeight: typography.weight.heading,
+    color: colors.foreground,
+  },
+  emptyText: {
+    fontSize: typography.size.sm,
+    color: colors.mutedForeground,
+  },
+  presetRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    marginBottom: spacing.sm,
+  },
+  presetInfo: {
+    flex: 1,
+    minHeight: minTouchTarget,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.base,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  presetInfoPressed: {
+    backgroundColor: colors.primarySubtleBg,
+    borderColor: colors.primary,
+  },
+  presetName: {
+    fontSize: typography.size.base,
+    fontWeight: typography.weight.heading,
+    color: colors.foreground,
+  },
+  presetDuration: {
+    marginTop: spacing.xs,
+    fontSize: typography.size.sm,
+    color: colors.mutedForeground,
+  },
+  deleteButton: {
+    minWidth: minTouchTarget,
+    minHeight: minTouchTarget,
+    marginLeft: spacing.sm,
+    borderRadius: radius.base,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.destructive,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteButtonPressed: {
+    backgroundColor: colors.destructive,
+  },
+  deleteButtonLabel: {
+    fontSize: typography.size.sm,
+    fontWeight: typography.weight.heading,
+    color: colors.destructive,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  modalCard: {
+    width: '100%',
+    borderRadius: radius.base,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+  },
+  modalTitle: {
+    marginBottom: spacing.md,
+    fontSize: typography.size.lg,
+    fontWeight: typography.weight.heading,
+    color: colors.foreground,
+  },
+  modalInput: {
+    minHeight: minTouchTarget,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.base,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    color: colors.foreground,
+    fontSize: typography.size.base,
+  },
+  modalButtonRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: spacing.lg,
+  },
+  modalButton: {
+    minWidth: minTouchTarget,
+    minHeight: minTouchTarget,
+    marginLeft: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.base,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
