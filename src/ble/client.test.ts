@@ -198,6 +198,34 @@ describe('sendSetEndFromDistanceCommand', () => {
 });
 
 describe('parseStatusPayload', () => {
+  // qa-report.md REG-2: PROJ-4 grew the wire payload from 5 to 6 bytes, but
+  // the pre-PROJ-4 5-byte test cases were replaced by 6-byte ones instead of
+  // being kept alongside them — silently dropping the one guarantee that
+  // actually matters across a firmware/app version mismatch: an app running
+  // PROJ-4 code must still decode a still-not-yet-reflashed PROJ-3 firmware's
+  // 5-byte notify correctly (`bytes[5] ?? 0` treats a missing byte 5 as
+  // `endIsAfterStart: true` rather than throwing or misreading bytes 0-4).
+  it('parses a legacy 5-byte payload (pre-PROJ-4 firmware) with endIsAfterStart defaulting true', () => {
+    // flags: bit0 hasStart, bit1 hasEnd, bit2 atStart, bit3 atEnd, bit4 driving -> 0x1f; distance 300000 steps (uint32 LE); no byte 5
+    const distance = 300000;
+    const distanceBytes = [
+      distance & 0xff,
+      (distance >>> 8) & 0xff,
+      (distance >>> 16) & 0xff,
+      (distance >>> 24) & 0xff,
+    ];
+    const payload = fromByteArray(new Uint8Array([0x1f, ...distanceBytes]));
+
+    const result = parseStatusPayload(payload);
+    expect(result.hasStart).toBe(true);
+    expect(result.hasEnd).toBe(true);
+    expect(result.atStart).toBe(true);
+    expect(result.atEnd).toBe(true);
+    expect(result.driving).toBe(true);
+    expect(result.distanceSteps).toBe(300000);
+    expect(result.endIsAfterStart).toBe(true);
+  });
+
   it('parses no start / no end, distanceSteps and endIsAfterStart null', () => {
     const payload = fromByteArray(new Uint8Array([0x00, 0, 0, 0, 0, 0]));
 

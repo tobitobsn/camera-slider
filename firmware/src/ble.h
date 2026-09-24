@@ -32,10 +32,11 @@ void bleSetup(bool resetBonds);
 // Returns true if a central (the paired app) is currently connected.
 bool bleIsConnected();
 
-// Call from loop() (PROJ-3). Reads motorGetStatus(), packs it into the
-// Status-Characteristic's 5-byte notify payload (design.md "Grenze zur
-// Firmware"), and sends a notify() only if the payload differs from the
-// last one actually sent — cheap to call every loop() iteration, and this
+// Call from loop() (PROJ-3, payload grown to 6 bytes by PROJ-4). Reads
+// motorGetStatus(), packs it into the Status-Characteristic's notify
+// payload (design.md "Grenze zur Firmware"), and sends a notify() only if
+// the payload differs from the last one actually sent — cheap to call
+// every loop() iteration, and this
 // diff-check is how a SET_START/SET_END/motor-stop/auto-drive-arrival is
 // "noticed" without motor.cpp needing to call back into ble.cpp directly
 // for each one. A central that just subscribed gets one notify immediately
