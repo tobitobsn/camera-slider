@@ -179,3 +179,15 @@ Auf Nutzerwunsch wurden BUG-1, BUG-3 und BUG-5 gefixt (Commit `1cf023e`) und ans
 - Bereits behoben (Owner, Step 6, vorheriger /qa-Lauf): REG-1, REG-2
 
 **Welche Bugs sollen zuerst behoben werden — BUG-5 jetzt als eigene Protokoll-Design-Entscheidung angehen, oder als dokumentiertes Restrisiko in den Hardwaretest gehen?**
+
+Nutzerentscheidung: mit dokumentiertem Restrisiko (BUG-5) in den Hardwaretest gehen, ohne weiteren Fixversuch.
+
+## Hardwaretest (2026-09-24)
+
+Manueller Test durch den Nutzer am echten Slider, Debug-Build (frischer `installDebug`, da die zuvor installierte APK älter als die AsyncStorage-Abhängigkeit war und das native Modul fehlte — separat gefunden und gefixt, kein PROJ-4-Code-Bug). Ergebnis: **alles ok** — Preset speichern/laden/löschen, BUG-1-Korrektur (Presets über die alte 240mm-Grenze hinaus), Start/Ende/Auto-Fahrt funktionieren.
+
+Zwei Beobachtungen während des Tests waren beim Nachfragen kein Bug, sondern bestätigtes Design-Verhalten:
+- Preset-Laden aktualisiert sichtbar nur das Dauer-Feld; Distanz/Richtung werden intern gemerkt und erst bei „Als Start setzen" wirksam (AC-5) — keine Regression.
+- „Start und Ende müssen sich unterscheiden" blockierte kurzzeitig die Fahrt, nachdem „Als Start setzen" erneut an der bisherigen Endposition gedrückt wurde (`motorSetStart()` löscht `hasEnd` nicht — vorbestehendes, dokumentiertes Verhalten, kein PROJ-4-Fund). Löste sich durch Setzen eines neuen, abweichenden Endpunkts.
+
+**Status: Approved.** BUG-5 bleibt offen und dokumentiert (siehe oben) — akzeptiertes Restrisiko, keine Blockade für den Produktiveinsatz laut Nutzerentscheidung.
