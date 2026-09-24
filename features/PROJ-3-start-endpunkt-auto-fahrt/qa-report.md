@@ -231,11 +231,51 @@ Gesamte Suite nach der Ergänzung erneut komplett gelaufen (Owner, Step 5-Nachtr
 - **Severity:** Low
 - **Priority:** Nice to have
 
-## Summary
+## Summary (Erstlauf, 2026-09-24 — inzwischen überholt, siehe Re-Verifikation unten)
 - **Acceptance Criteria:** 0/10 als voll bestätigt verifizierbar (kein Probe möglich), 4 AC mit einem im Code bestätigten Bug (AC-3, AC-4, AC-6, AC-9), 1 AC mit bedingtem Bug (AC-10), 5 AC mit intakter Code-Kette aber `NOT VERIFIED` (AC-1, AC-2, AC-5, AC-7, AC-8); EC-2 PASS (Garantie im Code bestätigt), EC-1/EC-3/EC-4 `NOT VERIFIED` mit intakter Code-Kette
 - **Bugs Found:** 14 total (0 Critical, 1 High, 5 Medium, 8 Low)
 - **Security:** 6/10 Checks verifiziert, 4 NOT VERIFIED (3× not applicable, 1× not implemented/optional) — siehe Security-Zusammenfassung oben
-- **Production Ready:** **NO**
-- **Recommendation:** Vor allem BUG-1 (High) fixen — das ist der Kern-Bug, den alle drei Lanes unabhängig gefunden haben und der die zentrale Sicherheitsgarantie von AC-9 in der Firmware aushebelt. Die Medium-Bugs (BUG-2,3,5,6,7) sollten im selben Durchgang mit, da sie alle dieselbe Interaktion (Firmware verlässt sich zu sehr auf die App bzw. auf "es verbindet sich schon niemand Fremdes") betreffen. Danach `/qa` erneut — als Re-Verifikation im Umfang des Diffs.
+- **Production Ready:** NO (Stand Erstlauf)
+- **Empfehlung (Erstlauf):** Vor allem BUG-1 (High) fixen — das ist der Kern-Bug, den alle drei Lanes unabhängig gefunden haben und der die zentrale Sicherheitsgarantie von AC-9 in der Firmware aushebelt. Die Medium-Bugs (BUG-2,3,5,6,7) sollten im selben Durchgang mit, da sie alle dieselbe Interaktion (Firmware verlässt sich zu sehr auf die App bzw. auf "es verbindet sich schon niemand Fremdes") betreffen. Danach `/qa` erneut — als Re-Verifikation im Umfang des Diffs.
 
-> "Production Ready: NO" heißt: mindestens ein High-Bug ist offen (BUG-1). Das gilt unabhängig davon, dass viele Acceptance Criteria zusätzlich `NOT VERIFIED` sind, weil hier nichts ausführbar war — beide Lücken (Bugs UND fehlende Laufzeit-Verifikation) müssen vor „Approved" geschlossen werden.
+---
+
+## Re-Verifikation (2026-09-24, mehrere Runden)
+
+**Auftrag:** High- und Medium-Bugs (BUG-1, 2, 3, 5, 6, 7) fixen. Die Low-Bugs (BUG-4, 8–14) bleiben bewusst offen.
+
+**Ablauf** — vier Commits, jeder unabhängig re-verifiziert (fünf weitere `qa-engineer`-Lanes über drei Runden):
+
+1. `6dc8e80` — erster Fix-Durchgang für BUG-1, 2, 3, 5, 6, 7.
+2. **Re-Verifikation Runde 1** (drei Lanes, volle Breite, da der Diff gemeinsam mit PROJ-1/PROJ-2 genutzten Firmware-Code betrifft): BUG-1, BUG-2, BUG-6 sauber geschlossen. BUG-3 nur teilweise (Rundung stimmte, Rest-Ungenauigkeit durch `float32` vs. `double` blieb). **BUG-5 und BUG-7 waren beide schlimmer als vorher**: der unbedingte `motorStop()` bei jedem Disconnect ließ ein beliebiges unautorisiertes Gerät per bloßem Connect/Disconnect jede laufende Fahrt abbrechen (Wiedereinführung von PROJ-2s eigenem, bereits gefixtem N-1-Bug — unabhängig von zwei Lanes gefunden); `CONFIG_BT_NIMBLE_MAX_BONDS=1` ließ schon ein einziges fremdes Pairing den App-Bond verdrängen und die App trennen (vorher waren drei nötig).
+3. `89e0c8f` — Korrektur: `onDisconnect` prüft jetzt `connInfo.isEncrypted()` statt der Verbindungsanzahl (nur eine Verbindung, die tatsächlich das Pairing abgeschlossen hat, kann je den Motor gesteuert haben). Ein eigener `NimBLEDeviceCallbacks::onStoreStatus`-Handler lehnt einen Bond-Speicher-Überlauf jetzt ab, statt den bestehenden Bond zu verdrängen. Dazu die numerisch stabile Form (`2ad/(aT+√disc)` statt `(aT−√disc)/2`) gegen die verbleibende BUG-3-Ungenauigkeit.
+4. **Re-Verifikation Runde 2** (drei Lanes, weiterhin volle Breite): BUG-1, BUG-2, BUG-5 bestätigt korrekt geschlossen. BUG-3s numerische Form mathematisch bestätigt (575 Abweichungen auf wenige exakte Grenzfälle reduziert). **BUG-7 war jetzt korrekt für den Speicher-Schutz, aber ohne Rückweg**: Da nichts mehr verdrängt, gab es keinen Weg mehr, einen falsch belegten Bond-Slot zu löschen (z. B. nach der NVS-Migration von der alten `MAX_BONDS=3`-Firmware) — nur noch per Flash-Löschen behebbar.
+5. `126097e` — Ergänzung: BOOT-Taster-Reset (`NimBLEDevice::deleteAllBonds()`) als Rückweg, dazu eine kleine symmetrische Geschwindigkeits-Toleranz (0,1 Steps/s) gegen die verbleibenden exakten BUG-3-Grenzfälle.
+6. **Re-Verifikation Runde 3** (eine fokussierte Lane, schmaler Diff): Der BOOT-Taster-Mechanismus wie dokumentiert („beim Einschalten halten") **kann auf echter Hardware nicht funktionieren** — GPIO0 ist ein Strapping-Pin, den das ROM genau im Einschalt-Moment liest; gehalten löst das den USB-Download-Modus aus, die Firmware startet nie. Außerdem: Die 0,1-Steps/s-Toleranz war größer als nötig und ließ die App in seltenen Fällen mehr Dauern akzeptieren, als sie selbst als gültigen Bereich anzeigt.
+7. `f188420` — finale Korrektur: BOOT-Taster wird jetzt in einem 2-Sekunden-Fenster **nach** dem Start abgefragt (nicht während des Einschaltens) — das ist nach dem ROM-Einlese-Zeitpunkt, also ein ganz normaler GPIO. Toleranz auf 0,01 Steps/s reduziert (gegen eine 759-Mio.-Kombinationen-Stichprobe verifiziert: weiterhin 0 schädliche Abweichungen).
+
+**Status je Bug nach allen Runden:**
+
+| Bug | Status | Beleg |
+|---|---|---|
+| BUG-1 (High) | **Geschlossen** | `motorJog()` lehnt bei `autoDriving` ab (`motor.cpp`), dreifach unabhängig bestätigt |
+| BUG-2 (Medium) | **Geschlossen** (mathematisch; physische Ankunftszeit weiterhin `NOT VERIFIED`) | Trapez-Geschwindigkeitsformel in `motor.cpp`/`AutoDriveControls.tsx`, Herleitung zweifach unabhängig nachgerechnet |
+| BUG-3 (Medium) | **Geschlossen** | Rundung + numerisch stabile Form + 0,01-Steps/s-Toleranz; 0 schädliche Abweichungen über 759 Mio. geprüfte Kombinationen |
+| BUG-5 (Medium) | **Geschlossen** | `onDisconnect` prüft `connInfo.isEncrypted()`; schließt sowohl den ursprünglichen Bug als auch die selbst verursachte Regression gegen PROJ-2 |
+| BUG-6 (Medium) | **Geschlossen** für den gemeldeten Fall | `onConnect` löscht Punkte nur bei `getConnectedCount()==1`. Bekannter Low-Restfall: hält ein fremdes Gerät durchgehend eine zweite Verbindung, während die App neu verbindet, greift die Bedingung nicht (EC-3 in diesem Rand-Szenario verletzt) — nicht gefixt, Severity Low |
+| BUG-7 (Medium) | **Geschlossen** | Eigener `onStoreStatus`-Handler lehnt Bond-Überlauf ab statt zu verdrängen, plus BOOT-Taster-Reset (2-Sekunden-Fenster nach dem Start) als Rückweg |
+
+**Neue, in den Re-Verifikationsrunden gefundene Low-Restbefunde (nicht gefixt, bewusst — außerhalb des High/Medium-Auftrags):**
+- Verwaiste CCCD-Einträge, wenn ein Angreifer mit bis zu 8 verschiedenen Adressen sitzungsweise pairt und jeweils die Status-Characteristic abonniert — füllt den CCCD-Speicher, erst dann betroffen. Erfordert einen gezielten, mehrfachen Angriff.
+- Nach einem BOOT-Taster-Reset behält Android seinen alten Schlüssel; der Nutzer muss die Kopplung dort vermutlich manuell entfernen, bevor ein Neu-Pairing klappt — nicht dokumentiert.
+- Bereits vor PROJ-3 bestehend: `setSpeedInHz()` rundet auf ganze Hz, was bei sehr langen, langsamen Fahrten stärker von der eingegebenen Dauer abweicht als die neue Toleranz (bis zu einigen Sekunden bei extremen Distanzen) — `setSpeedInMilliHz()` wäre der genauere Weg, nicht umgesetzt.
+
+**Tests:** `npm test` — 7 Suites, 117 Tests, 0 fehlgeschlagen (inkl. 25 neuer Tests für `AutoDriveControls.tsx`, rot-geprüft). `pio run -e esp32dev` — SUCCESS nach jedem Commit dieser Reihe.
+
+## Summary (nach Re-Verifikation)
+- **High/Medium-Bugs:** 6/6 geschlossen (BUG-1, 2, 3, 5, 6, 7), jeweils unabhängig re-verifiziert
+- **Offen (bewusst, Low):** BUG-4, 8–14 sowie die drei oben genannten neuen Low-Restbefunde
+- **Production Ready:** **NOT READY — not verified** (kein Critical/High-Bug mehr offen, aber `probe.kind: none` — kein einziges Laufzeit-AC wurde tatsächlich ausgeführt; das umfangreiche BLE-Verbindungs-/Bonding-/Motor-Stopp-Verhalten wurde seit diesen Fixes noch nicht auf echter Hardware getestet)
+- **Empfehlung:** Human-Hardware-Test wie bei PROJ-1/PROJ-2 — insbesondere: normale Jog-/Auto-Fahrt-Regression, JOG während einer laufenden Auto-Fahrt (BUG-1), Trennen der App-Verbindung während einer Fahrt (BUG-5). Erst danach `features/INDEX.md` auf Approved setzen.
+
+> Der ursprüngliche Blocker (BUG-1, High) ist geschlossen — „NOT READY" hier bedeutet nur noch fehlende Laufzeit-Verifikation, nicht mehr offene Bugs.
