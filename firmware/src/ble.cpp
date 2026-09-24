@@ -25,6 +25,7 @@ constexpr uint8_t kOpcodeSetStart = 0x02;   // <opcode> — 1 byte total
 constexpr uint8_t kOpcodeSetEnd = 0x03;     // <opcode> — 1 byte total
 constexpr uint8_t kOpcodeAutoDrive = 0x04;  // <opcode> <direction> <durationDeciseconds LE u16> — 4 bytes total
 constexpr uint8_t kOpcodeStop = 0x05;       // <opcode> — 1 byte total
+constexpr uint8_t kOpcodeSetEndFromDistance = 0x06;  // <opcode> <direction> <distanceSteps LE u32> — 6 bytes total
 
 volatile bool gConnected = false;
 
@@ -34,18 +35,21 @@ volatile bool gConnected = false;
 // gConnected above — file-scope state in this anonymous namespace.
 NimBLECharacteristic* gStatusChar = nullptr;
 
-// Last 5-byte Status-Characteristic payload actually sent (see
+// Last 6-byte Status-Characteristic payload actually sent (see
 // bleNotifyStatusIfChanged()), so repeated identical polls from loop()
 // don't spam notify(). Zero-initialized; the very first differing status
 // (including right after boot) will therefore always notify.
-uint8_t gLastStatusPayload[5] = {0, 0, 0, 0, 0};
+uint8_t gLastStatusPayload[6] = {0, 0, 0, 0, 0, 0};
 bool gHasSentStatus = false;
 
-// Packs a MotorStatus snapshot into the 5-byte wire payload design.md
+// Packs a MotorStatus snapshot into the 6-byte wire payload design.md
 // specifies: byte 0 is the flags bitfield (bit0 hasStart, bit1 hasEnd,
 // bit2 atStart, bit3 atEnd, bit4 driving), bytes 1-4 are distanceSteps as
-// little-endian uint32 (matches src/ble/client.ts's parseStatusPayload()).
-void packStatusPayload(const MotorStatus& status, uint8_t out[5]) {
+// little-endian uint32, byte 5 is 0x00 when the end point is at-or-after
+// the start point (increasing step-count direction) and 0x01 when it's
+// before (decreasing direction) — only meaningful when hasStart && hasEnd
+// are both true (matches src/ble/client.ts's parseStatusPayload()).
+void packStatusPayload(const MotorStatus& status, uint8_t out[6]) {
   uint8_t flags = 0;
   if (status.hasStart) flags |= 0x01;
   if (status.hasEnd) flags |= 0x02;
@@ -58,6 +62,7 @@ void packStatusPayload(const MotorStatus& status, uint8_t out[5]) {
   out[2] = static_cast<uint8_t>((status.distanceSteps >> 8) & 0xff);
   out[3] = static_cast<uint8_t>((status.distanceSteps >> 16) & 0xff);
   out[4] = static_cast<uint8_t>((status.distanceSteps >> 24) & 0xff);
+  out[5] = status.endIsAfterStart ? 0x00 : 0x01;
 }
 
 class ServerCallbacks : public NimBLEServerCallbacks {
@@ -185,10 +190,26 @@ class CommandCharacteristicCallbacks : public NimBLECharacteristicCallbacks {
         motorStop();
         break;
       }
+      case kOpcodeSetEndFromDistance: {
+        if (len != 6) {
+          return;  // malformed SET_END_FROM_DISTANCE write — ignore rather than read out of bounds
+        }
+        const uint8_t directionByte = value[1];
+        const bool endIsAfterStart = (directionByte == 0x00);
+        // Little-endian uint32, low byte first — matches
+        // src/ble/client.ts's sendSetEndFromDistanceCommand() encoding
+        // (distanceSteps & 0xff, then >>> 8/16/24 & 0xff).
+        const uint32_t distanceSteps = static_cast<uint32_t>(value[2]) |
+                                        (static_cast<uint32_t>(value[3]) << 8) |
+                                        (static_cast<uint32_t>(value[4]) << 16) |
+                                        (static_cast<uint32_t>(value[5]) << 24);
+        motorSetEndFromDistance(endIsAfterStart, distanceSteps);
+        break;
+      }
       default:
-        // No other opcodes are defined (PROJ-3's three new ones above cover
-        // the full protocol design.md specifies — no speculative future
-        // opcodes).
+        // No other opcodes are defined (PROJ-3's three opcodes plus PROJ-4's
+        // SET_END_FROM_DISTANCE above cover the full protocol design.md
+        // specifies — no speculative future opcodes).
         break;
     }
   }
@@ -213,7 +234,7 @@ class StatusCharacteristicCallbacks : public NimBLECharacteristicCallbacks {
       return;  // unsubscribed, or an indicate-only subscribe — nothing to send
     }
     const MotorStatus status = motorGetStatus();
-    uint8_t payload[5];
+    uint8_t payload[6];
     packStatusPayload(status, payload);
     pCharacteristic->setValue(payload, sizeof(payload));
     pCharacteristic->notify();
@@ -359,7 +380,7 @@ void bleNotifyStatusIfChanged() {
   }
 
   const MotorStatus status = motorGetStatus();
-  uint8_t payload[5];
+  uint8_t payload[6];
   packStatusPayload(status, payload);
 
   if (gHasSentStatus && memcmp(payload, gLastStatusPayload, sizeof(payload)) == 0) {
