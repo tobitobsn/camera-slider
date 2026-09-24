@@ -9,6 +9,7 @@ import {
   sendSetStartCommand,
   sendSetEndCommand,
   sendAutoDriveCommand,
+  sendSetEndFromDistanceCommand,
   parseStatusPayload,
 } from './client';
 
@@ -166,9 +167,39 @@ describe('sendAutoDriveCommand', () => {
   });
 });
 
+describe('sendSetEndFromDistanceCommand', () => {
+  it('encodes endIsAfterStart true (0x00) + distance, little-endian, with response', async () => {
+    const device = createMockDevice();
+
+    // 1234567 steps -> 0x12D687 -> LE bytes 0x87 0xD6 0x12 0x00
+    await sendSetEndFromDistanceCommand(device as unknown as Device, true, 1234567);
+
+    expect(device.writeCharacteristicWithResponseForService).toHaveBeenCalledTimes(1);
+    const [serviceUUID, charUUID, base64Value] =
+      device.writeCharacteristicWithResponseForService.mock.calls[0];
+    expect(serviceUUID).toBe(SLIDER_SERVICE_UUID);
+    expect(charUUID).toBe(SLIDER_COMMAND_CHAR_UUID);
+    expect(Array.from(toByteArray(base64Value))).toEqual([
+      0x06, 0x00, 0x87, 0xd6, 0x12, 0x00,
+    ]);
+    expect(device.writeCharacteristicWithoutResponseForService).not.toHaveBeenCalled();
+  });
+
+  it('encodes endIsAfterStart false as direction byte 0x01', async () => {
+    const device = createMockDevice();
+
+    await sendSetEndFromDistanceCommand(device as unknown as Device, false, 1234567);
+
+    const [, , base64Value] = device.writeCharacteristicWithResponseForService.mock.calls[0];
+    expect(Array.from(toByteArray(base64Value))).toEqual([
+      0x06, 0x01, 0x87, 0xd6, 0x12, 0x00,
+    ]);
+  });
+});
+
 describe('parseStatusPayload', () => {
-  it('parses no start / no end, distanceSteps null', () => {
-    const payload = fromByteArray(new Uint8Array([0x00, 0, 0, 0, 0]));
+  it('parses no start / no end, distanceSteps and endIsAfterStart null', () => {
+    const payload = fromByteArray(new Uint8Array([0x00, 0, 0, 0, 0, 0]));
 
     expect(parseStatusPayload(payload)).toEqual({
       hasStart: false,
@@ -177,11 +208,12 @@ describe('parseStatusPayload', () => {
       atEnd: false,
       driving: false,
       distanceSteps: null,
+      endIsAfterStart: null,
     });
   });
 
-  it('parses hasStart + hasEnd with a nonzero distance', () => {
-    // flags: bit0 hasStart, bit1 hasEnd -> 0x03; distance 300000 steps (uint32 LE)
+  it('parses hasStart + hasEnd with a nonzero distance and endIsAfterStart true', () => {
+    // flags: bit0 hasStart, bit1 hasEnd -> 0x03; distance 300000 steps (uint32 LE); byte 5: 0x00 -> endIsAfterStart true
     const distance = 300000;
     const distanceBytes = [
       distance & 0xff,
@@ -189,12 +221,23 @@ describe('parseStatusPayload', () => {
       (distance >>> 16) & 0xff,
       (distance >>> 24) & 0xff,
     ];
-    const payload = fromByteArray(new Uint8Array([0x03, ...distanceBytes]));
+    const payload = fromByteArray(new Uint8Array([0x03, ...distanceBytes, 0x00]));
 
     const result = parseStatusPayload(payload);
     expect(result.hasStart).toBe(true);
     expect(result.hasEnd).toBe(true);
     expect(result.distanceSteps).toBe(300000);
+    expect(result.endIsAfterStart).toBe(true);
+  });
+
+  it('parses endIsAfterStart false when byte 5 is 0x01', () => {
+    // flags: bit0 hasStart, bit1 hasEnd -> 0x03; byte 5: 0x01 -> endIsAfterStart false
+    const payload = fromByteArray(new Uint8Array([0x03, 10, 0, 0, 0, 0x01]));
+
+    const result = parseStatusPayload(payload);
+    expect(result.hasStart).toBe(true);
+    expect(result.hasEnd).toBe(true);
+    expect(result.endIsAfterStart).toBe(false);
   });
 
   it('parses the driving flag set', () => {
@@ -225,23 +268,25 @@ describe('parseStatusPayload', () => {
     expect(result.hasEnd).toBe(false);
   });
 
-  it('reports distanceSteps as null when only hasStart is set, even with nonzero distance bytes', () => {
-    // flags: bit0 hasStart only -> 0x01; distance bytes present but must be ignored
-    const payload = fromByteArray(new Uint8Array([0x01, 0xff, 0xff, 0xff, 0xff]));
+  it('reports distanceSteps and endIsAfterStart as null when only hasStart is set, even with nonzero distance/direction bytes', () => {
+    // flags: bit0 hasStart only -> 0x01; distance/direction bytes present but must be ignored
+    const payload = fromByteArray(new Uint8Array([0x01, 0xff, 0xff, 0xff, 0xff, 0x00]));
 
     const result = parseStatusPayload(payload);
     expect(result.hasStart).toBe(true);
     expect(result.hasEnd).toBe(false);
     expect(result.distanceSteps).toBeNull();
+    expect(result.endIsAfterStart).toBeNull();
   });
 
-  it('reports distanceSteps as null when only hasEnd is set, even with nonzero distance bytes', () => {
-    // flags: bit1 hasEnd only -> 0x02; distance bytes present but must be ignored
-    const payload = fromByteArray(new Uint8Array([0x02, 0x01, 0x02, 0x03, 0x04]));
+  it('reports distanceSteps and endIsAfterStart as null when only hasEnd is set, even with nonzero distance/direction bytes', () => {
+    // flags: bit1 hasEnd only -> 0x02; distance/direction bytes present but must be ignored
+    const payload = fromByteArray(new Uint8Array([0x02, 0x01, 0x02, 0x03, 0x04, 0x01]));
 
     const result = parseStatusPayload(payload);
     expect(result.hasStart).toBe(false);
     expect(result.hasEnd).toBe(true);
     expect(result.distanceSteps).toBeNull();
+    expect(result.endIsAfterStart).toBeNull();
   });
 });

@@ -30,6 +30,7 @@ const SET_START_OPCODE = 0x02;
 const SET_END_OPCODE = 0x03;
 const AUTO_DRIVE_OPCODE = 0x04;
 const STOP_OPCODE = 0x05;
+const SET_END_FROM_DISTANCE_OPCODE = 0x06;
 
 const JOG_DIRECTION_BYTE: Record<JogDirection, number> = {
   forward: 0x00,
@@ -39,6 +40,16 @@ const JOG_DIRECTION_BYTE: Record<JogDirection, number> = {
 const AUTO_DRIVE_DIRECTION_BYTE: Record<AutoDriveDirection, number> = {
   startToEnd: 0x00,
   endToStart: 0x01,
+};
+
+/**
+ * true -> the end point lies at-or-after the start point (increasing step
+ * count), encoded as 0x00; false -> before the start point (decreasing step
+ * count), encoded as 0x01. Mirrors JOG_DIRECTION_BYTE/AUTO_DRIVE_DIRECTION_BYTE.
+ */
+const END_FROM_DISTANCE_DIRECTION_BYTE: Record<'atOrAfterStart' | 'beforeStart', number> = {
+  atOrAfterStart: 0x00,
+  beforeStart: 0x01,
 };
 
 export type JogDirection = 'forward' | 'backward';
@@ -58,6 +69,12 @@ export type SliderStatus = {
   driving: boolean;
   /** Distance in steps between start and end. Null unless both hasStart and hasEnd are true. */
   distanceSteps: number | null;
+  /**
+   * Whether the end point lies at-or-after the start point (increasing step
+   * count) rather than before it (decreasing step count). Null unless both
+   * hasStart and hasEnd are true.
+   */
+  endIsAfterStart: boolean | null;
 };
 
 const DEFAULT_SCAN_TIMEOUT_MS = 10000;
@@ -271,6 +288,46 @@ export async function sendAutoDriveCommand(
 }
 
 /**
+ * Sends a SET_END_FROM_DISTANCE command: direction (relative to the start
+ * point) + a distance in steps. Unlike sendSetEndCommand, this does not
+ * require the carriage to have physically visited the end point — it lets
+ * PROJ-4 load a saved preset's end point directly from its stored
+ * distance/direction, computed relative to whatever the current start point
+ * is. Write WITH response — same safety rationale as
+ * sendSetStartCommand/sendSetEndCommand/sendAutoDriveCommand.
+ *
+ * @param endIsAfterStart true if the end point lies at-or-after the start
+ *   point (increasing step count), false if it lies before it (decreasing
+ *   step count).
+ * @param distanceSteps Distance in steps between start and end, encoded as
+ *   an unsigned 32-bit little-endian integer.
+ */
+export async function sendSetEndFromDistanceCommand(
+  device: Device,
+  endIsAfterStart: boolean,
+  distanceSteps: number,
+): Promise<void> {
+  const directionByte = endIsAfterStart
+    ? END_FROM_DISTANCE_DIRECTION_BYTE.atOrAfterStart
+    : END_FROM_DISTANCE_DIRECTION_BYTE.beforeStart;
+
+  const payload = new Uint8Array([
+    SET_END_FROM_DISTANCE_OPCODE,
+    directionByte,
+    distanceSteps & 0xff,
+    (distanceSteps >>> 8) & 0xff,
+    (distanceSteps >>> 16) & 0xff,
+    (distanceSteps >>> 24) & 0xff,
+  ]);
+
+  await device.writeCharacteristicWithResponseForService(
+    SLIDER_SERVICE_UUID,
+    SLIDER_COMMAND_CHAR_UUID,
+    fromByteArray(payload),
+  );
+}
+
+/**
  * Pure decoder for the Status characteristic's Notify payload — no BLE calls,
  * just bytes in, SliderStatus out. Exported separately so it's directly
  * unit-testable without mocking BLE.
@@ -280,6 +337,9 @@ export async function sendAutoDriveCommand(
  *    bit 3 atEnd, bit 4 driving
  *  - bytes 1-4: distance in steps between start and end (uint32,
  *    little-endian) — only meaningful when hasStart && hasEnd are both true
+ *  - byte 5: 0x00 when the end point is at-or-after the start point
+ *    (increasing step-count direction), 0x01 when it's before (decreasing
+ *    direction) — only meaningful when hasStart && hasEnd are both true
  */
 export function parseStatusPayload(base64Value: string): SliderStatus {
   const bytes = toByteArray(base64Value);
@@ -292,6 +352,7 @@ export function parseStatusPayload(base64Value: string): SliderStatus {
   const driving = (flags & 0x10) !== 0;
 
   let distanceSteps: number | null = null;
+  let endIsAfterStart: boolean | null = null;
   if (hasStart && hasEnd) {
     // Combine as an unsigned 32-bit little-endian value.
     distanceSteps =
@@ -300,9 +361,10 @@ export function parseStatusPayload(base64Value: string): SliderStatus {
         ((bytes[3] ?? 0) << 16) |
         ((bytes[4] ?? 0) << 24)) >>>
       0;
+    endIsAfterStart = (bytes[5] ?? 0) === 0x00;
   }
 
-  return { hasStart, hasEnd, atStart, atEnd, driving, distanceSteps };
+  return { hasStart, hasEnd, atStart, atEnd, driving, distanceSteps, endIsAfterStart };
 }
 
 /**
