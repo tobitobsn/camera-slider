@@ -272,6 +272,16 @@ void motorSetEnd() {
   hasEnd = true;
 }
 
+void motorSetEndFromDistance(bool endIsAfterStart, uint32_t distanceSteps) {
+  if (stepper == nullptr || stepper->isRunning() || autoDriving || !hasStart) {
+    return;
+  }
+  endPosition = startPosition +
+      (endIsAfterStart ? static_cast<int32_t>(distanceSteps)
+                        : -static_cast<int32_t>(distanceSteps));
+  hasEnd = true;
+}
+
 void motorClearPoints() {
   hasStart = false;
   hasEnd = false;
@@ -413,8 +423,10 @@ MotorStatus motorGetStatus() {
     const int32_t signedDistance = snapEndPosition - snapStartPosition;
     status.distanceSteps = static_cast<uint32_t>(
         signedDistance < 0 ? -signedDistance : signedDistance);
+    status.endIsAfterStart = snapEndPosition >= snapStartPosition;
   } else {
     status.distanceSteps = 0;
+    status.endIsAfterStart = false;
   }
 
   // Only read/compare the live position in standstill — same precision
