@@ -28,6 +28,15 @@ const MAX_SPEED_STEPS_PER_SEC = 4000;
  */
 const ACCELERATION_STEPS_PER_SEC2 = 8000;
 
+/**
+ * Mirrors firmware/src/motor.cpp's kAutoDriveSpeedToleranceHz — qa-report.md
+ * BUG-3 residual: this function's double and the firmware's float32 can
+ * land on opposite sides of the 200/4000 boundary for a duration whose
+ * exact value sits right on it, independent of the numerically-stable form
+ * below. Keeping both sides' tolerance identical is what makes them agree.
+ */
+const AUTO_DRIVE_SPEED_TOLERANCE_STEPS_PER_SEC = 0.1;
+
 const DEFAULT_DURATION_TEXT = '10';
 
 /**
@@ -189,8 +198,8 @@ export function AutoDriveControls() {
   const durationValid =
     rangeAvailable &&
     requestedSpeedStepsPerSec !== null &&
-    requestedSpeedStepsPerSec >= MIN_SPEED_STEPS_PER_SEC &&
-    requestedSpeedStepsPerSec <= MAX_SPEED_STEPS_PER_SEC;
+    requestedSpeedStepsPerSec >= MIN_SPEED_STEPS_PER_SEC - AUTO_DRIVE_SPEED_TOLERANCE_STEPS_PER_SEC &&
+    requestedSpeedStepsPerSec <= MAX_SPEED_STEPS_PER_SEC + AUTO_DRIVE_SPEED_TOLERANCE_STEPS_PER_SEC;
 
   // AC-6: only complain once the range is actually known and the user has
   // typed something — an empty field or missing points aren't "an invalid

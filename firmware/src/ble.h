@@ -11,7 +11,20 @@
 
 // Initializes the NimBLE stack, creates the GATT service/characteristics,
 // and starts advertising. Call once from setup().
-void bleSetup();
+//
+// resetBonds: qa-report.md BUG-7's fix (DeviceCallbacks::onStoreStatus in
+// ble.cpp) rejects a new pairing once the single stored-bond slot
+// (CONFIG_BT_NIMBLE_MAX_BONDS=1, platformio.ini) is occupied, rather than
+// evicting whatever is already there — deliberately, so a stranger's
+// pairing can't displace the app's bond anymore. The unavoidable trade-off
+// (re-verification found): if the slot is ever occupied by the wrong
+// device (a stray pairing before the owner's phone ever bonds, a phone
+// swap, or a leftover bond from firmware built before this fix with a
+// higher MAX_BONDS), there is otherwise no way back short of erasing the
+// whole flash. Pass true to wipe all stored bonds before anything can
+// connect — main.cpp wires this to the BOOT button held during power-on,
+// the standard ESP32 escape hatch for exactly this kind of reset.
+void bleSetup(bool resetBonds);
 
 // Returns true if a central (the paired app) is currently connected.
 bool bleIsConnected();

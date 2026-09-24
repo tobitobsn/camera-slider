@@ -248,8 +248,17 @@ class DeviceCallbacks : public NimBLEDeviceCallbacks {
 
 }  // namespace
 
-void bleSetup() {
+void bleSetup(bool resetBonds) {
   NimBLEDevice::init(kDeviceName);
+
+  if (resetBonds) {
+    // qa-report.md BUG-7 re-verification (NEU-1): with only one bond slot
+    // and overflow now rejected rather than evicted (below), a slot
+    // occupied by the wrong device had no way back except erasing flash.
+    // Called before anything can connect, so it can't race a real pairing.
+    NimBLEDevice::deleteAllBonds();
+    Serial.println("BLE: BOOT button held at startup - all stored bonds deleted");
+  }
 
   // qa-report.md BUG-7: reject a bond-storage overflow instead of the
   // library's default (evict the oldest bond) — see DeviceCallbacks above.

@@ -30,6 +30,19 @@ constexpr int32_t kAcceleration = 8000;  // steps/s^2
 constexpr float kJogSpeedMinHz = 200.0f;
 constexpr float kJogSpeedMaxHz = 4000.0f;
 
+// qa-report.md BUG-3 (residual after the numerically-stable-form fix):
+// this file's float32 and src/components/AutoDriveControls.tsx's double
+// can still land on opposite sides of kJogSpeedMinHz/kJogSpeedMaxHz for a
+// duration whose *exact* value sits right on the boundary — literally
+// different floating-point numbers for the same decimal input (e.g. 8.1f
+// vs 8.1 as a double), independent of the cancellation the stable form
+// already fixed. Re-verification found real cases a few hundredths of a
+// step/s off. A small symmetric tolerance, mirrored exactly in
+// AutoDriveControls.tsx, absorbs that; it doesn't move the actual
+// commanded speed (motorAutoDrive() rounds to the nearest integer Hz
+// before calling setSpeedInHz() — well inside a 0.5 Hz margin).
+constexpr float kAutoDriveSpeedToleranceHz = 0.1f;
+
 // Watchdog — design.md AC-6/EC-4: more than ~3 missed 300ms JOG heartbeats
 // (1000ms) while running stops the motor on its own.
 constexpr unsigned long kWatchdogTimeoutMs = 1000;
@@ -326,7 +339,8 @@ void motorAutoDrive(JogDirection direction, uint16_t durationDeciseconds) {
   // aTimesDuration + sqrt(discriminant) never cancels.
   const float speedHz = (2.0f * static_cast<float>(kAcceleration) * static_cast<float>(distanceSteps)) /
       (aTimesDuration + sqrtf(discriminant));
-  if (speedHz < kJogSpeedMinHz || speedHz > kJogSpeedMaxHz) {
+  if (speedHz < kJogSpeedMinHz - kAutoDriveSpeedToleranceHz ||
+      speedHz > kJogSpeedMaxHz + kAutoDriveSpeedToleranceHz) {
     // AC-6: requested duration would need a speed outside 200-4000 steps/s.
     return;
   }
