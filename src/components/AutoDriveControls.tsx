@@ -16,6 +16,7 @@ import {
   sendSetEndFromDistanceCommand,
   sendSetStartCommand,
   sendStopCommand,
+  waitForStatusMatching,
   type AutoDriveDirection,
   type SliderStatus,
 } from '../ble/client';
@@ -273,10 +274,20 @@ export function AutoDriveControls() {
   // Both writes share a single fire-and-forget error boundary, same as
   // every other handler here: a failed SET_START must not also attempt to
   // derive an end point from a start position that was never actually set.
+  //
+  // qa-report.md BUG-5: the SET_START write's own response only confirms the
+  // BLE stack accepted it, not that the firmware's motorSetStart() actually
+  // applied it (its guard — e.g. the stepper still finishing a jog — can
+  // silently no-op while the write still "succeeds"). Waiting for the
+  // Status characteristic to actually report hasStart before deriving the
+  // end point closes that gap: a silent firmware-side rejection now times
+  // out here and surfaces as a caught error instead of deriving the end
+  // point from a stale/unrelated start position with no feedback at all.
   const handleSetStart = async (): Promise<void> => {
     try {
       await sendSetStartCommand(device);
       if (loadedPreset !== null) {
+        await waitForStatusMatching(device, s => s.hasStart);
         await sendSetEndFromDistanceCommand(
           device,
           loadedPreset.endIsAfterStart,
@@ -284,8 +295,14 @@ export function AutoDriveControls() {
         );
       }
     } catch {
-      // fire-and-forget, matching this file's existing .catch(() => {})
-      // convention on every other handler
+      if (loadedPreset !== null) {
+        ToastAndroid.show(
+          'Startpunkt konnte nicht übernommen werden — bitte erneut versuchen',
+          ToastAndroid.SHORT,
+        );
+      }
+      // Without a loaded preset, this matches this file's existing
+      // fire-and-forget .catch(() => {}) convention on every other handler.
     }
   };
 

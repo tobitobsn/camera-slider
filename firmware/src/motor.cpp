@@ -53,6 +53,27 @@ constexpr float kAutoDriveSpeedToleranceHz = 0.01f;
 // (1000ms) while running stops the motor on its own.
 constexpr unsigned long kWatchdogTimeoutMs = 1000;
 
+// qa-report.md BUG-1 (PROJ-4): motorSetEndFromDistance() derives endPosition
+// from startPosition + a distance the carriage was never physically driven
+// to, unlike motorSetEnd() (which always reads a position the carriage
+// actually stands at). Without a home reference this firmware cannot know
+// whether the derived point is still physically on the rail (see
+// docs/data-model.md — only relative distance is ever trusted, never an
+// absolute position) — but it CAN reject a distance that is larger than the
+// entire rail could ever be, which is always wrong regardless of where the
+// current start position sits. This is therefore a plausibility check, not
+// a real software endstop (docs/stacks/firmware-esp32-tmc2209.md's
+// "Software-Endanschläge" describes the latter — a minSteps/maxSteps clamp
+// on every moveTo(), from an actual home position; that is a larger,
+// separate change this fix does not attempt). Measured 2026-09-24: 480mm
+// usable travel, GT2 20-tooth pulley, 200 full steps x 16 microsteps -> 80
+// steps/mm (docs/stacks/firmware-esp32-tmc2209.md "Kalibrierung /
+// Steps-pro-mm"): 480 * 80 = 38400 steps. A side effect: this also closes
+// qa-report.md BUG-2 (the unchecked static_cast<int32_t> of a uint32_t
+// distanceSteps that could exceed INT32_MAX) — any value large enough to
+// overflow is already far past this bound and rejected first.
+constexpr uint32_t kMaxPlausibleDistanceSteps = 38400;
+
 TMC2209Stepper driver(&Serial2, kRSense, kDriverAddress);
 FastAccelStepperEngine engine = FastAccelStepperEngine();
 FastAccelStepper* stepper = nullptr;
@@ -273,7 +294,8 @@ void motorSetEnd() {
 }
 
 void motorSetEndFromDistance(bool endIsAfterStart, uint32_t distanceSteps) {
-  if (stepper == nullptr || stepper->isRunning() || autoDriving || !hasStart) {
+  if (stepper == nullptr || stepper->isRunning() || autoDriving || !hasStart ||
+      distanceSteps > kMaxPlausibleDistanceSteps) {
     return;
   }
   endPosition = startPosition +

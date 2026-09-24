@@ -38,13 +38,22 @@ function sortByCreatedAtDescending(presets: Preset[]): Preset[] {
   return [...presets].sort((a, b) => b.createdAt - a.createdAt);
 }
 
-async function readStoredPresets(): Promise<Preset[]> {
+/**
+ * Raw read + parse, no error handling — propagates on a genuine storage or
+ * parse failure. Used by save()/remove() (see readStoredPresetsForMount()
+ * below for why the mount path swallows errors but this one must not).
+ */
+async function readStoredPresetsFromStorage(): Promise<Preset[]> {
+  const raw = await AsyncStorage.getItem(STORAGE_KEY);
+  if (raw === null) {
+    return [];
+  }
+  return JSON.parse(raw) as Preset[];
+}
+
+async function readStoredPresetsForMount(): Promise<Preset[]> {
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (raw === null) {
-      return [];
-    }
-    return JSON.parse(raw) as Preset[];
+    return await readStoredPresetsFromStorage();
   } catch {
     // No presets saved yet (fresh install) and a corrupt/unreadable read are
     // both treated the same on initial load: start from an empty list
@@ -82,7 +91,7 @@ export function usePresets(): {
   useEffect(() => {
     let cancelled = false;
 
-    readStoredPresets().then(loaded => {
+    readStoredPresetsForMount().then(loaded => {
       if (!cancelled) {
         setPresets(sortByCreatedAtDescending(loaded));
       }
@@ -114,11 +123,22 @@ export function usePresets(): {
       createdAt: now,
     };
 
-    await persist([...presets, newPreset]);
+    // qa-report.md BUG-3: building the next list from the in-memory
+    // `presets` state (rather than a fresh read) meant a failed initial
+    // mount-read — silently treated as "no presets" by
+    // readStoredPresetsForMount() above — left `presets` at [] even though
+    // real presets were still on disk. The next save() would then persist
+    // just the one new preset, discarding everything else. Reading fresh
+    // here means a genuine storage failure now surfaces as this call's
+    // rejection (EC-4) instead of silently overwriting real data.
+    const currentPresets = await readStoredPresetsFromStorage();
+    await persist([...currentPresets, newPreset]);
   }
 
   async function remove(id: string): Promise<void> {
-    await persist(presets.filter(preset => preset.id !== id));
+    // Same BUG-3 fix as save() above.
+    const currentPresets = await readStoredPresetsFromStorage();
+    await persist(currentPresets.filter(preset => preset.id !== id));
   }
 
   return { presets, save, remove };

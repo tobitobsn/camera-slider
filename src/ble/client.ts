@@ -368,6 +368,50 @@ export function parseStatusPayload(base64Value: string): SliderStatus {
 }
 
 /**
+ * qa-report.md BUG-5: a "Write With Response" resolving successfully only
+ * confirms the BLE stack accepted the write at the ATT protocol level — it
+ * says nothing about whether the firmware's guarded command function (e.g.
+ * motorSetStart()) actually applied it, since that guard is entirely inside
+ * the firmware and doesn't affect the ATT response path. Waits for the
+ * Status characteristic to report a state matching `predicate` — the
+ * closest thing to an application-level confirmation this protocol has.
+ *
+ * @param timeoutMs Rejects if no matching status arrives in time (e.g. the
+ *   command was silently guarded off) — deliberately generous relative to a
+ *   normal BLE round-trip so ordinary notify latency doesn't produce a
+ *   false-positive rejection.
+ */
+export function waitForStatusMatching(
+  device: Device,
+  predicate: (status: SliderStatus) => boolean,
+  timeoutMs: number = 2000,
+): Promise<SliderStatus> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timeoutHandle: ReturnType<typeof setTimeout>;
+
+    const unsubscribe = subscribeToStatus(device, status => {
+      if (settled || !predicate(status)) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutHandle);
+      unsubscribe();
+      resolve(status);
+    });
+
+    timeoutHandle = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      unsubscribe();
+      reject(new Error('waitForStatusMatching: timed out waiting for a matching status'));
+    }, timeoutMs);
+  });
+}
+
+/**
  * Subscribes to the Status characteristic's notifications, decoding each
  * incoming payload with parseStatusPayload() and forwarding it to callback.
  *

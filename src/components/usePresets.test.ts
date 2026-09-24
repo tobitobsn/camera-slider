@@ -208,6 +208,54 @@ describe('usePresets', () => {
     act(() => rendererB.unmount());
   });
 
+  it('save() after a failed initial read does not overwrite presets already on disk (BUG-3 regression guard)', async () => {
+    // A preset already exists in storage from a previous session.
+    await AsyncStorage.setItem(
+      'camera-slider.presets',
+      JSON.stringify([
+        {
+          id: 'existing-1',
+          name: 'Already saved',
+          distanceSteps: 999,
+          endIsAfterStart: true,
+          durationSeconds: 7,
+          createdAt: 500,
+        },
+      ]),
+    );
+
+    // The hook's initial mount read fails transiently — readStoredPresetsForMount()
+    // swallows this to [], leaving `presets` state empty even though real data
+    // is on disk. Only this first getItem() call is affected; later calls
+    // (inside save()) go through to the real in-memory mock.
+    jest.spyOn(AsyncStorage, 'getItem').mockRejectedValueOnce(new Error('transient read failure'));
+
+    let lastApi: PresetsApi | undefined;
+    let renderer: ReactTestRenderer.ReactTestRenderer;
+
+    await act(async () => {
+      renderer = ReactTestRenderer.create(renderProbe(api => (lastApi = api)));
+      await flushPromises();
+    });
+
+    expect(lastApi!.presets).toEqual([]);
+
+    await act(async () => {
+      await lastApi!.save('New preset', 10, true, 5);
+    });
+
+    // BUG-3: without the fix, this would be length 1 — the stale, empty
+    // in-memory `presets` state would have been used as the base for the
+    // write, silently discarding "Already saved".
+    expect(lastApi!.presets).toHaveLength(2);
+    expect(lastApi!.presets.map(preset => preset.name).sort()).toEqual([
+      'Already saved',
+      'New preset',
+    ]);
+
+    act(() => renderer.unmount());
+  });
+
   it('a failed save() does not add the preset to presets, and the returned promise rejects (EC-4)', async () => {
     let lastApi: PresetsApi | undefined;
     let renderer: ReactTestRenderer.ReactTestRenderer;
