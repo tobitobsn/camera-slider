@@ -1,0 +1,241 @@
+# QA Test Results
+
+**Tested:** 2026-09-24
+**App URL:** nicht ausführbar hier (`probe.kind: none`, App-Ebene und Layer `firmware`) — jedes Laufzeit-AC ist unten `[!] NOT VERIFIED`, bis ein Mensch es testet
+**Tester:** QA Engineer (AI) — drei unabhängige `qa-engineer`-Lanes (Akzeptanz, Security, Regression), zusammengeführt vom Owner
+**Scope:** `full` (erster `/qa`-Lauf für PROJ-3, HEAD `d3a37a4` auf `feat/PROJ-3-start-endpunkt-auto-fahrt`)
+
+> Legende: `[x]` in diesem Lauf verifiziert (Beleg nötig) · `[ ] BUG` als kaputt verifiziert · `[!] NOT VERIFIED` in diesem Lauf nicht prüfbar (Grund nötig)
+
+## Vorbemerkung zur Methode
+
+`probe.kind: none` gilt sowohl auf App-Ebene als auch im Layer `firmware` — es gab nichts zu starten und nichts live abzufragen. Alle Befunde stammen aus Quellcode-Inspektion (inkl. der vendorten Bibliotheken `firmware/.pio/libdeps/esp32dev/{FastAccelStepper,NimBLE-Arduino}`), aus dem einmaligen Suite-Lauf des Owners und aus einer Nachrechnung der Dauer-/Geschwindigkeitsformeln. Die App-Suite lief einmal vor dem Fan-out (6 Suites/92 Tests, siehe unten) und wurde vom Owner nach dem Hinzufügen eines neuen Testfiles ein zweites Mal komplett wiederholt (7 Suites/109 Tests) — beide Läufe sind unten zitiert. Die drei Lanes selbst haben keine Suite erneut ausgeführt, nur einzelne Dateien gelesen.
+
+## Automatisierte Tests (Step 5)
+
+- **App-Suite** (`npm test`) — PASS — erster Lauf vor dem Fan-out: 6 Suites, 92 Tests, 0 fehlgeschlagen (`ConnectionProvider.test.tsx`, `connectionReducer.test.ts`, `useJogState.test.ts`, `client.test.ts`, `useSliderStatus.test.ts`, `App.test.tsx`). Zweiter Lauf nach Ergänzung von `AutoDriveControls.test.ts` (Owner, Step 6): 7 Suites, **109 Tests, 0 fehlgeschlagen**.
+- **Firmware-Layer** — `[!] NOT VERIFIED — no test command recorded for layer firmware` (`commands.test: null` in `.ai-eng-kit`). Ersatzweise: `pio run -e esp32dev` → `[SUCCESS]` (RAM 12,6 %, Flash 48,9 %) — belegt nur, dass die Firmware baut, nicht ihr Verhalten.
+- **E2E-Suite** — nicht vorhanden, übersprungen (kein früherer `/e2e-tests`-Lauf).
+
+## Acceptance Criteria Status
+
+#### AC-1: Startpunkt setzen (überschreibt vorherigen)
+- [!] NOT VERIFIED — no way to run and probe this project was recorded. Code-Kette vollständig geprüft: `AutoDriveControls.tsx:123-125` → `client.ts:214-222` (Opcode `0x02`, Write mit Antwort, Test `client.test.ts:77`) → `ble.cpp:143-148` → `motor.cpp:226-235` (überschreibt `startPosition`).
+- Zusatzbefund: wird still ignoriert, solange der Stepper läuft (`motor.cpp:230`) — siehe BUG-11.
+
+#### AC-2: Endpunkt setzen (überschreibt vorherigen)
+- [!] NOT VERIFIED — no way to run and probe this project was recorded. Gleiche Kette: `AutoDriveControls.tsx:127-129` → `client.ts:229-237` (Test `client.test.ts:93`) → `ble.cpp:150-155` → `motor.cpp:237-243`.
+- Gleicher Zusatzbefund wie AC-1 (BUG-11).
+
+#### AC-3: Auto-Fahrt Start → Ende kommt nach eingegebener Dauer an
+- [ ] BUG-2 (Medium) — die Firmware berechnet `speed = distance/duration` (`motor.cpp:280-291`) ohne die Beschleunigungsrampe (`kAcceleration = 8000` steps/s², `motor.cpp:24,139`) einzurechnen. `setSpeedInHz` ist laut vendortem `FastAccelStepper.h:400-401` die *Maximal*geschwindigkeit, nicht die Durchschnittsgeschwindigkeit — die reale Fahrzeit ist `d/v + v/a`, bei 4000 steps/s also **+0,5 s** zu lang (Beispiel: 40 000 Steps/„10 s" kommen nach ca. 10,5 s an, 5 % zu spät). Bei kurzen Fahrten unter 0,5 s wird das Profil dreieckig und weicht noch stärker ab (800 Steps/„0,2 s" → ca. 0,63 s). `spec.md`s Decision Log lehnt eine „stille Abweichung von der eingegebenen Dauer" explizit ab — das ist genau das.
+- [!] NOT VERIFIED (physisch) — no way to run and probe this project was recorded.
+- Rest der Kette PASS (Code): `AutoDriveControls.tsx:116` (nur bei `atStart`), `client.ts:249-271` (Opcode `0x04`, Richtung `0x00`, Tests `client.test.ts:110,135,145`), `ble.cpp:157-171`, `motor.cpp:305` (`moveTo(endPosition)`).
+
+#### AC-4: Auto-Fahrt Ende → Start kommt nach eingegebener Dauer an
+- [ ] BUG-2 (Medium) — derselbe Rampenfehler wie AC-3, gleicher Codepfad (`motor.cpp:280-291`).
+- [!] NOT VERIFIED (physisch) — no way to run and probe this project was recorded.
+- Rest der Kette PASS (Code): `AutoDriveControls.tsx:117` (nur bei `atEnd`), Richtung `0x01` (`client.ts:39-42`, Test `client.test.ts:125`), Ziel `startPosition` (`motor.cpp:260-263`).
+
+#### AC-5: Stopp hält den Motor sofort an
+- [!] NOT VERIFIED — no way to run and probe this project was recorded.
+- Garantie im Code PASS: Stopp-Button sichtbar/aktiv nur während `driving` (`AutoDriveControls.tsx:216-223`) → STOP als Write mit Antwort (`client.ts:199-207`, Test `client.test.ts:61`) → `ble.cpp:172-178` → `motorStop()` → `forceStop()` ohne Bremsrampe, laut `FastAccelStepper.h:575-578` Stillstand nach ca. 20 ms (`motor.cpp:189`) → `autoDriving = false` (`motor.cpp:201`).
+
+#### AC-6: Ungültige Dauer → Fehlermeldung mit erlaubtem Bereich, keine Fahrt
+- [ ] BUG-3 (Medium) — App und Firmware validieren unterschiedliche Werte: die App prüft die *ungerundete* Eingabe (`AutoDriveControls.tsx:91-97`), gesendet wird aber `Math.round(sekunden*10)` (`client.ts:254-257`), und die Firmware prüft den *gerundeten* Wert (`motor.cpp:283-286`). Folge: Werte knapp an der Grenze gelten in der App als gültig (Button aktiv), der Druck bewirkt aber nichts — ohne jede Rückmeldung. Nachgerechnet (Node, Formeln aus den drei genannten Stellen):
+  | Distanz | Eingabe | Gesendet | Firmware-Speed | Ergebnis |
+  |---|---|---|---|---|
+  | 50100 Steps | 12,53 s | 125 ds | 4008 steps/s | von der Firmware abgelehnt |
+  | 840 Steps | 0,22 s | 2 ds | 4200 steps/s | von der Firmware abgelehnt |
+  | 1012 Steps | 5,055 s | 51 ds | 198,4 steps/s | von der Firmware abgelehnt |
+- [ ] BUG-4 (Low) — die angezeigte Fehlermeldung rundet Minimum und Maximum beide mit `toFixed(1)` (`AutoDriveControls.tsx:41-43`) statt Minimum auf-/Maximum abzurunden. Bei 50100 Steps zeigt die Meldung „erlaubt: 12.5–250.5 s", obwohl exakt 12,5 s wegen BUG-3 als ungültig markiert wird — die Meldung widerspricht sich selbst.
+- [!] NOT VERIFIED (Darstellung am Gerät) — no way to run and probe this project was recorded.
+- Grundmechanik PASS (Code): Bereichsberechnung `distance/4000 … distance/200` (`AutoDriveControls.tsx:84-97`), Auslöser gesperrt bei ungültiger Dauer (`:108-117`), Firmware prüft unabhängig erneut (`motor.cpp:283-286`).
+
+#### AC-7: Ohne beide Punkte sind die Auto-Fahrt-Auslöser deaktiviert
+- [!] NOT VERIFIED — no way to run and probe this project was recorded. Logik PASS (Code): beide Auslöser erfordern `hasStart && hasEnd && distanceSteps > 0` (`AutoDriveControls.tsx:108-117`, `disabled` in Z. 194/206); Flags korrekt geparst (`client.ts:284-306`, Tests `client.test.ts:170,228,238`). Kein Komponententest für `AutoDriveControls` in der Suite (nur die reinen Hilfsfunktionen, siehe Step 6).
+
+#### AC-8: Auslöser nur aktiv, wenn exakt am jeweiligen Startpunkt der Richtung
+- [!] NOT VERIFIED — no way to run and probe this project was recorded. Logik PASS (Code): `atStart`/`atEnd` kommen aus der Firmware, exakter Vergleich nur im Stillstand (`motor.cpp:357-365`), App schaltet danach (`AutoDriveControls.tsx:116-117`), Firmware lehnt unabhängig ab (`motor.cpp:264-270`). Parse-Test: `client.test.ts:217`.
+
+#### AC-9: Während einer Auto-Fahrt reagieren nur der Stopp-Button, Jog/Setzen nicht
+- [ ] **BUG-1 (High)** — die Sperre existiert nur in der App-UI, nicht in der Firmware. `motorJog()` prüft `autoDriving` nicht (`motor.cpp:142-180`), der Command-Handler reicht jeden JOG-Write ungeprüft durch (`ble.cpp:132-141`). Trifft während einer laufenden Auto-Fahrt (`autoDriving == true`, gesetzt in `motor.cpp:304` vor `moveTo()`) ein JOG-Befehl ein, macht `runForward()`/`runBackward()` aus der geplanten `moveTo()`-Fahrt einen **unbegrenzten Dauerlauf** (`FastAccelStepper`s dokumentiertes Verhalten, vendort in `RampGenerator.cpp:32-47`). `autoDriving` bleibt dabei `true` (motorJog fasst es nicht an), wodurch **beide** verbleibenden Sicherheitsnetze verstummen: `motorAutoDriveCheck()` löscht das Flag nur bei `!isRunning()`, was bei Dauerlauf nie eintritt (`motor.cpp:318`), und `motorWatchdogCheck()` kehrt bei `autoDriving == true` sofort zurück, ganz ohne den 1-Sekunden-Timeout zu prüfen (`motor.cpp:208-215`). Der Motor stoppt dann nur noch durch ein explizites STOP oder einen vollständigen Verbindungsabbruch — auf einer Schiene ohne Endanschläge (`spec.md` → Out of Scope) ein reales Risiko für die Mechanik.
+  - Erreichbar aus der App: Das Notify mit `driving=true` braucht eine BLE-Roundtrip-Latenz, bis dahin ist kein Jog-Button optimistisch gesperrt (`AutoDriveControls.tsx:131-136` sendet AUTO_DRIVE ohne selbst zu sperren; `JogControls` sperrt erst, wenn `status.driving` über das Notify ankommt, `RootScreen.tsx:34,68`) — ein zweiter Fingertipp in diesem kurzen Fenster reicht.
+  - Reproduktion (aus dem Code, nicht auf Hardware ausgeführt): Start/Ende setzen, „Start → Ende" antippen, innerhalb von ca. 100 ms „▲ Vorwärts" gedrückt halten, danach nichts mehr senden (App einfrieren/STOP unterdrücken). Erwartet: Stopp nach ≤1 s. Laut Code tatsächlich: Dauerlauf.
+  - Widerspricht `design.md`s eigenem Grundsatz (Zeile 117: „Firmware verlässt sich nicht auf die App") — der ist für AUTO_DRIVE umgesetzt, für JOG während einer Fahrt aber nicht.
+  - **Unabhängig von drei separaten QA-Lanes (Akzeptanz, Security, Regression) gefunden und mit identischen `file:line`-Belegen bestätigt** — kein Einzelbefund.
+  - Fix-Richtung (nicht selbst umgesetzt, gehört zu `/build`): Guard in `motorJog()`, z. B. `if (autoDriving) return;` — analog zum bestehenden `isRunning()`-Guard in `motorSetStart()`/`motorSetEnd()`.
+- [!] NOT VERIFIED (UI-Sperre selbst am Gerät) — no way to run and probe this project was recorded.
+
+#### AC-10: BLE-Abbruch während Auto-Fahrt → Firmware stoppt eigenständig
+- [ ] BUG-5 (Medium) — die Firmware stoppt nur, wenn `getConnectedCount() == 0` ist (`ble.cpp:107-113`). Advertising läuft auch während einer bestehenden Verbindung weiter (`ble.cpp:87`), erlaubt bis zu 3 gleichzeitige Verbindungen (`nimconfig.h:225`), und für den reinen *Connect* ist kein Bonding nötig (`WRITE_ENC` schützt nur Schreibzugriffe). Hält also ein zweites, unbeteiligtes BLE-Gerät (z. B. eine Scanner-App in Reichweite) eine eigene Verbindung, stoppt die Firmware nicht, wenn nur die App-Verbindung abbricht — und der Jog-Watchdog greift wegen BUG-1 während `autoDriving` ohnehin nicht. Für den Normalfall (kein zweites Gerät verbunden) bleibt die Garantie intakt.
+- [!] NOT VERIFIED (Normalfall, Hardware) — no way to run and probe this project was recorded.
+- Grundmechanismus PASS (Code): `onDisconnect` → `motorStop()` (`ble.cpp:107-113`), für jeden Fahrmodus.
+
+## Edge Cases Status
+
+#### EC-1: Start = Ende (0 Steps) → Auslöser deaktiviert
+- [!] NOT VERIFIED — no way to run and probe this project was recorded. Logik PASS (Code): Hinweistext (`AutoDriveControls.tsx:106,187-189`), Auslöser gesperrt über `distanceSteps > 0` (`:113`), Firmware lehnt unabhängig ab (`motor.cpp:275-278`).
+
+#### EC-2: Zweite Auslöse-Anfrage während laufender Fahrt wird ignoriert
+- [x] PASS (Garantie im Code bestätigt) — `motor.cpp:251` lehnt bei `autoDriving || stepper->isRunning()` ab, gesetzt in `motor.cpp:303-305`. Alle Command-Writes laufen seriell im einen NimBLE-Host-Task (`NimBLEDevice.cpp:884,1009` der vendorten Bibliothek) — kein Check-then-Set-Race zwischen zwei AUTO_DRIVE-Anfragen möglich, auch nicht über mehrere Verbindungen hinweg. Die App selbst entprellt einen Doppel-Tap nicht (`AutoDriveControls.tsx:131-136`), die Firmware fängt es aber zuverlässig ab.
+
+#### EC-3: App-Neustart/Reconnect → Start/Ende nicht mehr gesetzt
+- [!] NOT VERIFIED — no way to run and probe this project was recorded. Garantien PASS (Code): Firmware `onConnect` → `motorClearPoints()` (`ble.cpp:74` → `motor.cpp:245-248`); App `useSliderStatus` setzt bei `device === null` zurück (`useSliderStatus.ts:48-56`, Tests `useSliderStatus.test.ts:108,139`, im Suite-Lauf bestanden).
+- Zusatzbefund BUG-6 (Medium, siehe unten) — dieselbe Firmware-Logik löscht die Punkte bei **jedem** neuen Connect, nicht nur bei einem Reconnect der eigenen App.
+
+#### EC-4: Auto-Fahrt läuft weiter, wenn App in den Hintergrund geht/abstürzt
+- [!] NOT VERIFIED — no way to run and probe this project was recorded. Garantie PASS (Code): Watchdog kehrt bei `autoDriving` sofort zurück (`motor.cpp:208-215`), App sendet beim Hintergrund-Wechsel nichts Eigenes (`ConnectionProvider.tsx:240-258` reagiert nur auf `active`). Beobachtung (kein Bug): ein echter App-Absturz schließt auf Android meist die GATT-Verbindung, dann greift eher AC-10 als EC-4.
+
+## Nicht dokumentierte Befunde
+
+#### BUG-6 (Medium) — jeder BLE-Connect löscht Start/Ende, nicht nur der eigenen App
+`ble.cpp:74` ruft `motorClearPoints()` in `onConnect` für **jede** neue Verbindung auf, auch unverschlüsselt/ungebondet (`onConnect` feuert vor Pairing, vendort in `NimBLEServer.cpp:446-471`) und auch während die App bereits verbunden ist (Advertising läuft weiter, `ble.cpp:87`). Ein beliebiges fremdes Gerät in Reichweite kann so mitten in der Sitzung — auch während einer laufenden Fahrt — die gesetzten Punkte löschen. Die App sieht nur `hasStart=false` über das Notify, ohne Erklärung. Workaround: Punkte neu setzen.
+
+#### BUG-7 (Medium) — Bond-Verdrängung kann die App aussperren, auch für STOP
+Just-Works-Bonding nimmt jede Pairing-Anfrage ohne Rückfrage an (`ble.cpp:234,245`). Bei maximal 3 gespeicherten Bonds (`nimconfig.h:234`) wird bei Überlauf der älteste per `ble_gap_unpair_oldest_peer()` verdrängt (vendort in `ble_store_util.c:350-355`). Drei fremde Pairings verdrängen so den Bond der App; die Command-Characteristic verlangt `WRITE_ENC` (`ble.cpp:280-282`), wodurch alle App-Writes fehlschlagen — STOP eingeschlossen — bis der Nutzer die Kopplung manuell in den Android-Einstellungen entfernt. Ob Android danach automatisch neu pairt: `[!] NOT VERIFIED — no way to run and probe this project was recorded`.
+
+#### BUG-8 (Low) — AUTO_DRIVE-Richtungsbyte nicht streng validiert
+`ble.cpp:161-163`: jeder Wert ungleich `0x00` wird als „Ende→Start" gewertet, auch `0x02`–`0xFF`, statt nur `0x00`/`0x01` zu akzeptieren. Keine Sicherheitsfolge (Position/Distanz/Geschwindigkeit werden danach unabhängig geprüft), aber ungültige Eingabe wird angenommen statt verworfen. Dasselbe Muster besteht bereits bei JOG (PROJ-2, `ble.cpp:138-139`).
+
+#### BUG-9 (Low) — veralteter Sicherheits-Kommentar
+`ble.cpp:225-228` behauptet, ein Passkey-/Zahlenvergleich-Flow sei „not an option" — laut PROJ-2s `qa-report.md` wurde diese Aussage in `design.md` und im Stack-Pack bereits korrigiert (ein fester Passkey wäre mit `BLE_HS_IO_DISPLAY_ONLY` + `setSecurityPasskey()` + `mitm=true` + `WRITE_AUTHEN` möglich), nur der Firmware-Kommentar wurde nicht nachgezogen.
+
+#### BUG-10 (Low) — Statuszeile zeigt keine Richtung, kein Einzelpunkt-Hinweis
+`AutoDriveControls.tsx:46-52` zeigt während der Fahrt immer nur „Fährt…", `design.md` sieht „Fährt zum Ende…"/„Fährt zum Start…" vor. Bei nur einem gesetzten Punkt wird nicht angezeigt, welcher. Abweichung vom Design, nicht vom Spec (spec.md schreibt keinen exakten Wortlaut vor).
+
+#### BUG-11 (Low) — SET_START/SET_END ohne Rückmeldung ignoriert, wenn der Stepper läuft
+`motor.cpp:230,238`: wird still verworfen, solange `isRunning()` true ist (z. B. ~20 ms nach Jog-Loslassen, oder Multi-Touch „Jog halten + Setzen tippen"). Die Setzen-Buttons sind nur während `driving` gesperrt, nicht während des Joggens. Ein alter Punkt bleibt dann unbemerkt bestehen.
+
+#### BUG-12 (Low) — Data Race auf `gLastStatusPayload`/`gHasSentStatus`
+`ble.cpp:41-42,211-212,324-325`: `onSubscribe` (BLE-Host-Task) und `bleNotifyStatusIfChanged()` (loop-Task) schreiben denselben nicht-`volatile` Puffer ohne Synchronisation und rufen `setValue()`/`notify()` potenziell gleichzeitig auf. Gleiche Bugklasse wie die in dieser Session bereits behobenen `motor.cpp`-Races, hier aber übersehen. Schlimmstenfalls: eine veraltete oder doppelte Notification, sichtbar z. B. als kurzzeitig falsch angezeigter `driving`-Status.
+
+#### BUG-13 (Low) — schmales Race-Fenster in `motorAutoDriveCheck()`
+Treffen STOP und ein neues AUTO_DRIVE genau zwischen dem Lesen von `autoDriving`/`autoDriveStartMillis` und dem `isRunning()`-Aufruf ein, kann `autoDriving` fälschlich gelöscht werden (`motor.cpp:303-322`). Fällt sicher aus (Motor stoppt), wirkt aber wie eine abgebrochene statt einer nie gestarteten Fahrt.
+
+#### BUG-14 (Low) — Rückgabewert von `moveTo()` ignoriert
+`motor.cpp:305`: scheitert der Aufruf, bleibt `autoDriving` nur bis zum Ende der 100-ms-Anlaufzeit `true`, dann setzt sich der Zustand von selbst zurück (`motor.cpp:315-321`). Harmlos (kein hängendes `driving`), aber keine Fehlerrückmeldung an den Nutzer.
+
+## Security Audit Results
+
+_BLE-Peripherie ohne HTTP-Oberfläche, kein Backend, keine Nutzerkonten — die Checkliste ist entsprechend übersetzt, siehe Vorbemerkung. Alles unten ist Code-Inspektion, `probe.kind: none`._
+
+- [x] **BLE-Link-Absicherung (Äquivalent zu „Authentication bypass")** — Command-Characteristic trägt `WRITE_ENC` (`ble.cpp:280-282`), unverschlüsselte Writes erreichen `onWrite` nicht. Evidenz: `ble.cpp:234,245`.
+- [ ] **BUG (Kontext, keine Neubewertung)** — Just Works (`mitm=false`) authentifiziert nicht, nur verschlüsselt: jedes Gerät in Reichweite kann pairen und danach schreiben. Diese Risikoentscheidung wurde bei PROJ-2 bewusst getroffen (`features/PROJ-2-manuelle-steuerung-jog/qa-report.md:109`) — hier nur zur Kenntnis genommen, keine neue Bewertung. PROJ-3 senkt die Angriffshürde aber von „muss dauerhaft JOG senden" auf „ein einziges Paket" (BUG-1) und fügt zwei neue, von Fremdgeräten auslösbare Nebenwirkungen hinzu (BUG-6, BUG-5).
+- [!] NOT VERIFIED — not applicable (keine Nutzerkonten, Einzelnutzer-Gerät) — Authorization über mehrere Nutzer hinweg.
+- [x] **Eingabevalidierung an der BLE-Grenze (Äquivalent zu Input Injection)** — Längenprüfung vor jedem Payload-Zugriff, exakte Länge je Opcode (`ble.cpp:126,133,144,151,158,173`), unbekannte Opcodes ignoriert (`:179-183`), kein Out-of-Bounds-Read möglich. AUTO_DRIVE wird unabhängig von der App erneut validiert (`motor.cpp:251-286`: `autoDriving`, `hasStart`/`hasEnd`, exakte Position, Distanz≠0, Geschwindigkeit 200–4000). Ausnahme: BUG-8 (loses Richtungsbyte, Low, keine Sicherheitsfolge).
+- [x] **Geschwindigkeits-/Bereichsprüfung unabhängig von der App** — PASS. `motor.cpp:283-286` lehnt außerhalb 200–4000 steps/s ab; bei `uint16`-Dauer (max. 6553,5 s) ist keine Geschwindigkeit außerhalb des Bereichs erreichbar.
+- [x] **Integer-Overflow/-Underflow bei Positions-/Distanzrechnung** — PASS mit Anmerkung (Low, physisch unerreichbar). `int32`-Subtraktionen (`motor.cpp:272,347`) könnten bei >2³¹ Steps Auseinanderliegen (theoretisch UB) überlaufen — physisch auf einer endlichen Schiene ausgeschlossen.
+- [!] NOT VERIFIED — not implemented (optional for MVP) — Rate Limiting auf BLE-Writes; im Web-Sinn nicht anwendbar.
+- [!] NOT VERIFIED — not applicable (kein Login/Signup/Passwort-Reset, kein Credential-Check) — Brute Force, Account-Enumeration.
+- [!] NOT VERIFIED — not applicable (no HTTP surface in this project) — Credentials in der URL.
+- [x] **Keine Secrets im Bundle** — PASS. Kein Backend, `grep -rniE "api[_-]?key|secret|token|password|https?://" src App.tsx firmware/src` findet nur Kommentartreffer; die BLE-UUIDs sind öffentlicher Protokollvertrag.
+- [x] **Status-Characteristic-Payload enthält nichts Sensibles** — PASS. Exakt 5 Byte, Flags + Distanz (`ble.cpp:48-61`), keine Adressen/Bonds/Geräte-IDs. Notify ist unverschlüsselt abrufbar (`ble.cpp:289`) — bei diesem Inhalt unbedenklich.
+- [ ] **BUG-5 (Medium)** — AC-10s Disconnect-Stopp-Garantie ist durch ein unbeteiligtes, ungebondetes Zweitgerät aushebelbar (Details oben unter AC-10).
+- [ ] **BUG-6 (Medium)** — jeder Connect löscht die Punkte, auch von einem unbeteiligten Gerät (Details oben).
+- [ ] **BUG-7 (Medium)** — Bond-Verdrängung kann die App aussperren (Details oben).
+- [ ] **BUG-8 (Low)** — loses AUTO_DRIVE-Richtungsbyte (Details oben).
+- [ ] **BUG-9 (Low)** — veralteter Sicherheits-Kommentar (Details oben).
+- [ ] **BUG-12 (Low)** — Data Race auf dem Status-Notify-Puffer (Details oben).
+
+**Security-Zusammenfassung:** 6 Checks verifiziert (PASS), 4 NOT VERIFIED (3× not applicable, 1× not implemented/optional), 6 Bugs gefunden (0 Critical, 0 High — BUG-1 selbst ist als Acceptance-Bug unter AC-9 gezählt, nicht doppelt hier —, 3 Medium: BUG-5/6/7, 3 Low: BUG-8/9/12).
+
+## E2E Tests
+- Status: **not run** (run `/e2e-tests` for critical flows)
+
+## Step 6 — Unit-Tests (Owner)
+
+Neu geschrieben: `src/components/AutoDriveControls.test.ts` (17 Tests) für die drei reinen, bis dahin ungetesteten Hilfsfunktionen aus `AutoDriveControls.tsx` (`parseDurationSeconds`, `formatSeconds`, `statusLabelFor` — dafür `export` ergänzt, keine Verhaltensänderung). Abdeckung: Komma-/Punkt-Dezimaltrennzeichen, leere/nicht-numerische/negative/unendliche Eingabe, Rundung, alle drei Statuszeilen-Fälle.
+
+Rot-Probe durchgeführt: alle drei Funktionen in der Quelldatei gezielt kaputt gemacht (Komma-Ersetzung entfernt, Null-/Negativ-/Unendlich-Filter entfernt, Rundung auf 3 statt 1 Dezimalstelle, Reihenfolge der `statusLabelFor`-Zweige vertauscht + Fallback-Text geändert), Testdatei erneut laufen lassen: **12 von 17 Tests wurden rot**, jeweils mit der erwarteten Diskrepanz (z. B. „Expected: null, Received: NaN" / „Expected: Bereit, Received: kaputt"); die verbleibenden 5 grünen Tests betreffen Eingaben, die von der jeweils kaputt gemachten Regel nicht berührt waren. Danach Quelldatei zurückgesetzt, Testdatei erneut grün (17/17). Kein Blindgänger-Test in der Datei.
+
+Gesamte Suite nach der Ergänzung erneut komplett gelaufen (Owner, Step 5-Nachtrag): `npm test` → 7 Suites, 109 Tests, 0 fehlgeschlagen.
+
+## Not Verified In This Run
+
+- [!] Laufzeitverhalten der gesamten App und Firmware auf echter Hardware — AC-1, AC-2, AC-5, AC-7, AC-8, EC-1, EC-3, EC-4 vollständig; der physische/UI-Teil von AC-3, AC-4, AC-6, AC-9, AC-10 — Grund: `no way to run and probe this project was recorded` (`probe.kind: none`, App-Ebene und Layer `firmware`).
+- [!] Firmware-eigene Tests — kein `commands.test` für den Layer `firmware` hinterlegt (`null`); nur der Compile-Nachweis (`pio run` → SUCCESS) liegt vor.
+- [!] Komponententest für `AutoDriveControls` als Ganzes (Rendering, Button-Enablement-Kette end-to-end) — nur die extrahierten reinen Hilfsfunktionen sind unit-getestet (Step 6); kein Render-Test in der Suite.
+- [!] Zwei parallele `monitorCharacteristicForService`-Aufrufe auf dieselbe Status-Characteristic (`RootScreen.tsx:34` und `AutoDriveControls.tsx:73`, je über `useSliderStatus`) — ob `react-native-ble-plx` das auf Android als eine gemeinsame native Subscription führt oder als zwei, ist ungeprüft.
+- [!] Rate Limiting auf BLE-Writes — nicht implementiert, für ein MVP dieser Art optional, keine Web-Analogie anwendbar.
+- [!] Verhalten von Android nach Verlust des Bonds (BUG-7) — ob automatisch neu gepaart wird — nur auf echter Hardware prüfbar.
+- [!] Cross-Browser/Responsive/DevTools — entfällt vollständig, mobile App ohne Browser-Oberfläche.
+
+## Bugs Found
+
+### BUG-1: JOG während laufender Auto-Fahrt hebelt Watchdog UND Auto-Fahrt-Ankunftserkennung aus
+- **Severity:** High (von zwei der drei Lanes unabhängig so eingestuft; die Security-Lane hält Critical für vertretbar, da die Schiene keine Endanschläge hat — die Entscheidung, ob das für den Nutzer geschäftskritisch genug ist, liegt beim Owner/Nutzer)
+- **Steps to Reproduce** (aus dem Code, nicht auf Hardware ausgeführt):
+  1. Start und Ende setzen, zum Startpunkt joggen
+  2. „Start → Ende" antippen
+  3. Innerhalb von ca. 100 ms (vor Eintreffen des `driving=true`-Notify) „▲ Vorwärts" gedrückt halten, dann loslassen — ODER die App währenddessen einfrieren/das folgende STOP unterdrücken
+  4. Erwartet: Fahrt läuft plangemäß zu Ende, oder JOG wird abgelehnt/wirkungslos
+  5. Tatsächlich (laut Code): `moveTo()` wird zu einem unbegrenzten Dauerlauf, weder Watchdog noch Ankunftserkennung greifen mehr
+- **Priority:** Fix before deployment
+
+### BUG-2: Auto-Fahrt kommt wegen ignorierter Beschleunigungsrampe später an als die eingegebene Dauer
+- **Severity:** Medium
+- **Steps to Reproduce:** Punkte 40 000 Steps auseinander setzen, Dauer „10" eingeben, Fahrt auslösen, Ankunftszeit messen. Erwartet: 10,0 s. Laut Formel: ca. 10,5 s (5 % Abweichung, wächst mit der Speed).
+- **Priority:** Fix before deployment (spec.md schließt „stille Abweichung" explizit aus)
+
+### BUG-3: App validiert die Dauer ungerundet, Firmware gerundet — Grenzwerte scheitern stillschweigend
+- **Severity:** Medium
+- **Steps to Reproduce:** Distanz 50100 Steps, Dauer „12.53" eingeben (App zeigt keinen Fehler), Fahrt auslösen. Erwartet: Fahrt startet oder App zeigt Fehler. Tatsächlich: Firmware lehnt (gerundet 125 ds → 4008 steps/s > 4000) kommentarlos ab, nichts passiert.
+- **Priority:** Fix before deployment
+
+### BUG-4: Angezeigter Dauer-Bereich in der Fehlermeldung ist an den Grenzen widersprüchlich
+- **Severity:** Low
+- **Steps to Reproduce:** Distanz 50100 Steps, ungültige Dauer eingeben → Meldung „erlaubt: 12.5–250.5 s" erscheint, obwohl genau 12,5 s (wegen BUG-3) tatsächlich abgelehnt wird.
+- **Priority:** Nice to have (hängt an BUG-3s Fix)
+
+### BUG-5: Disconnect-Stopp-Garantie (AC-10) durch unbeteiligtes Zweitgerät aushebelbar
+- **Severity:** Medium
+- **Steps to Reproduce:** Ein zweites BLE-Gerät verbindet sich mit dem Slider (kein Bonding nötig), während die App eine Auto-Fahrt fährt. App-Verbindung trennen. Erwartet: Firmware stoppt sofort (AC-10). Tatsächlich: `getConnectedCount() != 0`, kein Stopp — Fahrt läuft bis zum Ziel weiter.
+- **Priority:** Fix before deployment
+
+### BUG-6: Jeder BLE-Connect löscht Start-/Endpunkt, nicht nur ein Reconnect der eigenen App
+- **Severity:** Medium
+- **Steps to Reproduce:** Punkte setzen, ein beliebiges zweites BLE-Gerät verbindet sich mit dem Slider. Erwartet: Punkte bleiben (EC-3 meint nur echte App-Reconnects). Tatsächlich: `onConnect` löscht sie für jede neue Verbindung.
+- **Priority:** Fix before deployment
+
+### BUG-7: Bond-Verdrängung (Just Works, max. 3 Bonds) kann die App aussperren, auch für STOP
+- **Severity:** Medium
+- **Steps to Reproduce:** Drei fremde BLE-Geräte pairen nacheinander mit dem Slider. Erwartet: App bleibt bedienbar. Tatsächlich: App-Bond wird verdrängt, alle Writes (inkl. STOP) scheitern an `WRITE_ENC`, bis der Nutzer die Kopplung in Android manuell entfernt.
+- **Priority:** Fix in next sprint
+
+### BUG-8: AUTO_DRIVE-Richtungsbyte nicht streng validiert
+- **Severity:** Low
+- **Priority:** Nice to have
+
+### BUG-9: Veralteter Sicherheits-Kommentar in ble.cpp
+- **Severity:** Low
+- **Priority:** Nice to have
+
+### BUG-10: Statuszeile zeigt keine Fahrtrichtung / keinen Einzelpunkt-Hinweis
+- **Severity:** Low
+- **Priority:** Nice to have
+
+### BUG-11: SET_START/SET_END ohne Rückmeldung ignoriert, wenn der Stepper noch läuft
+- **Severity:** Low
+- **Priority:** Nice to have
+
+### BUG-12: Data Race auf dem Status-Notify-Puffer (`gLastStatusPayload`/`gHasSentStatus`)
+- **Severity:** Low
+- **Priority:** Fix in next sprint (gleiche Bugklasse wie die in dieser Session bereits gefixten `motor.cpp`-Races)
+
+### BUG-13: Schmales Race-Fenster in `motorAutoDriveCheck()` bei gleichzeitigem STOP+AUTO_DRIVE
+- **Severity:** Low
+- **Priority:** Nice to have
+
+### BUG-14: Rückgabewert von `moveTo()` ignoriert
+- **Severity:** Low
+- **Priority:** Nice to have
+
+## Summary
+- **Acceptance Criteria:** 0/10 als voll bestätigt verifizierbar (kein Probe möglich), 4 AC mit einem im Code bestätigten Bug (AC-3, AC-4, AC-6, AC-9), 1 AC mit bedingtem Bug (AC-10), 5 AC mit intakter Code-Kette aber `NOT VERIFIED` (AC-1, AC-2, AC-5, AC-7, AC-8); EC-2 PASS (Garantie im Code bestätigt), EC-1/EC-3/EC-4 `NOT VERIFIED` mit intakter Code-Kette
+- **Bugs Found:** 14 total (0 Critical, 1 High, 5 Medium, 8 Low)
+- **Security:** 6/10 Checks verifiziert, 4 NOT VERIFIED (3× not applicable, 1× not implemented/optional) — siehe Security-Zusammenfassung oben
+- **Production Ready:** **NO**
+- **Recommendation:** Vor allem BUG-1 (High) fixen — das ist der Kern-Bug, den alle drei Lanes unabhängig gefunden haben und der die zentrale Sicherheitsgarantie von AC-9 in der Firmware aushebelt. Die Medium-Bugs (BUG-2,3,5,6,7) sollten im selben Durchgang mit, da sie alle dieselbe Interaktion (Firmware verlässt sich zu sehr auf die App bzw. auf "es verbindet sich schon niemand Fremdes") betreffen. Danach `/qa` erneut — als Re-Verifikation im Umfang des Diffs.
+
+> "Production Ready: NO" heißt: mindestens ein High-Bug ist offen (BUG-1). Das gilt unabhängig davon, dass viele Acceptance Criteria zusätzlich `NOT VERIFIED` sind, weil hier nichts ausführbar war — beide Lücken (Bugs UND fehlende Laufzeit-Verifikation) müssen vor „Approved" geschlossen werden.

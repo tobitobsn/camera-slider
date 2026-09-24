@@ -29,7 +29,7 @@ const DEFAULT_DURATION_TEXT = '10';
  * for an empty, non-numeric, or non-positive value — so callers can tell
  * "nothing usable entered yet" apart from "a specific out-of-range number".
  */
-function parseDurationSeconds(text: string): number | null {
+export function parseDurationSeconds(text: string): number | null {
   const normalized = text.trim().replace(',', '.');
   if (normalized === '') {
     return null;
@@ -38,11 +38,11 @@ function parseDurationSeconds(text: string): number | null {
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
-function formatSeconds(value: number): string {
+export function formatSeconds(value: number): string {
   return value.toFixed(1);
 }
 
-function statusLabelFor(status: SliderStatus): string {
+export function statusLabelFor(status: SliderStatus): string {
   if (status.driving) {
     // SliderStatus only exposes a `driving` boolean, not which direction is
     // currently active, so a generic label is used here rather than
