@@ -122,4 +122,10 @@ Keine — kein Backend, kein Provider-Dashboard betroffen. Die Kamera-Berechtigu
 
 ## Open Questions
 
-- [ ] Aus spec.md übernommen: konkrete Kamera-Bibliothek und Wakelock-Mechanismus sind hier jetzt benannt (siehe Dependencies) — `/build` verifiziert beide vor der Installation gegen ihre vendorten Quellen, insbesondere die New-Architecture-Kompatibilität der Keep-Awake-Bibliothek, die hier nicht abschließend geprüft werden konnte
+Keine mehr offen — die einzige Frage (Kamera-Bibliothek/Wakelock-Mechanismus) wurde während `/build` (T3) verifiziert: `@sayem314/react-native-keep-awake` ist New-Architecture-only (`codegenConfig`/`peerDependencies` gegen die vendorte Quelle geprüft), passt zu diesem Projekt, kein Wechsel nötig.
+
+## Umsetzungshinweise (`/build`, 2026-09-26)
+
+- **Drei zusätzliche native Laufzeitabhängigkeiten** gegenüber dem ursprünglichen Entwurf: `react-native-nitro-modules` + `react-native-nitro-image` (VisionCamera Cores eigene, nicht optionale Voraussetzungen) — bereits oben unter Dependencies nachgetragen.
+- **`react-native-vision-camera`, `@react-native-camera-roll/camera-roll` und `@sayem314/react-native-keep-awake` touchieren beim reinen Import bereits ihr natives TurboModule** und stürzen dadurch in Jest ab, sobald irgendein Test den vollen Komponentenbaum lädt (`App.test.tsx`) — nicht nur, wenn ihre Hooks tatsächlich aufgerufen werden. Behoben durch drei neue projektweite manuelle Mocks (`__mocks__/react-native-vision-camera.js`, `__mocks__/@react-native-camera-roll/camera-roll.js`, `__mocks__/@sayem314/react-native-keep-awake.js`), nach demselben etablierten Muster wie das bestehende `__mocks__/react-native-ble-plx.js`; `jest.config.js`s `transformIgnorePatterns` außerdem um alle drei Pakete ergänzt (ESM-only, wie schon bei `@react-native-async-storage`).
+- **`TimelapseControls` erhält `device` als explizite Prop** (nicht selbst über `useConnection()` geholt) — bewusste Abweichung vom `AutoDriveControls`-Muster, weil `RootScreen` `useTimelapseSequence(device)` ohnehin selbst aufrufen muss (der Hook ist zustandsbehaftet, darf nicht doppelt instanziiert werden) und `device` dabei schon vorliegt.

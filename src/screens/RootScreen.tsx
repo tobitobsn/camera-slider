@@ -47,7 +47,7 @@ export function RootScreen() {
     <View style={styles.container}>
       <ConnectionHeader />
       <View style={styles.content}>
-        {renderContent(state.status, status.driving, timelapse)}
+        {renderContent(state.status, device, status.driving, timelapse)}
       </View>
     </View>
   );
@@ -55,6 +55,7 @@ export function RootScreen() {
 
 function renderContent(
   status: ReturnType<typeof useConnection>['state']['status'],
+  device: ReturnType<typeof useConnection>['device'],
   driving: boolean,
   timelapse: TimelapseSequenceApi,
 ) {
@@ -80,14 +81,16 @@ function renderContent(
       // sequence drives the carriage itself via TIMELAPSE_MOVE and a
       // concurrent jog/auto-drive command would fight it. Symmetrically,
       // TimelapseControls locks its own "start sequence" action while a
-      // manual auto-drive is already in progress (`disabled={driving}`) —
-      // AutoDriveControls' own `status.driving` checks already cover the
-      // reverse case internally.
+      // manual auto-drive is already in progress — it calls
+      // useSliderStatus(device) itself (same pattern as AutoDriveControls)
+      // and checks `status.driving` internally, so no separate `disabled`
+      // prop is needed here for that direction.
       return (
         <View style={styles.connectedStack}>
           <JogControls disabled={driving || timelapse.isRunning} />
           <AutoDriveControls disabled={timelapse.isRunning} />
           <TimelapseControls
+            device={device}
             isRunning={timelapse.isRunning}
             currentShot={timelapse.currentShot}
             totalShots={timelapse.totalShots}
@@ -95,7 +98,6 @@ function renderContent(
             error={timelapse.error}
             start={timelapse.start}
             stop={timelapse.stop}
-            disabled={driving}
           />
         </View>
       );
