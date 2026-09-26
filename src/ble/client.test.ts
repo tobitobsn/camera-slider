@@ -26,18 +26,18 @@ function createMockDevice(): MockWritableDevice {
 }
 
 describe('sendJogCommand', () => {
-  it('writes opcode 0x01 + forward (0x00) + speed, without response', async () => {
+  it('writes opcode 0x01 + forward (0x00) + speed, with response', async () => {
     const device = createMockDevice();
 
     await sendJogCommand(device as unknown as Device, 'forward', 42);
 
-    expect(device.writeCharacteristicWithoutResponseForService).toHaveBeenCalledTimes(1);
+    expect(device.writeCharacteristicWithResponseForService).toHaveBeenCalledTimes(1);
     const [serviceUUID, charUUID, base64Value] =
-      device.writeCharacteristicWithoutResponseForService.mock.calls[0];
+      device.writeCharacteristicWithResponseForService.mock.calls[0];
     expect(serviceUUID).toBe(SLIDER_SERVICE_UUID);
     expect(charUUID).toBe(SLIDER_COMMAND_CHAR_UUID);
     expect(Array.from(toByteArray(base64Value))).toEqual([0x01, 0x00, 42]);
-    expect(device.writeCharacteristicWithResponseForService).not.toHaveBeenCalled();
+    expect(device.writeCharacteristicWithoutResponseForService).not.toHaveBeenCalled();
   });
 
   it('encodes backward direction as 0x01', async () => {
@@ -45,7 +45,7 @@ describe('sendJogCommand', () => {
 
     await sendJogCommand(device as unknown as Device, 'backward', 7);
 
-    const [, , base64Value] = device.writeCharacteristicWithoutResponseForService.mock.calls[0];
+    const [, , base64Value] = device.writeCharacteristicWithResponseForService.mock.calls[0];
     expect(Array.from(toByteArray(base64Value))).toEqual([0x01, 0x01, 7]);
   });
 
@@ -54,7 +54,7 @@ describe('sendJogCommand', () => {
 
     await sendJogCommand(device as unknown as Device, 'forward', 100);
 
-    const [, , base64Value] = device.writeCharacteristicWithoutResponseForService.mock.calls[0];
+    const [, , base64Value] = device.writeCharacteristicWithResponseForService.mock.calls[0];
     expect(Array.from(toByteArray(base64Value))).toEqual([0x01, 0x00, 100]);
   });
 });
