@@ -194,8 +194,22 @@ export function subscribeToDisconnect(
 /**
  * Sends a JOG command: direction + speed (1-100%). Meant to be called
  * repeatedly (~every 300ms) while a direction button is held — the
- * firmware's watchdog auto-stops if these stop arriving. Write WITHOUT
- * response: a single lost packet is harmless since this repeats.
+ * firmware's watchdog auto-stops if these stop arriving.
+ *
+ * qa-report.md BUG-12 (PROJ-2): used to write WITHOUT response, on the
+ * (wrong) assumption that a single lost packet is harmless since this
+ * repeats. Reproduced live on hardware: after an AUTO_DRIVE (Start→Ende or
+ * Ende→Start), jog writes started silently failing to reach the firmware —
+ * not just once, but *persistently* for the rest of the session — while the
+ * app's own status view (`driving`/`timelapseMoving`) correctly read false
+ * the whole time, so nothing here could tell the difference between "not
+ * jogging because idle" and "not jogging because every write is being
+ * dropped". Write-without-response gives no delivery confirmation at all,
+ * so a sustained drop (not just an occasional one) is invisible by design.
+ * Switched to WithResponse, matching every other command's already-proven
+ * pattern — confirmed on hardware to close the gap (multiple AUTO_DRIVE →
+ * jog round-trips all worked afterwards). The small extra GATT round-trip
+ * per 300ms tick is not perceptible against JOG_REPEAT_INTERVAL_MS.
  */
 export async function sendJogCommand(
   device: Device,
@@ -208,7 +222,7 @@ export async function sendJogCommand(
     speedPercent,
   ]);
 
-  await device.writeCharacteristicWithoutResponseForService(
+  await device.writeCharacteristicWithResponseForService(
     SLIDER_SERVICE_UUID,
     SLIDER_COMMAND_CHAR_UUID,
     fromByteArray(payload),
