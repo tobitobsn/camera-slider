@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { Device } from 'react-native-ble-plx';
-import { Camera } from 'react-native-vision-camera';
+import { Camera, type CameraDevice, type usePhotoOutput } from 'react-native-vision-camera';
 
 import { colors, minTouchTarget, radius, spacing, typography } from '../theme/colors';
-import { useCameraCapture } from './useCameraCapture';
 import { useSliderStatus } from './useSliderStatus';
 import type { TimelapseSequenceApi } from './useTimelapseSequence';
 
@@ -80,6 +79,14 @@ export function formatDurationSeconds(totalSeconds: number): string {
 
 export type TimelapseControlsProps = TimelapseSequenceApi & {
   device: Device | null;
+  // qa-report.md BUG-2: these come from RootScreen's single useCameraCapture()
+  // call now, not from a second, separate call inside this component — see
+  // useTimelapseSequence.ts's `capturePhoto` param doc comment for why a
+  // second call breaks photo capture entirely.
+  hasPermission: boolean;
+  requestPermission: () => Promise<boolean>;
+  cameraDevice: CameraDevice | undefined;
+  photoOutput: ReturnType<typeof usePhotoOutput>;
 };
 
 /**
@@ -90,17 +97,30 @@ export type TimelapseControlsProps = TimelapseSequenceApi & {
  * already built) — this component only renders its state and calls
  * start()/stop() from the props it receives (from RootScreen via T6).
  *
- * Own useSliderStatus(device)/useCameraCapture() subscriptions, same pattern
- * as AutoDriveControls: no local optimistic state for hasStart/hasEnd/
- * atStart/distanceSteps or for the camera permission/device, all of it comes
- * straight from those hooks.
+ * Own useSliderStatus(device) subscription, same pattern as AutoDriveControls:
+ * no local optimistic state for hasStart/hasEnd/atStart/distanceSteps, all of
+ * it comes straight from that hook. The camera permission/device/output come
+ * as props instead (qa-report.md BUG-2) — RootScreen owns the single
+ * useCameraCapture() call and passes its result down here and into
+ * useTimelapseSequence.
  */
 export function TimelapseControls(props: TimelapseControlsProps): React.JSX.Element | null {
-  const { device, isRunning, currentShot, totalShots, remainingSeconds, error, start, stop } =
-    props;
+  const {
+    device,
+    isRunning,
+    currentShot,
+    totalShots,
+    remainingSeconds,
+    error,
+    start,
+    stop,
+    hasPermission,
+    requestPermission,
+    cameraDevice,
+    photoOutput,
+  } = props;
 
   const status = useSliderStatus(device);
-  const { hasPermission, requestPermission, cameraDevice, photoOutput } = useCameraCapture();
 
   const [shotCountText, setShotCountText] = useState(DEFAULT_SHOT_COUNT_TEXT);
   const [intervalText, setIntervalText] = useState(DEFAULT_INTERVAL_TEXT);

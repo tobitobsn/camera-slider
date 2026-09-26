@@ -45,5 +45,13 @@ void setup() {
 void loop() {
   motorWatchdogCheck();
   motorAutoDriveCheck();
+  // qa-report.md BUG-1 (PROJ-5): this call was missing entirely — no task
+  // in tasks.md ever added it (T1 built motorTimelapseMoveCheck() but was
+  // explicitly told not to touch this file; T4 wired the BLE opcode, not
+  // loop()). Without it, timelapseMoving never clears after a
+  // TIMELAPSE_MOVE, which silently disables the jog watchdog
+  // (motorWatchdogCheck()'s early-return guard) and rejects every
+  // subsequent motorAutoDrive() call until the next STOP.
+  motorTimelapseMoveCheck();
   bleNotifyStatusIfChanged();
 }

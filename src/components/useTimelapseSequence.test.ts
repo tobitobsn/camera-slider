@@ -20,19 +20,11 @@ jest.mock('../ble/client', () => ({
   subscribeToStatus: jest.fn(),
 }));
 
-// Mocked the same way (jest.mock + jest.fn) as ../ble/client above — these
-// are the two Level-1 device-capability hooks this hook is built on top of
-// (tasks.md T3), neither of which is itself under test here.
+// qa-report.md BUG-2: useTimelapseSequence no longer calls useCameraCapture()
+// itself (that created a second, unattached photo output — see the hook's
+// `capturePhoto` param doc comment) — it receives capturePhoto as a plain
+// argument instead, so a bare jest.fn() is enough here, no module mock.
 const mockCapturePhoto = jest.fn();
-jest.mock('./useCameraCapture', () => ({
-  useCameraCapture: () => ({
-    hasPermission: true,
-    requestPermission: jest.fn(),
-    cameraDevice: undefined,
-    photoOutput: undefined,
-    capturePhoto: mockCapturePhoto,
-  }),
-}));
 
 const mockActivate = jest.fn();
 const mockDeactivate = jest.fn();
@@ -80,7 +72,7 @@ function SequenceProbe({
   device: Device | null;
   onApi: (api: TimelapseSequenceApi) => void;
 }) {
-  const api = useTimelapseSequence(device);
+  const api = useTimelapseSequence(device, mockCapturePhoto);
   onApi(api);
   return null;
 }

@@ -182,7 +182,8 @@ MotorStatus motorGetStatus();
 // Nutzer-Einstellung").
 void motorTimelapseMoveTo(bool endIsAfterStart, uint32_t distanceSteps);
 
-// Call from loop() (main.cpp — not wired up by this change, see T4).
+// Call from loop() (main.cpp — qa-report.md BUG-1: this call was missing
+// entirely until the QA fix; no task in tasks.md had wired it up).
 // Analogous to motorAutoDriveCheck(): detects arrival (isRunning() becomes
 // false while timelapseMoving is still true) and clears timelapseMoving
 // when it happens, after the same start grace period motorAutoDriveCheck()

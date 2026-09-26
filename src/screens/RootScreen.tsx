@@ -11,10 +11,13 @@ import { PermissionRationale } from '../components/PermissionRationale';
 import { ReconnectingBanner } from '../components/ReconnectingBanner';
 import { ScanningIndicator } from '../components/ScanningIndicator';
 import { TimelapseControls } from '../components/TimelapseControls';
+import { useCameraCapture } from '../components/useCameraCapture';
 import { useConnection } from '../connection/ConnectionProvider';
 import { useSliderStatus } from '../components/useSliderStatus';
 import { useTimelapseSequence, type TimelapseSequenceApi } from '../components/useTimelapseSequence';
 import { colors, spacing, typography } from '../theme/colors';
+
+type CameraCapture = ReturnType<typeof useCameraCapture>;
 
 /**
  * The app's single screen (PROJ-1 owns the shell — see docs/app-shell.md).
@@ -34,6 +37,13 @@ export function RootScreen() {
   // left as-is: a second lightweight JS listener on the same already-active
   // BLE notify subscription, not a second native subscription.)
   const status = useSliderStatus(device);
+  // qa-report.md BUG-2: called here (once) rather than separately inside
+  // TimelapseControls and useTimelapseSequence — each of those calling it
+  // independently created its own, separate usePhotoOutput() instance, and
+  // only one of the two ever got attached to the actual <Camera> component,
+  // so a capture through the other one always failed. One call, passed down
+  // to both.
+  const cameraCapture = useCameraCapture();
   // PROJ-5 T6: called here (once) rather than inside TimelapseControls,
   // because — unlike useSliderStatus's lightweight status listener — this
   // hook owns the whole in-flight sequence (refs, timers, the run loop
@@ -41,13 +51,13 @@ export function RootScreen() {
   // second, independent orchestrator instead of sharing state. Its full API
   // is threaded down as props; JogControls/AutoDriveControls also need
   // `isRunning` to lock themselves while a sequence is running.
-  const timelapse = useTimelapseSequence(device);
+  const timelapse = useTimelapseSequence(device, cameraCapture.capturePhoto);
 
   return (
     <View style={styles.container}>
       <ConnectionHeader />
       <View style={styles.content}>
-        {renderContent(state.status, device, status.driving, timelapse)}
+        {renderContent(state.status, device, status.driving, timelapse, cameraCapture)}
       </View>
     </View>
   );
@@ -58,6 +68,7 @@ function renderContent(
   device: ReturnType<typeof useConnection>['device'],
   driving: boolean,
   timelapse: TimelapseSequenceApi,
+  cameraCapture: CameraCapture,
 ) {
   switch (status) {
     case 'checking_permissions':
@@ -98,6 +109,10 @@ function renderContent(
             error={timelapse.error}
             start={timelapse.start}
             stop={timelapse.stop}
+            hasPermission={cameraCapture.hasPermission}
+            requestPermission={cameraCapture.requestPermission}
+            cameraDevice={cameraCapture.cameraDevice}
+            photoOutput={cameraCapture.photoOutput}
           />
         </View>
       );

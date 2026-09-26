@@ -4,6 +4,17 @@
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <!-- qa-report.md BUG-3 (PROJ-5): required for react-native-vision-camera's
+         runtime permission request (useCameraPermission()) to ever succeed —
+         without this declaration Android silently denies the request with no
+         dialog, permanently blocking the Zeitraffer start button. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- qa-report.md "Auch bemerkt" (PROJ-5): @react-native-camera-roll/camera-roll's
+         CameraRoll.save() needs this on Android 9 (API 28) and below — this
+         project's minSdkVersion is 24 (android/build.gradle). Android 10+
+         (API 29+) uses scoped storage instead and does not need it, hence
+         the cap. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
     <application
       android:name=".MainApplication"

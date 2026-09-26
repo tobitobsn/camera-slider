@@ -26,7 +26,6 @@ import {
   type SliderStatus,
 } from '../ble/client';
 import { minAutoDriveDurationSeconds } from './AutoDriveControls';
-import { useCameraCapture } from './useCameraCapture';
 import { useKeepAwake } from './useKeepAwake';
 import { useSliderStatus } from './useSliderStatus';
 
@@ -215,8 +214,19 @@ export type TimelapseSequenceApi = {
 /**
  * @param device The live BLE Device, or null while not connected — same
  *   contract as useSliderStatus/ConnectionProvider's `device` field.
+ * @param capturePhoto qa-report.md BUG-2: `useCameraCapture()` must be
+ *   called exactly once in the tree, not once per hook — a second, separate
+ *   call creates its own `usePhotoOutput()` instance that is never attached
+ *   to the actual `<Camera>` component, so any photo captured through it
+ *   fails. The one call now lives in RootScreen.tsx (alongside its existing
+ *   single `useTimelapseSequence(device)` call, for the same "stateful hook,
+ *   don't instantiate twice" reason) and `capturePhoto` is passed down here
+ *   instead of this hook calling `useCameraCapture()` itself.
  */
-export function useTimelapseSequence(device: Device | null): TimelapseSequenceApi {
+export function useTimelapseSequence(
+  device: Device | null,
+  capturePhoto: () => Promise<void>,
+): TimelapseSequenceApi {
   const [isRunning, setIsRunning] = useState(false);
   const [currentShot, setCurrentShot] = useState(0);
   const [totalShots, setTotalShots] = useState(0);
@@ -224,7 +234,6 @@ export function useTimelapseSequence(device: Device | null): TimelapseSequenceAp
   const [error, setError] = useState<string | null>(null);
 
   const status = useSliderStatus(device);
-  const { capturePhoto } = useCameraCapture();
   const { activate, deactivate } = useKeepAwake();
 
   // "Latest value" refs, mirrored directly during render (a standard,
