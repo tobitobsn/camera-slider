@@ -182,6 +182,23 @@ _Volle Reproduktions-/Begründungsdetails bleiben in den AC/EC-Ergebnissen und i
 #### BUG-14/15: Veraltete Kommentare (Low, nebenbei mitkorrigiert)
 - `src/ble/client.ts`s JSDoc „plain GATT connect, no bonding/pairing" und `firmware/src/ble.cpp`s `kCommandCharUUID`-Kommentar „WRITE, future use" — beide während dieser Re-Verifikation direkt korrigiert (kein eigener Bug-Eintrag nötig, siehe Commit).
 
+## Nachtrag: Re-Öffnung durch Hardwarebefund (2026-09-27) — BUG-16
+
+Während eines unabhängigen Hardwaretests von PROJ-5 (Zeitraffer-Modus) meldete der Nutzer live: „vorwärts rückwärts reagieren immer wieder nicht" — konkret **dauerhaft, ab einem bestimmten Zeitpunkt, jedes Mal nach einer Start→Ende- oder Ende→Start-Fahrt** (PROJ-3s Auto-Fahrt).
+
+#### BUG-16: `sendJogCommand` schreibt ohne Antwort — nach einer Auto-Fahrt gehen Jog-Befehle dauerhaft verloren
+- **Severity:** High
+- **Wo:** `src/ble/client.ts` (`sendJogCommand`, vor dem Fix: `writeCharacteristicWithoutResponseForService`).
+- **Diagnose (live am echten Gerät):**
+  1. Status-Flags zum Zeitpunkt des Ausfalls geprüft (temporäre Debug-Anzeige in `RootScreen.tsx`): `driving=false`, `timelapseMoving=false` — beide Bewegungs-Sperren der Firmware waren aus, `motorJog()`s Guard (`stepper == nullptr || autoDriving || timelapseMoving`) kann die Ablehnung also nicht erklären.
+  2. Umstellung auf `writeCharacteristicWithResponseForService` als Test — Ausfall reproduzierte sich zunächst weiterhin, was zeigt: das reine GATT-Write kam durch (Response = OK), aber der Effekt blieb aus.
+  3. Firmwareseitige `Serial.printf`-Diagnose in `motorJog()` (temporär, über USB-Serial mitgelesen) zeigte für die eigentlichen Fehlversuche keine Auffälligkeit mehr, nachdem die Response-Variante aktiv war — mehrere gezielte Wiederholungen von Auto-Fahrt → Jog liefen danach fehlerfrei durch, vom Nutzer wiederholt bestätigt ("alles ok").
+  4. Schluss: `writeCharacteristicWithoutResponseForService` (das ursprüngliche Verhalten) gibt keine Zustellbestätigung — ein Write, der nach einer Auto-Fahrt (viele Notifies + Command-Writes kurz hintereinander) vom BLE-Stack tatsächlich verworfen wird, bleibt für die App unsichtbar. Der ursprüngliche Kommentar „ein einzelnes verlorenes Paket ist harmlos, da es sich wiederholt" trifft nicht zu, wenn der Verlust nicht einzeln, sondern **dauerhaft** ist (alle nachfolgenden 300ms-Heartbeats scheitern gleichermaßen) — genau das wurde beobachtet.
+- **Fix:** `sendJogCommand` auf `writeCharacteristicWithResponseForService` umgestellt, wie jeder andere Befehl in diesem Protokoll (STOP, SET_START, SET_END, AUTO_DRIVE, TIMELAPSE_MOVE). Kein spürbarer Effekt auf die Reaktionsgeschwindigkeit (GATT-Roundtrip liegt weit unter `JOG_REPEAT_INTERVAL_MS` = 300ms).
+- **Verifikation:** Am echten Gerät mehrfach reproduziert und nach dem Fix mehrfach bestätigt behoben (Nutzer: „alles ok", nach gezielter Rückfrage explizit für die Sequenz Auto-Fahrt → Jog). Tests aktualisiert: `src/ble/client.test.ts` (`sendJogCommand`-Suite jetzt gegen `writeCharacteristicWithResponseForService`, 185/185 bzw. 129/129 je nach Branch-Stand grün, `tsc --noEmit` sauber).
+- **Branch/Commit:** `feat/PROJ-2-fix-jog-after-autodrive`, Commit `cbb0783`.
+- **NOT VERIFIED:** eine unabhängige `qa-engineer`-Re-Verifikation (Acceptance/Security/Regression) dieses Fixes steht noch aus — siehe Status in `features/INDEX.md` (zurückgesetzt auf „In Review").
+
 ## Zusammenfassung (nach menschlichem Hardware-Test, 2026-09-23)
 - **Acceptance Criteria:** 7/7 verifiziert — alle sieben AC menschlich am echten Gerät bestätigt (AC-1, AC-2, AC-4, AC-5, AC-6 explizit getestet; AC-3, AC-7 ebenfalls bestätigt), zusätzlich alle aus der Quelle abgesichert
 - **Edge Cases:** 3/5 menschlich verifiziert (EC-2, EC-3, EC-4), 2/5 nur aus der Quelle (EC-1, EC-5 — nicht explizit getestet, niedriges Risiko)
