@@ -264,6 +264,62 @@ describe('useTimelapseSequence', () => {
     expect(sendAutoDriveCommand).toHaveBeenCalledWith(device, 'endToStart', expect.any(Number));
   });
 
+  it('the arrival timeout scales with a step\'s own delta, not the cumulative target distance (qa-report.md BUG-5, L-3)', async () => {
+    const device = fakeDevice('device-1');
+    let api: TimelapseSequenceApi | undefined;
+
+    await act(async () => {
+      ReactTestRenderer.create(renderProbe(device, a => (api = a)));
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    await act(async () => {
+      broadcastStatus(fullStatus({ distanceSteps: 100000 }));
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    // 3 shots over 100000 steps: step i=2's delta (0 → 50000) equals its own
+    // cumulative target, so it can't distinguish the two formulas — drive it
+    // through quickly. Step i=3's delta (50000 → 100000) is only 50000, but
+    // its cumulative target-from-start is the full 100000: that's the case
+    // that actually tells the two formulas apart.
+    await act(async () => {
+      api!.start(3, 5);
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    // Confirm + immediately complete step i=2 (target 50000, delta 50000).
+    await act(async () => {
+      broadcastStatus(fullStatus({ distanceSteps: 100000, timelapseMoving: true }));
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => {
+      broadcastStatus(fullStatus({ distanceSteps: 100000, timelapseMoving: false }));
+      // Past the 400ms settle pause and the rest of the 5s interval, so the
+      // loop has moved on to sending step i=3's TIMELAPSE_MOVE.
+      await jest.advanceTimersByTimeAsync(6000);
+    });
+    expect(sendTimelapseMoveCommand).toHaveBeenCalledTimes(2);
+
+    // Confirm step i=3's start (target 100000, delta 50000: 100000 - 50000).
+    // computeArriveTimeoutMs(50000) ≈ 13000ms travel + 5000ms margin =
+    // 18000ms — far short of what the cumulative target 100000 would give
+    // (≈30500ms). Never broadcast arrival for this step: if the timeout were
+    // computed from the cumulative target instead of the per-step delta,
+    // the sequence would still be "running" at 18100ms.
+    await act(async () => {
+      broadcastStatus(fullStatus({ distanceSteps: 100000, timelapseMoving: true }));
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(18100);
+    });
+
+    expect(api!.isRunning).toBe(false);
+    expect(api!.error).toMatch(/Ankunft/);
+    expect(sendStopCommand).toHaveBeenCalledWith(device);
+  });
+
   it('a start-confirmation timeout (step c) fails the sequence, takes no further shot, and sends no return drive', async () => {
     const device = fakeDevice('device-1');
     let api: TimelapseSequenceApi | undefined;

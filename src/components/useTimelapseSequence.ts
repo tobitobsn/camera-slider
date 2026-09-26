@@ -49,10 +49,12 @@ const TIMELAPSE_MOVE_START_TIMEOUT_MS = 2000;
  * motor.cpp), so a single step's actual travel time scales directly with
  * that step's distance and has no fixed upper bound: a sequence with few
  * shots over a long rail moves the full distance (or close to it) in one
- * step, which can take far longer than any one-size-fits-all constant.
- * Reproduced on real hardware during the hardware test with a
- * shot-count/rail-length combination close to this. Computed per step
- * instead, from the same trapezoidal-move formula minAutoDriveDurationSeconds
+ * step, which can take far longer than any one-size-fits-all constant. Not
+ * itself hardware-reproduced (the hardware test's 45cm/10-shot run used
+ * short-enough steps to stay under the old timeout) — derived from that
+ * test's finding that the risk scales with a step's own distance, not the
+ * sequence's total. Computed per step instead, from the same trapezoidal-move
+ * formula minAutoDriveDurationSeconds
  * (AutoDriveControls.tsx) already uses for AUTO_DRIVE at a *variable* speed
  * — here the speed is always the max, so this is exactly the real travel
  * time for a TIMELAPSE_MOVE of that distance, not just an achievable lower
@@ -61,23 +63,17 @@ const TIMELAPSE_MOVE_START_TIMEOUT_MS = 2000;
 const ARRIVE_TIMEOUT_SAFETY_MARGIN_MS = 5000;
 
 /**
- * Floor for the computed arrival timeout — guards a degenerate ~0-distance
- * step (shouldn't happen given shotCount >= 2 and distanceSteps > 0, both
- * enforced before a sequence can start, but cheaper than a special case) and
- * keeps a wide margin for BLE round-trip latency on very short steps.
- */
-const MIN_ARRIVE_TIMEOUT_MS = 3000;
-
-/**
  * The real expected travel time for a single TIMELAPSE_MOVE step of this
  * distance, plus a fixed safety margin for BLE latency and the firmware's
  * own start grace period (motor.cpp's kAutoDriveStartGraceMs, reused for
  * this movement type) — see this constant's own doc comment above for why a
- * fixed timeout was wrong.
+ * fixed timeout was wrong. No explicit floor: even a 1-step distance yields
+ * several seconds once the safety margin is added, which is already ample
+ * for BLE round-trip latency.
  */
 function computeArriveTimeoutMs(stepDistanceSteps: number): number {
   const estimatedTravelMs = minAutoDriveDurationSeconds(Math.max(1, stepDistanceSteps)) * 1000;
-  return Math.max(MIN_ARRIVE_TIMEOUT_MS, Math.round(estimatedTravelMs) + ARRIVE_TIMEOUT_SAFETY_MARGIN_MS);
+  return Math.round(estimatedTravelMs) + ARRIVE_TIMEOUT_SAFETY_MARGIN_MS;
 }
 
 /**
