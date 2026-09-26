@@ -156,17 +156,34 @@ Geprüfte, als „Deployed"/„Approved" markierte Features: PROJ-1 (BLE-Verbind
 - **`client.ts` bestehende Exporte** — [x] Code-verifiziert: alle sieben bestehenden Exporte textuell unverändert, nur additive Erweiterungen (`sendTimelapseMoveCommand`, `timelapseMoving`-Feld/Bit).
 - **Test-Suite-Integrität** — [x] Code-verifiziert: `client.test.ts` hat im Diff ausschließlich Ergänzungen (+90/−0 Zeilen), keine bestehenden Testfälle wurden ersetzt (kein REG-2-artiger Vorfall wie bei PROJ-4). Neue Jest-Mocks (`__mocks__/react-native-vision-camera.js` u. a.) treffen exakte Paketpfade, keine Kollision mit bestehenden Mocks — belegt durch 8/8 bereits vor PROJ-5 existierende Suiten weiterhin grün.
 
+## Nachtrag: Re-Verification der Critical-Fixes (2026-09-26, Diff `62f0c4c..99eb9af`)
+
+Auf Nutzerwunsch wurden nur BUG-1, BUG-2 und BUG-3 gefixt (Commit `99eb9af`) und anschließend per vollem Drei-Lanes-Fan-out re-verifiziert (6 Produktionsdateien im Diff → volle Breite laut Skill). Ergebnis:
+
+- **BUG-1 — bestätigt behoben**, von zwei Lanes unabhängig geprüft: `motorTimelapseMoveCheck();` steht jetzt in `firmware/src/main.cpp`s `loop()` (Zeile 55, direkt nach `motorAutoDriveCheck()`), der veraltete „not wired up"-Kommentar in `motor.h` ist korrigiert. Der volle Zustandsübergang (`timelapseMoving` true → Ankunft → false, inkl. Grace-Period) wurde von der Security-Lane nachvollzogen — sicher, kein eigener Firmware-Timeout nötig, solange nichts die Bewegung ersetzt (siehe BUG-4 unten).
+- **BUG-2 — bestätigt behoben**, von zwei Lanes unabhängig geprüft: `useCameraCapture()` wird jetzt nur noch einmal aufgerufen (`RootScreen.tsx:46`), das Ergebnis korrekt an `useTimelapseSequence` (als `capturePhoto`-Parameter) und `TimelapseControls` (als vier neue Props, Namen/Typen stimmen exakt) durchgereicht. `<Camera outputs={[photoOutput]}>` nutzt jetzt dieselbe Instanz, über die auch `capturePhoto` ausgelöst wird.
+- **BUG-3 — bestätigt behoben**: `<uses-permission android:name="android.permission.CAMERA" />` steht im Manifest. Die zusätzlich ergänzte `WRITE_EXTERNAL_STORAGE` ist korrekt auf `maxSdkVersion="28"` begrenzt.
+- **AC-1 — jetzt PASS (Code), weiterhin NOT VERIFIED zur Laufzeit.** Der komplette Ablauf ist im Code lückenlos nachvollziehbar. Zwei bereits bekannte, nicht im Fix-Scope enthaltene High-Bugs (BUG-5 Timeout zu kurz, BUG-6 möglicher Notify-Verlust) schränken das weiterhin ein.
+
+**BUG-4 (High) — präzisiert, bleibt offen und real erreichbar.** Die Security-Lane hat das Zeitfenster genauer eingegrenzt: der Fall „Jog irgendwann nach einer bereits abgebrochenen Sequenz" ist durch den BUG-1-Fix weg. Übrig bleibt ein enger, aber über die normale UI erreichbarer Pfad: (1) ein Schritt läuft in den 15s-Ankunfts-Timeout (BUG-5), (2) der Fehlerpfad sendet kein STOP (BUG-7), (3) `timelapse.isRunning` wird `false` und gibt `JogControls` wieder frei, (4) die Firmware fährt aber unter `timelapseMoving=true` noch — ein Jog in genau diesem Moment läuft ungeschützt (`motorJog()` prüft weiterhin nur `autoDriving`, nicht `timelapseMoving`, `motor.cpp:228`), exakt das Muster von PROJ-3 BUG-1. Weiterhin High, nicht Teil des jetzigen Fixes.
+
+**Zwei neue Low-Funde** (beide von der Akzeptanz-Lane, nicht Teil des Fix-Auftrags):
+- **NEU-1** — kein Test schützt davor, dass BUG-2 wiederkehrt (z. B. bei einer künftigen Änderung, die versehentlich erneut zwei `useCameraCapture()`-Aufrufe einführt) — nur `tsc` prüft die Typen, nicht die „nur ein Aufruf"-Invariante.
+- **NEU-2** — `WRITE_EXTERNAL_STORAGE` ist deklariert, wird aber auf API 24–28 nirgends zur Laufzeit angefragt (kein `PermissionsAndroid.request(...)` dafür im Code) — `CameraRoll.save()` würde auf sehr alten Android-Versionen (7–9) trotzdem scheitern. Auf API 29+ (Scoped Storage) ohne Auswirkung.
+
+**Suite nach Fix:** 12 Suites, 182 Tests, alle grün. `tsc --noEmit` sauber. Firmware-Build SUCCESS.
+
 ## Production-Ready Entscheidung
 
-**Empfehlung: NEIN.** Drei Critical-Bugs (BUG-1, BUG-2, BUG-3) verhindern, dass das Feature in der aktuellen Form überhaupt funktioniert — nicht Rand- oder Sonderfälle, sondern der Kern-Anwendungsfall (AC-1) ist betroffen. BUG-1 hat zusätzlich eine echte Regression an PROJ-2/PROJ-3 zur Folge (Jog-Watchdog wirkungslos, Auto-Fahrt still verworfen), solange eine Zeitraffer-Sequenz einmal gestartet und nicht sauber beendet wurde.
+**Empfehlung: NEIN, weiterhin.** Die drei Critical-Bugs sind bestätigt behoben — AC-1 ist im Code jetzt vollständig abgedeckt. Es bleiben aber **3 High-Bugs offen**, davon einer (BUG-4) über einen ganz normalen Nutzerpfad real erreichbar und mit derselben Sicherheitsklasse wie PROJ-3s eigener, damals gefundener BUG-1 (unbegrenzt laufender Motor ohne Watchdog-Schutz auf einer Schiene ohne Endanschläge). BUG-5 und BUG-6 blockieren zusätzlich den Kern-Anwendungsfall bei längeren Fahrstrecken bzw. sind ein unbestätigter, aber plausibler Verdacht auf eine Race Condition.
 
-**Was von hier aus nicht geprüft werden konnte:** jedes Laufzeit-AC (BLE-Timing, tatsächliches Kameraverhalten, ob der Bildschirm wirklich wach bleibt, die vermutete Notify-Race in BUG-6), da `probe.kind: none`. Auch nach den Firmware-/App-Fixes bleibt ein Hardwaretest zwingend nötig, bevor „Approved" möglich ist.
+**Was von hier aus nicht geprüft werden konnte:** jedes Laufzeit-AC (BLE-Timing, tatsächliches Kameraverhalten, ob der Bildschirm wirklich wach bleibt, ob der Berechtigungsdialog jetzt tatsächlich erscheint, die vermutete Notify-Race in BUG-6), da `probe.kind: none`. Ein Hardwaretest bleibt vor „Approved" in jedem Fall zwingend nötig.
 
-**Bug-Übersicht nach Schweregrad:**
-- Critical: 3 — BUG-1 (`motorTimelapseMoveCheck()` nie aufgerufen), BUG-2 (doppelte, nicht verbundene Kamera-Ausgabe), BUG-3 (fehlende `CAMERA`-Berechtigung im Android-Manifest)
-- High: 3 — BUG-4 (Jog-Watchdog ignoriert `timelapseMoving`), BUG-5 (Ankunfts-Timeout zu kurz für lange Bewegungen), BUG-6 (möglicher Notify-Verlust, Verdacht)
-- Medium: 3 — BUG-7 (kein STOP in Fehlerpfaden), BUG-8 (verzögerte Verbindungsabbruch-Erkennung), BUG-9 (kein Verweis auf Systemeinstellungen)
-- Low: 2 — BUG-10 (Rückfahrt-Erfolg unbestätigt), BUG-11 (kein Aufnahme-Timeout)
-- Notiert, nicht bewertet: `WRITE_EXTERNAL_STORAGE` je nach `minSdkVersion` eventuell nötig; `CameraRoll.save()` ist laut eigener Dokumentation deprecated (funktioniert, aber nicht zukunftssicher)
+**Bug-Übersicht nach Schweregrad (Stand nach Re-Verification):**
+- Critical: 0 offen — BUG-1, BUG-2, BUG-3 bestätigt behoben
+- High: 3 offen — BUG-4 (Jog-Watchdog ignoriert `timelapseMoving`, real erreichbarer Pfad über BUG-5+BUG-7 bestätigt), BUG-5 (Ankunfts-Timeout zu kurz für lange Bewegungen), BUG-6 (möglicher Notify-Verlust, Verdacht)
+- Medium: 3 — BUG-7 (kein STOP in Fehlerpfaden — schließt auch BUG-4s Lücke auf App-Seite, Firmware-Lücke bliebe trotzdem bestehen), BUG-8 (verzögerte Verbindungsabbruch-Erkennung), BUG-9 (kein Verweis auf Systemeinstellungen)
+- Low: 4 — BUG-10 (Rückfahrt-Erfolg unbestätigt), BUG-11 (kein Aufnahme-Timeout), NEU-1 (keine Testabdeckung gegen ein Wiederauftreten von BUG-2), NEU-2 (`WRITE_EXTERNAL_STORAGE` nie zur Laufzeit angefragt, nur API 24–28 betroffen)
+- Notiert, nicht bewertet: `CameraRoll.save()` ist laut eigener Dokumentation deprecated (funktioniert, aber nicht zukunftssicher)
 
-**Welche Bugs sollen zuerst behoben werden?** Meine Empfehlung: BUG-1, BUG-2, BUG-3 zuerst (blockieren den gesamten Kern-Anwendungsfall und die Sicherheit angrenzender Features) — danach neu verifizieren, bevor die restlichen Befunde angegangen werden.
+**Welche Bugs sollen als Nächstes behoben werden?** Meine Empfehlung: BUG-4 zusammen mit BUG-7 (kleiner, zusammenhängender Fix — ein STOP im Fehlerpfad plus die eine fehlende Guard-Bedingung in `motorJog()`), da diese beiden gemeinsam den einzigen verbliebenen sicherheitsrelevanten Pfad schließen. BUG-5/BUG-6 danach, da sie den Kern-Anwendungsfall bei realistischen Schienenlängen weiter einschränken.
