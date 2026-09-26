@@ -176,18 +176,34 @@ async function moveToTimelapseTargetOrThrow(
   endIsAfterStart: boolean,
   targetDistanceSteps: number,
 ): Promise<void> {
-  try {
-    await sendTimelapseMoveCommand(device, endIsAfterStart, targetDistanceSteps);
-  } catch (err) {
-    throw new Error(`Zeitraffer-Bewegung konnte nicht gesendet werden: ${describeError(err)}`);
-  }
-
-  await waitForStatusCondition(
+  // qa-report.md BUG-6: subscribe for the start confirmation BEFORE sending
+  // the write, not after. waitForStatusCondition() sets up its
+  // subscribeToStatus() listener synchronously the moment it's called (see
+  // its own doc comment), so starting it here means no notify arriving
+  // between the firmware acting on the write and the write's ATT response
+  // reaching this promise can be missed — the previous ordering (subscribe
+  // only after `await sendTimelapseMoveCommand` had already resolved) left
+  // exactly that gap open, and this was reproduced on real hardware as a
+  // false "Bewegung nicht bestätigt" timeout on an accepted command.
+  const startConfirmed = waitForStatusCondition(
     device,
     status => status.timelapseMoving === true,
     TIMELAPSE_MOVE_START_TIMEOUT_MS,
     'Zeitüberschreitung: Der Slider hat die Zeitraffer-Bewegung nicht bestätigt — der Befehl wurde vermutlich verworfen',
   );
+
+  try {
+    await sendTimelapseMoveCommand(device, endIsAfterStart, targetDistanceSteps);
+  } catch (err) {
+    // The pending startConfirmed listener is now moot — let it time out on
+    // its own in the background rather than tearing it down manually here;
+    // swallow that eventual rejection so it doesn't surface as an unhandled
+    // promise rejection once the send error below has already been thrown.
+    startConfirmed.catch(() => {});
+    throw new Error(`Zeitraffer-Bewegung konnte nicht gesendet werden: ${describeError(err)}`);
+  }
+
+  await startConfirmed;
 
   await waitForStatusCondition(
     device,

@@ -177,6 +177,46 @@ describe('useTimelapseSequence', () => {
     },
   );
 
+  it('a start-confirmation notify arriving before the write resolves is still caught (qa-report.md BUG-6)', async () => {
+    const device = fakeDevice('device-1');
+    let api: TimelapseSequenceApi | undefined;
+
+    // Simulates the notify winning the race against the write's own ATT
+    // response — sendTimelapseMoveCommand's mock "arrives" (broadcasts the
+    // status change) before its own promise resolves, standing in for the
+    // real BLE case this reproduced on hardware. With the subscription set
+    // up only after awaiting the write (the pre-fix ordering), this
+    // broadcast would already be missed by the time anyone is listening.
+    (sendTimelapseMoveCommand as jest.Mock).mockImplementationOnce(async () => {
+      broadcastStatus(fullStatus({ timelapseMoving: true }));
+    });
+
+    await act(async () => {
+      ReactTestRenderer.create(renderProbe(device, a => (api = a)));
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => {
+      broadcastStatus(fullStatus());
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    await act(async () => {
+      api!.start(3, 5);
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    // Arrival still needs its own notify — only the start confirmation was
+    // pre-empted above.
+    await act(async () => {
+      broadcastStatus(fullStatus({ timelapseMoving: false }));
+      await jest.advanceTimersByTimeAsync(4500);
+    });
+
+    expect(api!.error).toBeNull();
+    expect(api!.isRunning).toBe(true);
+    expect(mockCapturePhoto).toHaveBeenCalledTimes(2);
+  });
+
   it('a start-confirmation timeout (step c) fails the sequence, takes no further shot, and sends no return drive', async () => {
     const device = fakeDevice('device-1');
     let api: TimelapseSequenceApi | undefined;

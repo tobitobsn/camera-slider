@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { AutoDriveControls } from '../components/AutoDriveControls';
 import { ConnectionHeader } from '../components/ConnectionHeader';
@@ -96,8 +96,18 @@ function renderContent(
       // useSliderStatus(device) itself (same pattern as AutoDriveControls)
       // and checks `status.driving` internally, so no separate `disabled`
       // prop is needed here for that direction.
+      // Reported during PROJ-5's hardware test: JogControls + AutoDriveControls
+      // + TimelapseControls (camera preview, inputs, progress) together no
+      // longer fit a single screen — the permission-request button, well
+      // below the fold, was unreachable with no way to scroll to it. A plain
+      // View never clips content, so this was always going to happen once
+      // enough sections stacked up; ScrollView is the fix, not a redesign of
+      // any one section.
       return (
-        <View style={styles.connectedStack}>
+        <ScrollView
+          style={styles.connectedStack}
+          contentContainerStyle={styles.connectedStackContent}
+        >
           <JogControls disabled={driving || timelapse.isRunning} />
           <AutoDriveControls disabled={timelapse.isRunning} />
           <TimelapseControls
@@ -114,7 +124,7 @@ function renderContent(
             cameraDevice={cameraCapture.cameraDevice}
             photoOutput={cameraCapture.photoOutput}
           />
-        </View>
+        </ScrollView>
       );
     case 'reconnecting':
       return (
@@ -158,6 +168,9 @@ const styles = StyleSheet.create({
   },
   connectedStack: {
     flex: 1,
+  },
+  connectedStackContent: {
+    paddingBottom: spacing.lg,
   },
   reconnectingWrap: {
     flex: 1,
