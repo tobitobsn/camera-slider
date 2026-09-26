@@ -202,3 +202,35 @@ Auf Nutzerwunsch wurden BUG-4 und BUG-7 gefixt (Commit `f5fce0e`, 2 Produktionsd
 - Notiert, nicht bewertet: `CameraRoll.save()` ist laut eigener Dokumentation deprecated (funktioniert, aber nicht zukunftssicher)
 
 **Welche Bugs sollen als Nächstes behoben werden?** Meine Empfehlung: BUG-5 (Timeout-Wert/-Berechnung) als Nächstes, da er den Kern-Anwendungsfall bei realistischen Schienenlängen (>~362mm bei diesem Projekt) direkt einschränkt — danach BUG-6 am echten Gerät gezielt testen, da er sich rein aus dem Code nicht abschließend bestätigen oder entkräften lässt.
+
+## Nachtrag 3: BUG-6-Fix + Hardwaretest (2026-09-26)
+
+Während des Hardwaretests trat BUG-6 tatsächlich live auf: die exakte Fehlermeldung „Der Slider hat die Zeitraffer-Bewegung nicht bestätigt — der Befehl wurde vermutlich verworfen" erschien beim ersten echten Sequenzlauf, obwohl die Firmware den Befehl angenommen hatte. Damit ist der Verdacht aus der vorherigen Verifikation bestätigt: die Notify für `timelapseMoving: true` kam vor dem Abonnieren an und ging verloren.
+
+**BUG-6 — gefixt:** `moveToTimelapseTargetOrThrow()` (`src/components/useTimelapseSequence.ts`) baut die Status-Subscription jetzt VOR dem Senden von `sendTimelapseMoveCommand` auf, nicht danach — schließt die Race exakt. Neuer Test simuliert die Notify, die vor der Auflösung des Schreibvorgangs eintrifft, rot-geprüft (an der alten Reihenfolge bestätigt fehlgeschlagen). Zusätzlich wurde bei diesem Hardwaretest sichtbar, dass die drei gestapelten Bereiche (Jog, Auto-Fahrt, Zeitraffer) nicht mehr auf einen Bildschirm passen — der Kamera-Berechtigungs-Button war unerreichbar. Gefixt: `RootScreen.tsx`s verbundener Zustand ist jetzt in einem `ScrollView`.
+
+**Außerdem, unabhängig vom eigentlichen Feature:** die physische Schiene wurde vom Nutzer auf 1000mm umgebaut (vorher 480mm) — `kMaxPlausibleDistanceSteps` (PROJ-4s BUG-1-Fix, von PROJ-5 wiederverwendet) war noch auf die alte Länge kalibriert und wurde auf 160000 Steps (1000mm × 160 steps/mm, gleiches Riemenrad) korrigiert und neu geflasht.
+
+**Hardwaretest — Ergebnis (manuell, durch den Nutzer, nach dem BUG-6-Fix):**
+- [x] AC-1 (Kernablauf: erste Aufnahme sofort, Zwischenschritte, weitere Aufnahmen) — **verifiziert durch den Nutzer, 2026-09-26**: „alles funkt", kurze Sequenz komplett durchgelaufen
+- [x] AC-2 (automatische Rückfahrt zum Start) — **verifiziert durch den Nutzer**, Teil desselben Laufs
+- [x] AC-3 (Fortschrittsanzeige) — **verifiziert durch den Nutzer**, Teil desselben Laufs
+- [x] AC-5 (Kamera-Berechtigung erteilbar) — **verifiziert durch den Nutzer** (Sequenz lief nur, weil die Berechtigung erteilt wurde; der ScrollView-Fix hat den zuvor unerreichbaren Button erreichbar gemacht)
+- [!] AC-10 (Foto landet in der Galerie) — NOT VERIFIED: nicht explizit vom Nutzer bestätigt, nur dass die Sequenz insgesamt durchlief
+- [!] AC-4 (Stopp-Button) — NOT VERIFIED: nicht getestet
+- [!] AC-9 (gegenseitige Sperre live, insbesondere Jog während laufender Sequenz) — NOT VERIFIED: nicht getestet
+- [ ] **BUG-5 bleibt offen und ist NICHT getestet worden** — der Nutzer hat gezielt nur die kurze Sequenz getestet, nicht die vorgeschlagene lange Strecke (>360mm). Der Bug ist damit weder bestätigt noch entkräftet, aber der Code ist unverändert seit dem letzten Fund — er besteht mit hoher Wahrscheinlichkeit weiterhin.
+
+**Bug-Übersicht (aktueller Stand):**
+- Critical: 0 — alle behoben
+- High: 1 offen — BUG-5 (Ankunfts-Timeout zu kurz für lange Bewegungen, ungetestet in diesem Lauf, Code unverändert)
+- Behoben und live bestätigt: BUG-6 (Notify-Race)
+- Behoben und re-verifiziert: BUG-4, BUG-7
+- Medium: 2 offen — BUG-8, BUG-9
+- Low: 6 (unverändert, siehe oben) plus die neue ScrollView-Erkenntnis (kein eigener Bug-Eintrag, da sofort gefixt)
+
+## Production-Ready Entscheidung (aktualisiert)
+
+**Empfehlung: NEIN, aber nah dran — ein einziger offener High-Bug (BUG-5), der Rest ist entweder behoben oder Medium/Low.** Der Kern-Anwendungsfall (AC-1/AC-2/AC-3/AC-5) ist jetzt durch einen echten Hardwaretest bestätigt, nicht nur durch Code-Inspektion. BUG-5 schränkt weiterhin lange Fahrstrecken ein (>~362mm bei der alten 480mm-Kalibrierung — die genaue neue Schwelle bei 1000mm Schienenlänge wurde nicht neu berechnet, da sich am Timeout-Wert selbst nichts geändert hat: 15s reichen bei maximaler Geschwindigkeit weiterhin nur für recht kurze Strecken).
+
+**Status bleibt „In Review"** — kein „Approved" trotz erfolgreichen Hardwaretests, da BUG-5 ein offener High-Bug ist und AC-4/AC-9/AC-10 nicht am Gerät getestet wurden.
