@@ -26,6 +26,7 @@ constexpr uint8_t kOpcodeSetEnd = 0x03;     // <opcode> — 1 byte total
 constexpr uint8_t kOpcodeAutoDrive = 0x04;  // <opcode> <direction> <durationDeciseconds LE u16> — 4 bytes total
 constexpr uint8_t kOpcodeStop = 0x05;       // <opcode> — 1 byte total
 constexpr uint8_t kOpcodeSetEndFromDistance = 0x06;  // <opcode> <direction> <distanceSteps LE u32> — 6 bytes total
+constexpr uint8_t kOpcodeTimelapseMove = 0x07;  // <opcode> <direction> <distanceSteps LE u32> — 6 bytes total
 
 volatile bool gConnected = false;
 
@@ -44,11 +45,12 @@ bool gHasSentStatus = false;
 
 // Packs a MotorStatus snapshot into the 6-byte wire payload design.md
 // specifies: byte 0 is the flags bitfield (bit0 hasStart, bit1 hasEnd,
-// bit2 atStart, bit3 atEnd, bit4 driving), bytes 1-4 are distanceSteps as
-// little-endian uint32, byte 5 is 0x00 when the end point is at-or-after
-// the start point (increasing step-count direction) and 0x01 when it's
-// before (decreasing direction) — only meaningful when hasStart && hasEnd
-// are both true (matches src/ble/client.ts's parseStatusPayload()).
+// bit2 atStart, bit3 atEnd, bit4 driving, bit5 timelapseMoving), bytes 1-4
+// are distanceSteps as little-endian uint32, byte 5 is 0x00 when the end
+// point is at-or-after the start point (increasing step-count direction)
+// and 0x01 when it's before (decreasing direction) — only meaningful when
+// hasStart && hasEnd are both true (matches src/ble/client.ts's
+// parseStatusPayload()).
 void packStatusPayload(const MotorStatus& status, uint8_t out[6]) {
   uint8_t flags = 0;
   if (status.hasStart) flags |= 0x01;
@@ -56,6 +58,7 @@ void packStatusPayload(const MotorStatus& status, uint8_t out[6]) {
   if (status.atStart) flags |= 0x04;
   if (status.atEnd) flags |= 0x08;
   if (status.driving) flags |= 0x10;
+  if (status.timelapseMoving) flags |= 0x20;
 
   out[0] = flags;
   out[1] = static_cast<uint8_t>(status.distanceSteps & 0xff);
@@ -206,10 +209,27 @@ class CommandCharacteristicCallbacks : public NimBLECharacteristicCallbacks {
         motorSetEndFromDistance(endIsAfterStart, distanceSteps);
         break;
       }
+      case kOpcodeTimelapseMove: {
+        if (len != 6) {
+          return;  // malformed TIMELAPSE_MOVE write — ignore rather than read out of bounds
+        }
+        const uint8_t directionByte = value[1];
+        const bool endIsAfterStart = (directionByte == 0x00);
+        // Little-endian uint32, low byte first — same encoding as
+        // SET_END_FROM_DISTANCE above (matches src/ble/client.ts's
+        // sendTimelapseMoveCommand() encoding).
+        const uint32_t distanceSteps = static_cast<uint32_t>(value[2]) |
+                                        (static_cast<uint32_t>(value[3]) << 8) |
+                                        (static_cast<uint32_t>(value[4]) << 16) |
+                                        (static_cast<uint32_t>(value[5]) << 24);
+        motorTimelapseMoveTo(endIsAfterStart, distanceSteps);
+        break;
+      }
       default:
         // No other opcodes are defined (PROJ-3's three opcodes plus PROJ-4's
-        // SET_END_FROM_DISTANCE above cover the full protocol design.md
-        // specifies — no speculative future opcodes).
+        // SET_END_FROM_DISTANCE and PROJ-5's TIMELAPSE_MOVE (0x07) above
+        // cover the full protocol design.md specifies — no speculative
+        // future opcodes).
         break;
     }
   }
