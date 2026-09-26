@@ -242,3 +242,38 @@ Bei einem weiteren Testversuch mit wenigen Aufnahmen über eine lange Strecke tr
 **Empfehlung: NEIN, aber nah dran — ein einziger offener High-Bug (BUG-5), der Rest ist entweder behoben oder Medium/Low.** Der Kern-Anwendungsfall (AC-1/AC-2/AC-3/AC-5) ist jetzt durch einen echten Hardwaretest bestätigt, nicht nur durch Code-Inspektion. BUG-5 schränkt weiterhin lange Fahrstrecken ein (>~362mm bei der alten 480mm-Kalibrierung — die genaue neue Schwelle bei 1000mm Schienenlänge wurde nicht neu berechnet, da sich am Timeout-Wert selbst nichts geändert hat: 15s reichen bei maximaler Geschwindigkeit weiterhin nur für recht kurze Strecken).
 
 **Status bleibt „In Review"** — kein „Approved" trotz erfolgreichen Hardwaretests, da BUG-5 ein offener High-Bug ist und AC-4/AC-9/AC-10 nicht am Gerät getestet wurden.
+
+## Nachtrag 4: Re-Verification von BUG-5 (2026-09-27, Diff `6c0da01..248cf19`, Folge-Fixes `42f1c52`)
+
+BUG-5 wurde behoben (Commit `248cf19`, 1 Produktionsdatei → eine Lane mit allen drei Scopes laut Skill): der feste 15000ms-Ankunfts-Timeout ist durch `computeArriveTimeoutMs(stepDistanceSteps)` ersetzt, berechnet aus der tatsächlichen Distanz des jeweiligen Schritts (nicht der kumulierten Zieldistanz vom Start) über dieselbe Trapezformel `minAutoDriveDurationSeconds` (`AutoDriveControls.tsx`, bisher nur für AUTO_DRIVE bei variabler Geschwindigkeit genutzt) — hier gültig als exakte Fahrzeit, da TIMELAPSE_MOVE immer mit Höchstgeschwindigkeit fährt.
+
+- **BUG-5 — bestätigt behoben (Code und Test), weiterhin NOT VERIFIED zur Laufzeit** (`probe.kind: none`, mobile Hardware-App). Die Lane hat die Formel gegen die Firmware-Konstanten gegengeprüft (App: `MAX_SPEED_STEPS_PER_SEC=4000`/`ACCELERATION_STEPS_PER_SEC2=8000`, `AutoDriveControls.tsx:33,40`; Firmware: `kJogSpeedMaxHz=4000.0f`/`kAcceleration=8000`, `motor.cpp:26,31`, `setSpeedInHz(kJogSpeedMaxHz)` fest in `motorTimelapseMoveTo()`, `motor.cpp:500`) — die Werte stimmen exakt überein. Bei der jetzigen Plausibilitätsgrenze (`kMaxPlausibleDistanceSteps=160000`) beträgt der maximale Timeout jetzt ≈45,5s statt vorher fest 15s (die alten 15s reichten nur bis ≈58000 Steps). Ein eigener Gegenprobe-Test der Lane (3 Szenarien: Timeout feuert weiterhin bei echtem Hänger, Timeout skaliert mit dem Schritt-Delta statt dem kumulierten Ziel, Verhalten an der 160000-Steps-Obergrenze) bestätigte die Formel unabhängig vom Repo-Test.
+- **AC-1 — jetzt uneingeschränkt PASS (Code), weiterhin NOT VERIFIED zur Laufzeit für den spezifischen Risikofall** (wenige Aufnahmen über einen Großteil der 1000mm-Schiene) — der Hardwaretest aus Nachtrag 3 hat diesen Fall nicht abgedeckt (45cm/10+ Aufnahmen ⇒ kurze Einzelschritte). Ein gezielter Test (z. B. 2 Aufnahmen über ≥60cm) steht noch aus.
+- **Drei neue Low-Funde der Lane, alle noch in derselben Runde behoben (Commit `42f1c52`), nicht mehr offen:**
+  - **L-1** — Kommentar in `useTimelapseSequence.ts` behauptete fälschlich eine Hardware-Reproduktion des Risikofalls; korrigiert auf „aus dem Hardwaretest-Befund abgeleitet, nicht selbst reproduziert".
+  - **L-2** — `MIN_ARRIVE_TIMEOUT_MS` (3000ms-Untergrenze) griff nie, da schon der kleinste mögliche Schritt (1 Step) rechnerisch über der Marge liegt (≈5022ms); entfernt.
+  - **L-3** (löst NEU-4 aus Nachtrag 2/„Bug-Übersicht" ab) — der 15s/jetzt-dynamische Ankunfts-Timeout-Pfad hatte keinen eigenen Test. Neuer Test ergänzt und rot-geprüft (zuerst gegen eine absichtlich auf die kumulierte Zieldistanz zurückgesetzte Berechnung bestätigt fehlgeschlagen, dann gegen den korrekten Delta-basierten Fix bestätigt grün) — belegt jetzt sowohl, dass der Timeout weiterhin auslöst, als auch, dass er korrekt aus dem Schritt-Delta und nicht der kumulierten Zieldistanz berechnet wird.
+- **Security:** nichts zu prüfen und das auch geprüft, nicht nur angenommen — keine neue BLE-Nachricht, kein neuer Eingabepfad (`stepDistanceSteps` ist rein intern aus bereits validierten Werten berechnet), keine neue Berechtigung. Einzige sicherheitsnahe Auswirkung: ein wirklich hängender Schritt wird jetzt erst nach bis zu 45,5s statt 15s per STOP abgebrochen — kein Fund, da Jog währenddessen firmwareseitig weiterhin durch den BUG-4-Fix gesperrt ist.
+- **Regression:** Suite nach Fix (inkl. L-1/L-2/L-3): **12 Suites, 185 Tests, alle grün.** `tsc --noEmit` sauber. Die 7 bereits bestehenden Tests in `useTimelapseSequence.test.ts` unverändert grün, keiner ruft die geänderte interne Signatur (`moveToTimelapseTargetOrThrow`) direkt auf. Keine Auswirkung auf PROJ-1–PROJ-4 (`AutoDriveControls.tsx` selbst nicht verändert, nur `minAutoDriveDurationSeconds` importiert).
+- **Außerdem aufgefallen, außerhalb des Scopes, nicht bewertet:** eine durch `stop()` abgelöste Status-Subscription bleibt jetzt bis zu 45,5s statt 15s registriert, bevor sie über den Timeout-Handler aufräumt — funktional harmlos (jede Fortsetzung prüft vorher `runId`), aber eine längere Lebensdauer als vorher.
+
+**Bug-Übersicht (aktueller Stand):**
+- Critical: 0 — alle behoben
+- High: 0 offen — BUG-5 bestätigt behoben (Code/Test), Laufzeit-Bestätigung am Gerät steht noch aus
+- Behoben und live bestätigt: BUG-6 (Notify-Race)
+- Behoben und re-verifiziert: BUG-4, BUG-7, BUG-5
+- Medium: 2 offen — BUG-8 (verzögerte Verbindungsabbruch-Erkennung), BUG-9 (kein Verweis auf Systemeinstellungen)
+- Low: 5 offen — BUG-10 (Rückfahrt-Erfolg unbestätigt), BUG-11 (kein Aufnahme-Timeout), NEU-1 (keine Testabdeckung gegen ein Wiederauftreten von BUG-2), NEU-2 (`WRITE_EXTERNAL_STORAGE` nie zur Laufzeit angefragt, nur API 24–28 betroffen), NEU-3 (kein Test prüft „STOP nicht beim Erfolgspfad")
+- Low, behoben in dieser Runde: NEU-4 (Ankunfts-Timeout-Pfad jetzt getestet, siehe L-3), L-1, L-2, L-3
+- Notiert, nicht bewertet: `CameraRoll.save()` ist laut eigener Dokumentation deprecated (funktioniert, aber nicht zukunftssicher)
+
+## Production-Ready Entscheidung (aktualisiert)
+
+**Empfehlung: Näher an „Approved", aber weiterhin NEIN** — alle Critical- und High-Bugs sind jetzt code-/testseitig behoben; was fehlt, ist ausschließlich Laufzeit-Bestätigung (`probe.kind: none` erlaubt keine automatisierte Prüfung) und die noch offenen Medium-Bugs (BUG-8, BUG-9).
+
+**Vor „Approved" noch nötig:**
+1. Hardwaretest von BUG-5s eigentlichem Risikofall: wenige Aufnahmen (z. B. 2) über einen möglichst großen Teil der jetzt 1000mm-Schiene — bestätigt, dass die Sequenz nicht mehr vorzeitig abbricht.
+2. AC-4 (Stopp-Button), AC-9 (gegenseitige Sperre live, insbesondere Jog während laufender Sequenz) und AC-10 (Foto landet in der Galerie) sind bisher nicht explizit am Gerät bestätigt.
+3. Entscheidung des Nutzers, ob BUG-8/BUG-9 (Medium) vor oder nach `/deploy` behoben werden — beide sind kein Blocker für „Approved" laut Skill (kein Critical/High mehr offen), aber offene Medium-Bugs sollten bewusst entschieden, nicht übersehen werden.
+
+**Status bleibt „In Review"** — kein „Approved", bis mindestens Punkt 1 und 2 am echten Gerät bestätigt sind.
