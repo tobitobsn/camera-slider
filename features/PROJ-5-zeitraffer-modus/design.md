@@ -99,8 +99,9 @@ Der zweistufige Warte-Schritt („erst bestätigt gestartet, dann bestätigt ang
 ## Dependencies
 
 - `react-native-vision-camera` — Kamera-Vorschau + Foto-Aufnahme
+- `react-native-nitro-modules`, `react-native-nitro-image` — Laufzeit-Voraussetzungen von `react-native-vision-camera` Core (nicht optional, während `/build` per Context7 gegen die aktuelle Installationsanleitung verifiziert — ohne sie lädt die Bibliothek nicht; ursprünglich nicht in diesem Entwurf genannt, hier nachgetragen)
 - `@react-native-camera-roll/camera-roll` — Foto in die Geräte-Galerie speichern
-- Eine Keep-Awake-Bibliothek (Kandidat `@sayem314/react-native-keep-awake`, von `/build` gegen New-Architecture-Kompatibilität verifiziert) — verhindert das Sperren des Bildschirms während einer laufenden Sequenz
+- `@sayem314/react-native-keep-awake` — verhindert das Sperren des Bildschirms während einer laufenden Sequenz; während `/build` gegen die vendorte Quelle geprüft (`peerDependencies`/`codegenConfig`: explizit New-Architecture-only, passt zu diesem Projekt) — kein Wechsel auf eine Alternative nötig
 
 ## Settings the user makes
 

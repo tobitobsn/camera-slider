@@ -27,6 +27,7 @@ const INITIAL_STATUS: SliderStatus = {
   driving: false,
   endIsAfterStart: null,
   distanceSteps: null,
+  timelapseMoving: false,
 };
 
 /**
