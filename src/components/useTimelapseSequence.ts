@@ -42,13 +42,43 @@ import { useSliderStatus } from './useSliderStatus';
 const TIMELAPSE_MOVE_START_TIMEOUT_MS = 2000;
 
 /**
- * How long to wait for the firmware to report arrival (timelapseMoving back
- * to false) once a move has been confirmed started. Generous, because the
- * real travel time depends on the step's distance — design.md is explicit
- * that a single fixed upper bound is good enough for this hobby project's
- * rail lengths, no dynamic per-distance calculation needed.
+ * qa-report.md BUG-5: a fixed arrival timeout (originally 15000ms, chosen
+ * when design.md judged "a single fixed upper bound is good enough for this
+ * hobby project's rail lengths") turned out to be wrong — TIMELAPSE_MOVE
+ * always targets the firmware's max speed (kJogSpeedMaxHz, 4000 steps/s,
+ * motor.cpp), so a single step's actual travel time scales directly with
+ * that step's distance and has no fixed upper bound: a sequence with few
+ * shots over a long rail moves the full distance (or close to it) in one
+ * step, which can take far longer than any one-size-fits-all constant.
+ * Reproduced on real hardware during the hardware test with a
+ * shot-count/rail-length combination close to this. Computed per step
+ * instead, from the same trapezoidal-move formula minAutoDriveDurationSeconds
+ * (AutoDriveControls.tsx) already uses for AUTO_DRIVE at a *variable* speed
+ * — here the speed is always the max, so this is exactly the real travel
+ * time for a TIMELAPSE_MOVE of that distance, not just an achievable lower
+ * bound like it is for AUTO_DRIVE.
  */
-const TIMELAPSE_MOVE_ARRIVE_TIMEOUT_MS = 15000;
+const ARRIVE_TIMEOUT_SAFETY_MARGIN_MS = 5000;
+
+/**
+ * Floor for the computed arrival timeout — guards a degenerate ~0-distance
+ * step (shouldn't happen given shotCount >= 2 and distanceSteps > 0, both
+ * enforced before a sequence can start, but cheaper than a special case) and
+ * keeps a wide margin for BLE round-trip latency on very short steps.
+ */
+const MIN_ARRIVE_TIMEOUT_MS = 3000;
+
+/**
+ * The real expected travel time for a single TIMELAPSE_MOVE step of this
+ * distance, plus a fixed safety margin for BLE latency and the firmware's
+ * own start grace period (motor.cpp's kAutoDriveStartGraceMs, reused for
+ * this movement type) — see this constant's own doc comment above for why a
+ * fixed timeout was wrong.
+ */
+function computeArriveTimeoutMs(stepDistanceSteps: number): number {
+  const estimatedTravelMs = minAutoDriveDurationSeconds(Math.max(1, stepDistanceSteps)) * 1000;
+  return Math.max(MIN_ARRIVE_TIMEOUT_MS, Math.round(estimatedTravelMs) + ARRIVE_TIMEOUT_SAFETY_MARGIN_MS);
+}
 
 /**
  * Fixed settle pause after the firmware reports arrival and before the photo
@@ -170,11 +200,19 @@ async function capturePhotoOrThrow(capturePhoto: () => Promise<void>): Promise<v
  * (design.md → "App-seitige Sequenzsteuerung"). Throws with a clear message
  * on a send failure, a start-confirmation timeout (the command was likely
  * rejected — AC-6), or an arrival-confirmation timeout.
+ *
+ * @param targetDistanceSteps The absolute target, as a distance from the
+ *   frozen start point (what TIMELAPSE_MOVE's wire payload actually sends).
+ * @param stepDistanceSteps The distance this specific step actually travels
+ *   (the delta from wherever the carriage already was) — qa-report.md BUG-5:
+ *   this, not `targetDistanceSteps`, is what the arrival timeout must scale
+ *   with.
  */
 async function moveToTimelapseTargetOrThrow(
   device: Device,
   endIsAfterStart: boolean,
   targetDistanceSteps: number,
+  stepDistanceSteps: number,
 ): Promise<void> {
   // qa-report.md BUG-6: subscribe for the start confirmation BEFORE sending
   // the write, not after. waitForStatusCondition() sets up its
@@ -208,7 +246,7 @@ async function moveToTimelapseTargetOrThrow(
   await waitForStatusCondition(
     device,
     status => status.timelapseMoving === false,
-    TIMELAPSE_MOVE_ARRIVE_TIMEOUT_MS,
+    computeArriveTimeoutMs(stepDistanceSteps),
     'Zeitüberschreitung: Die Ankunft am Zielpunkt wurde nicht bestätigt',
   );
 }
@@ -325,6 +363,14 @@ export function useTimelapseSequence(
         return;
       }
 
+      // qa-report.md BUG-5: tracks the previous step's target (distance from
+      // the frozen start) so each step's *actual* travel distance (the delta
+      // from wherever the carriage already was, not the cumulative distance
+      // from start) can be computed — that delta, not the cumulative target,
+      // is what the arrival timeout must scale with. Starts at 0: shot 1 is
+      // taken at the start point itself, no move yet.
+      let previousTargetDistanceSteps = 0;
+
       for (let i = 2; i <= shotCount; i++) {
         if (runIdRef.current !== myRunId) {
           return;
@@ -353,12 +399,16 @@ export function useTimelapseSequence(
           const targetDistanceSteps = Math.round(
             (frozenDistanceSteps * (i - 1)) / (shotCount - 1),
           );
+          const stepDistanceSteps = Math.abs(targetDistanceSteps - previousTargetDistanceSteps);
 
           await moveToTimelapseTargetOrThrow(
             currentDevice,
             frozenEndIsAfterStart,
             targetDistanceSteps,
+            stepDistanceSteps,
           );
+
+          previousTargetDistanceSteps = targetDistanceSteps;
 
           if (runIdRef.current !== myRunId) {
             return;

@@ -217,6 +217,53 @@ describe('useTimelapseSequence', () => {
     expect(mockCapturePhoto).toHaveBeenCalledTimes(2);
   });
 
+  it('a long single step (few shots over a long distance) is not cut off by a short fixed arrival timeout (qa-report.md BUG-5)', async () => {
+    const device = fakeDevice('device-1');
+    let api: TimelapseSequenceApi | undefined;
+
+    await act(async () => {
+      ReactTestRenderer.create(renderProbe(device, a => (api = a)));
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    // 2 shots over 100000 steps: the single step (i=2) travels the full
+    // distance in one move. At max speed (4000 steps/s) that's a real
+    // ~25.5s trip (100000/4000 + 4000/8000 acceleration overhead) — well
+    // past the old fixed 15000ms timeout this bug was about.
+    await act(async () => {
+      broadcastStatus(fullStatus({ distanceSteps: 100000 }));
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    await act(async () => {
+      api!.start(2, 5);
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    await act(async () => {
+      broadcastStatus(fullStatus({ distanceSteps: 100000, timelapseMoving: true }));
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    // Past the old fixed 15s timeout, arrival still not confirmed — with the
+    // bug, this would already have failed by now.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(20000);
+    });
+    expect(api!.isRunning).toBe(true);
+    expect(api!.error).toBeNull();
+
+    // Arrival confirmed for real, well within the distance-scaled timeout.
+    await act(async () => {
+      broadcastStatus(fullStatus({ distanceSteps: 100000, timelapseMoving: false }));
+      await jest.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(api!.error).toBeNull();
+    expect(mockCapturePhoto).toHaveBeenCalledTimes(2);
+    expect(sendAutoDriveCommand).toHaveBeenCalledWith(device, 'endToStart', expect.any(Number));
+  });
+
   it('a start-confirmation timeout (step c) fails the sequence, takes no further shot, and sends no return drive', async () => {
     const device = fakeDevice('device-1');
     let api: TimelapseSequenceApi | undefined;
