@@ -173,17 +173,32 @@ Auf Nutzerwunsch wurden nur BUG-1, BUG-2 und BUG-3 gefixt (Commit `99eb9af`) und
 
 **Suite nach Fix:** 12 Suites, 182 Tests, alle grün. `tsc --noEmit` sauber. Firmware-Build SUCCESS.
 
+## Nachtrag 2: Re-Verification von BUG-4/BUG-7 (2026-09-26, Diff `f480075..f5fce0e`)
+
+Auf Nutzerwunsch wurden BUG-4 und BUG-7 gefixt (Commit `f5fce0e`, 2 Produktionsdateien → eine Lane mit allen drei Scopes laut Skill). Ergebnis:
+
+- **BUG-4 — bestätigt behoben:** `motorJog()`s Guard in `firmware/src/motor.cpp:235` prüft jetzt zusätzlich `timelapseMoving`, dasselbe Muster wie `motorAutoDrive()`/`motorTimelapseMoveTo()`. Keine neue, unerwünschte Sperre für normalen Jog (das Flag ist nur während einer laufenden Zeitraffer-Bewegung `true`).
+- **BUG-7 — bestätigt behoben:** `finishRun()` sendet STOP bei jedem Fehlerpfad (`finalError !== null`), nicht beim erfolgreichen Abschluss (dort liefe sonst die Rückfahrt ins Leere). Beide Fehler-Aufrufer (erste Aufnahme fehlgeschlagen, Schritt-Fehler in der Schleife) decken das ab.
+- **Der verbleibende Zeitspalt aus der letzten Re-Verification ist geschlossen:** die Lane hat den genauen Ablauf nachvollzogen — `finishRun` setzt `isRunning=false` und sendet STOP im selben synchronen Aufruf, ein Jog kann also frühestens danach entstehen. Bis STOP bei der Firmware tatsächlich ankommt (BLE-Laufzeit, grob einige zehn ms), schützt jetzt genau der neue `motorJog()`-Guard — vorher gab es in genau diesem Fenster keinen Schutz. Verteidigung in der Tiefe funktioniert wie vorgesehen.
+- **Zwei neue Low-Testlücken** (nicht Teil des Fix-Auftrags): kein Test prüft explizit, dass STOP beim Erfolgspfad NICHT gesendet wird; der 15s-Ankunfts-Timeout-Pfad (BUG-5) hat keinen eigenen Test, läuft aber über denselben Code wie der bereits getestete 2s-Start-Timeout.
+- **Auch bemerkt:** durch BUG-7 bricht ein BUG-5-Timeout jetzt aktiv per STOP mitten in der Fahrt ab, statt den Schlitten das Ziel erreichen zu lassen — sicherer, macht BUG-5 für den Nutzer aber sichtbarer (Sequenz bricht an einer Zwischenposition ab, statt am Ziel).
+- Keine Regression: Diff berührt `motor.h`/`ble.cpp`/`client.ts`/`usePresets.ts`/`AutoDriveControls.tsx`/`JogControls.tsx` nicht.
+
+**Suite nach Fix:** 12 Suites, 182 Tests, alle grün. `tsc --noEmit` sauber. Firmware-Build SUCCESS.
+
 ## Production-Ready Entscheidung
 
-**Empfehlung: NEIN, weiterhin.** Die drei Critical-Bugs sind bestätigt behoben — AC-1 ist im Code jetzt vollständig abgedeckt. Es bleiben aber **3 High-Bugs offen**, davon einer (BUG-4) über einen ganz normalen Nutzerpfad real erreichbar und mit derselben Sicherheitsklasse wie PROJ-3s eigener, damals gefundener BUG-1 (unbegrenzt laufender Motor ohne Watchdog-Schutz auf einer Schiene ohne Endanschläge). BUG-5 und BUG-6 blockieren zusätzlich den Kern-Anwendungsfall bei längeren Fahrstrecken bzw. sind ein unbestätigter, aber plausibler Verdacht auf eine Race Condition.
+**Empfehlung: NEIN, weiterhin — aber der sicherheitsrelevante Pfad ist jetzt geschlossen.** Alle drei Critical-Bugs und der einzige real erreichbare High-Bug mit Sicherheitsbezug (BUG-4, zusammen mit BUG-7) sind bestätigt behoben. Es bleiben **2 High-Bugs offen**, beide schränken den Kern-Anwendungsfall (AC-1) ein, sind aber keine Sicherheitsfunde mehr: BUG-5 (Ankunfts-Timeout zu kurz für lange Bewegungen — bricht jetzt durch den BUG-7-Fix aktiv und sichtbar ab, statt den Schlitten einfach ankommen zu lassen) und BUG-6 (unbestätigter Verdacht auf eine Notify-Race).
 
-**Was von hier aus nicht geprüft werden konnte:** jedes Laufzeit-AC (BLE-Timing, tatsächliches Kameraverhalten, ob der Bildschirm wirklich wach bleibt, ob der Berechtigungsdialog jetzt tatsächlich erscheint, die vermutete Notify-Race in BUG-6), da `probe.kind: none`. Ein Hardwaretest bleibt vor „Approved" in jedem Fall zwingend nötig.
+**Was von hier aus nicht geprüft werden konnte:** jedes Laufzeit-AC (BLE-Timing, tatsächliches Kameraverhalten, ob der Bildschirm wirklich wach bleibt, ob der Berechtigungsdialog erscheint, die tatsächliche Reihenfolge STOP→Firmware-Reaktion→Jog-Sperre, die vermutete Notify-Race in BUG-6), da `probe.kind: none`. Ein Hardwaretest bleibt vor „Approved" in jedem Fall zwingend nötig.
 
-**Bug-Übersicht nach Schweregrad (Stand nach Re-Verification):**
+**Bug-Übersicht nach Schweregrad (Stand nach beiden Re-Verifications):**
 - Critical: 0 offen — BUG-1, BUG-2, BUG-3 bestätigt behoben
-- High: 3 offen — BUG-4 (Jog-Watchdog ignoriert `timelapseMoving`, real erreichbarer Pfad über BUG-5+BUG-7 bestätigt), BUG-5 (Ankunfts-Timeout zu kurz für lange Bewegungen), BUG-6 (möglicher Notify-Verlust, Verdacht)
-- Medium: 3 — BUG-7 (kein STOP in Fehlerpfaden — schließt auch BUG-4s Lücke auf App-Seite, Firmware-Lücke bliebe trotzdem bestehen), BUG-8 (verzögerte Verbindungsabbruch-Erkennung), BUG-9 (kein Verweis auf Systemeinstellungen)
-- Low: 4 — BUG-10 (Rückfahrt-Erfolg unbestätigt), BUG-11 (kein Aufnahme-Timeout), NEU-1 (keine Testabdeckung gegen ein Wiederauftreten von BUG-2), NEU-2 (`WRITE_EXTERNAL_STORAGE` nie zur Laufzeit angefragt, nur API 24–28 betroffen)
+- High: 2 offen — BUG-5 (Ankunfts-Timeout zu kurz für lange Bewegungen), BUG-6 (möglicher Notify-Verlust, Verdacht)
+- Behoben und re-verifiziert (sicherheitsrelevant): BUG-4 (Jog-Watchdog ignorierte `timelapseMoving`)
+- Medium: 2 offen — BUG-8 (verzögerte Verbindungsabbruch-Erkennung), BUG-9 (kein Verweis auf Systemeinstellungen)
+- Behoben und re-verifiziert: BUG-7 (kein STOP in Fehlerpfaden)
+- Low: 6 — BUG-10 (Rückfahrt-Erfolg unbestätigt), BUG-11 (kein Aufnahme-Timeout), NEU-1 (keine Testabdeckung gegen ein Wiederauftreten von BUG-2), NEU-2 (`WRITE_EXTERNAL_STORAGE` nie zur Laufzeit angefragt, nur API 24–28 betroffen), NEU-3 (kein Test prüft „STOP nicht beim Erfolgspfad"), NEU-4 (BUG-5s 15s-Timeout-Pfad ungetestet, aber codeseitig identisch zum getesteten 2s-Pfad)
 - Notiert, nicht bewertet: `CameraRoll.save()` ist laut eigener Dokumentation deprecated (funktioniert, aber nicht zukunftssicher)
 
-**Welche Bugs sollen als Nächstes behoben werden?** Meine Empfehlung: BUG-4 zusammen mit BUG-7 (kleiner, zusammenhängender Fix — ein STOP im Fehlerpfad plus die eine fehlende Guard-Bedingung in `motorJog()`), da diese beiden gemeinsam den einzigen verbliebenen sicherheitsrelevanten Pfad schließen. BUG-5/BUG-6 danach, da sie den Kern-Anwendungsfall bei realistischen Schienenlängen weiter einschränken.
+**Welche Bugs sollen als Nächstes behoben werden?** Meine Empfehlung: BUG-5 (Timeout-Wert/-Berechnung) als Nächstes, da er den Kern-Anwendungsfall bei realistischen Schienenlängen (>~362mm bei diesem Projekt) direkt einschränkt — danach BUG-6 am echten Gerät gezielt testen, da er sich rein aus dem Code nicht abschließend bestätigen oder entkräften lässt.
