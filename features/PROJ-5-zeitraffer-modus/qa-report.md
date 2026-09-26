@@ -219,7 +219,7 @@ Während des Hardwaretests trat BUG-6 tatsächlich live auf: die exakte Fehlerme
 - [!] AC-10 (Foto landet in der Galerie) — NOT VERIFIED: nicht explizit vom Nutzer bestätigt, nur dass die Sequenz insgesamt durchlief
 - [!] AC-4 (Stopp-Button) — NOT VERIFIED: nicht getestet
 - [!] AC-9 (gegenseitige Sperre live, insbesondere Jog während laufender Sequenz) — NOT VERIFIED: nicht getestet
-- [ ] **BUG-5 bleibt offen und ist NICHT getestet worden** — der Nutzer hat gezielt nur die kurze Sequenz getestet, nicht die vorgeschlagene lange Strecke (>360mm). Der Bug ist damit weder bestätigt noch entkräftet, aber der Code ist unverändert seit dem letzten Fund — er besteht mit hoher Wahrscheinlichkeit weiterhin.
+- [ ] **BUG-5 — Zusatztest ergab keine neue Erkenntnis, Risikofall weiterhin nicht getestet.** Der Nutzer hat danach zusätzlich eine 45cm-Gesamtstrecke getestet, mit 10 oder mehr Aufnahmen eingestellt — lief ebenfalls durch. **Das testet BUG-5s Risikofall aber nicht:** das 15s-Zeitlimit gilt pro einzelnem Fahrschritt, nicht für die Gesamtstrecke. Bei 10+ Aufnahmen über 45cm ist jeder einzelne Schritt nur rund 5cm (45cm/9 ≈ 8000 Steps) — bei 4000 Steps/s Höchstgeschwindigkeit weit unter der 15s-Grenze. Der Risikofall (wenige Aufnahmen, dadurch mindestens ein einzelner, langer Schritt — im Extremfall 2 Aufnahmen über einen Großteil der jetzt 1000mm-Schiene) wurde nicht geprüft. Der Code ist unverändert seit dem letzten Fund und besteht mit hoher Wahrscheinlichkeit weiterhin für diesen speziellen Fall (wenige Aufnahmen über eine lange Strecke).
 
 **Bug-Übersicht (aktueller Stand):**
 - Critical: 0 — alle behoben
