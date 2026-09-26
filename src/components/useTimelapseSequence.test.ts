@@ -209,6 +209,9 @@ describe('useTimelapseSequence', () => {
     expect(mockCapturePhoto).toHaveBeenCalledTimes(1); // only shot 1, no second
     expect(sendAutoDriveCommand).not.toHaveBeenCalled();
     expect(mockDeactivate).toHaveBeenCalledTimes(1);
+    // qa-report.md BUG-7: a failed step must stop the carriage (AC-6) — also
+    // what clears a hung timelapseMoving flag on the firmware side.
+    expect(sendStopCommand).toHaveBeenCalledWith(device);
   });
 
   it('a photo failure fails the sequence immediately with an error, without sending any move command', async () => {
@@ -237,6 +240,11 @@ describe('useTimelapseSequence', () => {
     expect(sendTimelapseMoveCommand).not.toHaveBeenCalled();
     expect(sendAutoDriveCommand).not.toHaveBeenCalled();
     expect(mockDeactivate).toHaveBeenCalledTimes(1);
+    // qa-report.md BUG-7: sent unconditionally on any failed run, even one
+    // that failed before the carriage ever moved — harmless (motorStop() is
+    // always safe) and keeps the rule simple (one path, not "only if a move
+    // was in flight").
+    expect(sendStopCommand).toHaveBeenCalledWith(device);
   });
 
   it('stop() aborts immediately without a return drive, and a stray status notify afterwards changes nothing', async () => {

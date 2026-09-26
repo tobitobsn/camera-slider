@@ -225,7 +225,14 @@ void motorJog(JogDirection direction, uint8_t speedPercent) {
   // silent — the motor then only stopped on an explicit STOP or a full
   // disconnect. Same defense-in-depth the firmware already applies to
   // motorSetStart()/motorSetEnd() via their isRunning() guard.
-  if (stepper == nullptr || autoDriving) {
+  //
+  // qa-report.md BUG-4 (PROJ-5): the same class of bug for the newer
+  // timelapseMoving flag — this guard originally checked only autoDriving,
+  // so a JOG arriving while a TIMELAPSE_MOVE was in progress (e.g. during
+  // the app's confirmation-timeout window, BUG-5/BUG-6) turned it into an
+  // unbounded continuous run the same way, with the same silent-watchdog
+  // consequence.
+  if (stepper == nullptr || autoDriving || timelapseMoving) {
     return;
   }
 

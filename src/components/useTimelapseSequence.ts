@@ -271,6 +271,23 @@ export function useTimelapseSequence(
       setRemainingSeconds(0);
       setError(finalError);
       deactivate();
+
+      // qa-report.md BUG-7: a failed step (timeout, capture failure) used to
+      // leave the carriage exactly as it was — including, for a
+      // TIMELAPSE_MOVE that never confirmed arrival, still physically
+      // moving. AC-6 requires the carriage to actually stop, and a STOP is
+      // also what clears a hung `timelapseMoving` flag on the firmware side
+      // (motorStop()) — closing this on the app side narrows BUG-4's
+      // remaining window without waiting on that firmware-side guard.
+      // finishRun() is only ever called with a non-null error from a
+      // failure path (see runSequence() below) — the success path calls it
+      // with null and has already sent its own AUTO_DRIVE return command.
+      if (finalError !== null) {
+        const currentDevice = deviceRef.current;
+        if (currentDevice) {
+          sendStopCommand(currentDevice).catch(() => {});
+        }
+      }
     },
     [deactivate],
   );
