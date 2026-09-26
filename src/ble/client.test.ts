@@ -10,6 +10,7 @@ import {
   sendSetEndCommand,
   sendAutoDriveCommand,
   sendSetEndFromDistanceCommand,
+  sendTimelapseMoveCommand,
   parseStatusPayload,
 } from './client';
 
@@ -197,6 +198,45 @@ describe('sendSetEndFromDistanceCommand', () => {
   });
 });
 
+describe('sendTimelapseMoveCommand', () => {
+  it('encodes endIsAfterStart true (0x00) + distance, little-endian, with response', async () => {
+    const device = createMockDevice();
+
+    // 1234567 steps -> 0x12D687 -> LE bytes 0x87 0xD6 0x12 0x00
+    await sendTimelapseMoveCommand(device as unknown as Device, true, 1234567);
+
+    expect(device.writeCharacteristicWithResponseForService).toHaveBeenCalledTimes(1);
+    const [serviceUUID, charUUID, base64Value] =
+      device.writeCharacteristicWithResponseForService.mock.calls[0];
+    expect(serviceUUID).toBe(SLIDER_SERVICE_UUID);
+    expect(charUUID).toBe(SLIDER_COMMAND_CHAR_UUID);
+    expect(Array.from(toByteArray(base64Value))).toEqual([
+      0x07, 0x00, 0x87, 0xd6, 0x12, 0x00,
+    ]);
+    expect(device.writeCharacteristicWithoutResponseForService).not.toHaveBeenCalled();
+  });
+
+  it('encodes endIsAfterStart false as direction byte 0x01', async () => {
+    const device = createMockDevice();
+
+    await sendTimelapseMoveCommand(device as unknown as Device, false, 1234567);
+
+    const [, , base64Value] = device.writeCharacteristicWithResponseForService.mock.calls[0];
+    expect(Array.from(toByteArray(base64Value))).toEqual([
+      0x07, 0x01, 0x87, 0xd6, 0x12, 0x00,
+    ]);
+  });
+
+  it('encodes a small distance spanning only the low byte, little-endian', async () => {
+    const device = createMockDevice();
+
+    await sendTimelapseMoveCommand(device as unknown as Device, true, 42);
+
+    const [, , base64Value] = device.writeCharacteristicWithResponseForService.mock.calls[0];
+    expect(Array.from(toByteArray(base64Value))).toEqual([0x07, 0x00, 42, 0x00, 0x00, 0x00]);
+  });
+});
+
 describe('parseStatusPayload', () => {
   // qa-report.md REG-2: PROJ-4 grew the wire payload from 5 to 6 bytes, but
   // the pre-PROJ-4 5-byte test cases were replaced by 6-byte ones instead of
@@ -237,6 +277,7 @@ describe('parseStatusPayload', () => {
       driving: false,
       distanceSteps: null,
       endIsAfterStart: null,
+      timelapseMoving: false,
     });
   });
 
@@ -316,5 +357,54 @@ describe('parseStatusPayload', () => {
     expect(result.hasEnd).toBe(true);
     expect(result.distanceSteps).toBeNull();
     expect(result.endIsAfterStart).toBeNull();
+  });
+
+  it('parses timelapseMoving set (bit 5) without hasStart/hasEnd', () => {
+    // flags: bit5 timelapseMoving only -> 0x20 (hasStart/hasEnd unset)
+    const payload = fromByteArray(new Uint8Array([0x20, 0, 0, 0, 0, 0]));
+
+    const result = parseStatusPayload(payload);
+    expect(result.timelapseMoving).toBe(true);
+    expect(result.hasStart).toBe(false);
+    expect(result.hasEnd).toBe(false);
+    expect(result.distanceSteps).toBeNull();
+    expect(result.endIsAfterStart).toBeNull();
+  });
+
+  it('parses timelapseMoving unset (bit 5) without hasStart/hasEnd', () => {
+    // flags: none set -> 0x00
+    const payload = fromByteArray(new Uint8Array([0x00, 0, 0, 0, 0, 0]));
+
+    const result = parseStatusPayload(payload);
+    expect(result.timelapseMoving).toBe(false);
+  });
+
+  it('parses timelapseMoving set (bit 5) together with hasStart && hasEnd', () => {
+    // flags: bit0 hasStart, bit1 hasEnd, bit5 timelapseMoving -> 0x23; distance 300000 steps (uint32 LE); byte 5: 0x00 -> endIsAfterStart true
+    const distance = 300000;
+    const distanceBytes = [
+      distance & 0xff,
+      (distance >>> 8) & 0xff,
+      (distance >>> 16) & 0xff,
+      (distance >>> 24) & 0xff,
+    ];
+    const payload = fromByteArray(new Uint8Array([0x23, ...distanceBytes, 0x00]));
+
+    const result = parseStatusPayload(payload);
+    expect(result.timelapseMoving).toBe(true);
+    expect(result.hasStart).toBe(true);
+    expect(result.hasEnd).toBe(true);
+    expect(result.distanceSteps).toBe(300000);
+    expect(result.endIsAfterStart).toBe(true);
+  });
+
+  it('parses timelapseMoving unset (bit 5) together with hasStart && hasEnd', () => {
+    // flags: bit0 hasStart, bit1 hasEnd -> 0x03 (bit5 not set)
+    const payload = fromByteArray(new Uint8Array([0x03, 10, 0, 0, 0, 0x00]));
+
+    const result = parseStatusPayload(payload);
+    expect(result.timelapseMoving).toBe(false);
+    expect(result.hasStart).toBe(true);
+    expect(result.hasEnd).toBe(true);
   });
 });

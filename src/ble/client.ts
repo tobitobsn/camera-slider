@@ -31,6 +31,7 @@ const SET_END_OPCODE = 0x03;
 const AUTO_DRIVE_OPCODE = 0x04;
 const STOP_OPCODE = 0x05;
 const SET_END_FROM_DISTANCE_OPCODE = 0x06;
+const TIMELAPSE_MOVE_OPCODE = 0x07;
 
 const JOG_DIRECTION_BYTE: Record<JogDirection, number> = {
   forward: 0x00,
@@ -75,6 +76,12 @@ export type SliderStatus = {
    * hasStart and hasEnd are true.
    */
   endIsAfterStart: boolean | null;
+  /**
+   * Whether the firmware is currently executing a timelapse step move
+   * (triggered by sendTimelapseMoveCommand). Always a valid value, unlike
+   * distanceSteps/endIsAfterStart — it does not depend on hasStart/hasEnd.
+   */
+  timelapseMoving: boolean;
 };
 
 const DEFAULT_SCAN_TIMEOUT_MS = 10000;
@@ -328,13 +335,55 @@ export async function sendSetEndFromDistanceCommand(
 }
 
 /**
+ * Sends a TIMELAPSE_MOVE command: direction (relative to the start point) +
+ * a distance in steps. Used by the timelapse mode to advance the carriage by
+ * one step-interval at a time between shots — unlike
+ * sendSetEndFromDistanceCommand, this does not touch the firmware's
+ * startPosition/endPosition at all, it just moves the carriage. Byte layout
+ * is identical to sendSetEndFromDistanceCommand (same opcode-then-direction-
+ * then-distance shape). Write WITH response — same safety rationale as
+ * sendSetStartCommand/sendSetEndCommand/sendAutoDriveCommand/
+ * sendSetEndFromDistanceCommand.
+ *
+ * @param endIsAfterStart true if the target point lies at-or-after the start
+ *   point (increasing step count), false if it lies before it (decreasing
+ *   step count).
+ * @param distanceStepsFromStart Distance in steps from the start point,
+ *   encoded as an unsigned 32-bit little-endian integer.
+ */
+export async function sendTimelapseMoveCommand(
+  device: Device,
+  endIsAfterStart: boolean,
+  distanceStepsFromStart: number,
+): Promise<void> {
+  const directionByte = endIsAfterStart
+    ? END_FROM_DISTANCE_DIRECTION_BYTE.atOrAfterStart
+    : END_FROM_DISTANCE_DIRECTION_BYTE.beforeStart;
+
+  const payload = new Uint8Array([
+    TIMELAPSE_MOVE_OPCODE,
+    directionByte,
+    distanceStepsFromStart & 0xff,
+    (distanceStepsFromStart >>> 8) & 0xff,
+    (distanceStepsFromStart >>> 16) & 0xff,
+    (distanceStepsFromStart >>> 24) & 0xff,
+  ]);
+
+  await device.writeCharacteristicWithResponseForService(
+    SLIDER_SERVICE_UUID,
+    SLIDER_COMMAND_CHAR_UUID,
+    fromByteArray(payload),
+  );
+}
+
+/**
  * Pure decoder for the Status characteristic's Notify payload — no BLE calls,
  * just bytes in, SliderStatus out. Exported separately so it's directly
  * unit-testable without mocking BLE.
  *
  * Wire format (firmware/src/ble.cpp):
  *  - byte 0: flags bitfield — bit 0 hasStart, bit 1 hasEnd, bit 2 atStart,
- *    bit 3 atEnd, bit 4 driving
+ *    bit 3 atEnd, bit 4 driving, bit 5 timelapseMoving
  *  - bytes 1-4: distance in steps between start and end (uint32,
  *    little-endian) — only meaningful when hasStart && hasEnd are both true
  *  - byte 5: 0x00 when the end point is at-or-after the start point
@@ -350,6 +399,9 @@ export function parseStatusPayload(base64Value: string): SliderStatus {
   const atStart = (flags & 0x04) !== 0;
   const atEnd = (flags & 0x08) !== 0;
   const driving = (flags & 0x10) !== 0;
+  // Valid regardless of hasStart/hasEnd — unlike distanceSteps/endIsAfterStart
+  // below, which only make sense once both a start and an end point exist.
+  const timelapseMoving = (flags & 0x20) !== 0;
 
   let distanceSteps: number | null = null;
   let endIsAfterStart: boolean | null = null;
@@ -364,7 +416,16 @@ export function parseStatusPayload(base64Value: string): SliderStatus {
     endIsAfterStart = (bytes[5] ?? 0) === 0x00;
   }
 
-  return { hasStart, hasEnd, atStart, atEnd, driving, distanceSteps, endIsAfterStart };
+  return {
+    hasStart,
+    hasEnd,
+    atStart,
+    atEnd,
+    driving,
+    distanceSteps,
+    endIsAfterStart,
+    timelapseMoving,
+  };
 }
 
 /**
