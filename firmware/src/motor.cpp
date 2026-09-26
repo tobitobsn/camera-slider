@@ -151,6 +151,31 @@ constexpr unsigned long kAutoDriveStartGraceMs = 100;
 // already captured by kJogSpeedMinHz/kJogSpeedMaxHz above — reused here
 // as-is rather than duplicated under a second name.
 
+// --- PROJ-5: Zeitraffer intermediate-step movement -------------------------
+//
+// True from a validated motorTimelapseMoveTo() call until
+// motorTimelapseMoveCheck() notices the stepper has arrived (isRunning()
+// becomes false), or until motorStop() cancels it early — same lifecycle as
+// autoDriving above, kept as its own flag rather than reusing autoDriving
+// because the two movement kinds are mutually exclusive but distinguishable
+// on the Status-Characteristic (design.md: separate bit 5) and because
+// motorAutoDrive()'s own exact-position guard must not apply here (design.md
+// "Warum eine neue Bewegungsart in der Firmware nötig ist").
+volatile bool timelapseMoving = false;
+
+// millis() timestamp of the motorTimelapseMoveTo() call that set
+// timelapseMoving=true. Same race and same fix as autoDriveStartMillis
+// above (PROJ-3 bug hunt, see the comment there): timelapseMoving is set
+// *before* stepper->moveTo() is called, but moveTo() likely only schedules
+// the move rather than making isRunning() true synchronously — without a
+// grace period, motorTimelapseMoveCheck() running on the loop() task could
+// see isRunning()==false in that brief gap and misinterpret "hasn't started
+// yet" as "already arrived", clearing timelapseMoving before the move ever
+// gets going. kAutoDriveStartGraceMs already covers exactly this window;
+// reused here rather than duplicated under a second constant, since the
+// underlying race is identical.
+volatile unsigned long timelapseMoveStartMillis = 0;
+
 uint32_t speedPercentToStepsPerSecond(uint8_t speedPercent) {
   if (speedPercent < 1) {
     speedPercent = 1;
@@ -259,18 +284,24 @@ void motorStop() {
   // fresh, and motorWatchdogCheck()'s jog-guard must not keep thinking an
   // auto-drive is still active (design.md motorStop() entry).
   autoDriving = false;
+
+  // design.md "STOP (0x05) hält zusätzlich ... jetzt auch eine laufende
+  // Zeitraffer-Bewegung sofort an" — same reasoning as autoDriving above:
+  // the next motorTimelapseMoveTo() call must be treated as starting fresh.
+  timelapseMoving = false;
 }
 
 void motorWatchdogCheck() {
   if (stepper == nullptr) {
     return;
   }
-  if (autoDriving) {
-    // EC-4: an auto-drive is a terminating, self-contained move — it
-    // doesn't send a continuous heartbeat like jog does, so the jog
-    // watchdog must stay quiet while it's in progress. Checked before
-    // isRunning() (PROJ-3 bug hunt) so this guard depends on a single
-    // variable's visibility, not on isRunning() and autoDriving agreeing.
+  if (autoDriving || timelapseMoving) {
+    // EC-4: an auto-drive (or, PROJ-5, a timelapse intermediate-step move)
+    // is a terminating, self-contained move — it doesn't send a continuous
+    // heartbeat like jog does, so the jog watchdog must stay quiet while
+    // either is in progress. Checked before isRunning() (PROJ-3 bug hunt)
+    // so this guard depends on a single variable's visibility, not on
+    // isRunning() and autoDriving/timelapseMoving agreeing.
     return;
   }
   if (!stepper->isRunning()) {
@@ -319,9 +350,11 @@ void motorClearPoints() {
 }
 
 void motorAutoDrive(JogDirection direction, uint16_t durationDeciseconds) {
-  if (stepper == nullptr || autoDriving || !hasStart || !hasEnd ||
-      stepper->isRunning() || durationDeciseconds == 0) {
+  if (stepper == nullptr || autoDriving || timelapseMoving || !hasStart ||
+      !hasEnd || stepper->isRunning() || durationDeciseconds == 0) {
     // autoDriving true covers EC-2 (no overlapping auto-drive requests).
+    // timelapseMoving true is the PROJ-5 mutual exclusion (design.md
+    // "Umgekehrter Schutz") — both movement kinds share the same motor.
     // stepper->isRunning() true also rejects a request that arrives while
     // a jog is still going — reading getCurrentPosition() while running
     // isn't precise enough to validate "stands exactly at the point".
@@ -428,6 +461,69 @@ void motorAutoDriveCheck() {
   }
 }
 
+// --- PROJ-5: Zeitraffer intermediate-step movement -------------------------
+
+void motorTimelapseMoveTo(bool endIsAfterStart, uint32_t distanceSteps) {
+  if (stepper == nullptr || stepper->isRunning() || autoDriving ||
+      timelapseMoving || !hasStart ||
+      distanceSteps > kMaxPlausibleDistanceSteps) {
+    // autoDriving true is the PROJ-5 mutual exclusion (design.md
+    // "Umgekehrter Schutz") — both movement kinds share the same motor.
+    // Deliberately does NOT check the carriage's current position against
+    // startPosition (unlike motorAutoDrive()'s exact-position guard) — a
+    // timelapse sequence calls this repeatedly from wherever the previous
+    // step left off, not always from startPosition itself.
+    return;
+  }
+
+  // Same sign convention as motorSetEndFromDistance() (motor.h doc comment,
+  // and that function a few lines above) — deliberately does not touch
+  // startPosition, endPosition or hasEnd (design.md "Warum eine neue
+  // Bewegungsart in der Firmware nötig ist": those stay reserved for the
+  // user's own registered points, untouched by intermediate timelapse
+  // steps).
+  const int32_t targetPosition = startPosition +
+      (endIsAfterStart ? static_cast<int32_t>(distanceSteps)
+                        : -static_cast<int32_t>(distanceSteps));
+
+  // Fixed technical speed, not a user-facing setting (design.md: "kein
+  // neues Tuning, keine neue Nutzer-Einstellung") — same constant
+  // motorJog()'s fastest jog speed uses.
+  stepper->setSpeedInHz(static_cast<uint32_t>(kJogSpeedMaxHz + 0.5f));
+
+  // Write order matters across the loop()/BLE-host task boundary — same
+  // reasoning as motorAutoDrive()'s autoDriveStartMillis/autoDriving pair
+  // above (PROJ-3 bug hunt): timelapseMoveStartMillis is written *before*
+  // timelapseMoving is published, so any task that observes
+  // timelapseMoving==true is guaranteed to see a fresh
+  // timelapseMoveStartMillis too, never a previous move's stale timestamp —
+  // which would let motorTimelapseMoveCheck()'s grace-period check read a
+  // huge elapsed time and wrongly clear timelapseMoving before moveTo()
+  // below ever starts the move. timelapseMoving is still published before
+  // moveTo() so motorWatchdogCheck()'s guard is already active once the
+  // stepper can possibly start running.
+  timelapseMoveStartMillis = millis();
+  timelapseMoving = true;
+  stepper->moveTo(targetPosition, /*blocking=*/false);
+}
+
+void motorTimelapseMoveCheck() {
+  if (stepper == nullptr || !timelapseMoving) {
+    return;
+  }
+  // Grace period (see timelapseMoveStartMillis above): don't trust
+  // isRunning()==false as "arrived" until the move has genuinely had a
+  // chance to start. Same constant motorAutoDriveCheck() uses — identical
+  // race, no reason for a second value.
+  if (millis() - timelapseMoveStartMillis < kAutoDriveStartGraceMs) {
+    return;
+  }
+  if (!stepper->isRunning()) {
+    // Arrived at the target on its own — no signal from the app needed.
+    timelapseMoving = false;
+  }
+}
+
 MotorStatus motorGetStatus() {
   // Snapshot every shared flag/value into plain locals with a single read
   // each, right at the top — belt-and-suspenders on top of `volatile` above.
@@ -442,6 +538,7 @@ MotorStatus motorGetStatus() {
   const bool snapHasStart = hasStart;
   const bool snapHasEnd = hasEnd;
   const bool snapAutoDriving = autoDriving;
+  const bool snapTimelapseMoving = timelapseMoving;
   const int32_t snapStartPosition = startPosition;
   const int32_t snapEndPosition = endPosition;
 
@@ -449,6 +546,7 @@ MotorStatus motorGetStatus() {
   status.hasStart = snapHasStart;
   status.hasEnd = snapHasEnd;
   status.driving = snapAutoDriving;
+  status.timelapseMoving = snapTimelapseMoving;
 
   if (snapHasStart && snapHasEnd) {
     const int32_t signedDistance = snapEndPosition - snapStartPosition;

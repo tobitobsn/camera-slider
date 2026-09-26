@@ -128,6 +128,11 @@ void motorAutoDriveCheck();
 //                          when both hasStart and hasEnd are true
 //   endIsAfterStart      — true when endPosition >= startPosition; only
 //                          meaningful when both hasStart and hasEnd are true
+//   timelapseMoving      — a motorTimelapseMoveTo() move is currently in
+//                          progress (design.md "Status-Characteristic", NEU
+//                          Bit 5) — independent of `driving`, since the two
+//                          movement kinds are mutually exclusive but each
+//                          gets its own status bit
 struct MotorStatus {
   bool hasStart;
   bool hasEnd;
@@ -136,6 +141,52 @@ struct MotorStatus {
   bool driving;
   uint32_t distanceSteps;
   bool endIsAfterStart;
+  bool timelapseMoving;
 };
 
 MotorStatus motorGetStatus();
+
+// --- PROJ-5: Zeitraffer intermediate-step movement -------------------------
+//
+// design.md "Warum eine neue Bewegungsart in der Firmware nötig ist":
+// motorAutoDrive() only ever moves between the two *registered* points
+// (startPosition/endPosition) and requires the carriage to stand exactly at
+// one of them. A timelapse sequence with N shots needs N-1 moves to N-1
+// distinct intermediate points between start and end, and reusing
+// motorSetEndFromDistance() (PROJ-4) to walk endPosition forward at each
+// step would overwrite the user's real, registered end point — losing it
+// for the final return-to-start move (spec.md AC-2). This movement kind is
+// therefore purely additive: it never touches startPosition, endPosition or
+// hasEnd, only reads startPosition as its reference.
+
+// Starts a direct move from the current position to
+// startPosition +/- distanceSteps (same sign convention as
+// motorSetEndFromDistance(): endIsAfterStart true = +distanceSteps).
+// Deliberately does not require the carriage to currently stand at
+// startPosition (unlike motorAutoDrive()'s exact-position guard) — a
+// timelapse sequence calls this repeatedly from wherever the previous step
+// left off.
+//
+// Silent no-op (does not start anything) if any of these hold:
+//   - the stepper isn't initialized, or is currently running
+//   - autoDriving is true (mutual exclusion — both movement kinds share the
+//     same motor, design.md "Umgekehrter Schutz")
+//   - a timelapse move is already in progress (timelapseMoving)
+//   - there is no start point yet (!hasStart) — no reference to move from
+//   - distanceSteps exceeds kMaxPlausibleDistanceSteps (the same
+//     plausibility bound as motorSetEndFromDistance(), PROJ-4's BUG-1 fix —
+//     reused as-is, not duplicated under a second constant)
+//
+// Speed is the fixed kJogSpeedMaxHz (4000 steps/s) — a technical constant,
+// not a user-facing setting (design.md: "kein neues Tuning, keine neue
+// Nutzer-Einstellung").
+void motorTimelapseMoveTo(bool endIsAfterStart, uint32_t distanceSteps);
+
+// Call from loop() (main.cpp — not wired up by this change, see T4).
+// Analogous to motorAutoDriveCheck(): detects arrival (isRunning() becomes
+// false while timelapseMoving is still true) and clears timelapseMoving
+// when it happens, after the same start grace period motorAutoDriveCheck()
+// uses (see motorTimelapseMoveTo()'s doc comment on
+// timelapseMoveStartMillis in motor.cpp for why the grace period exists).
+// No-op if no timelapse move is in progress.
+void motorTimelapseMoveCheck();
