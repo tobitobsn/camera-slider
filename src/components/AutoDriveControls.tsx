@@ -163,6 +163,18 @@ export function statusLabelFor(status: SliderStatus): string {
   return 'Bereit';
 }
 
+type AutoDriveControlsProps = {
+  /**
+   * PROJ-5 T6: true while a timelapse sequence is running (RootScreen's
+   * useTimelapseSequence(device).isRunning) — a sequence drives the
+   * carriage itself via TIMELAPSE_MOVE, so every interactive element here
+   * must stay locked for the same reason `status.driving` already locks
+   * them for a manual auto-drive. Combined with the existing
+   * `status.driving` checks everywhere, not a replacement for them.
+   */
+  disabled?: boolean;
+};
+
 /**
  * Auto-drive controls (AC-1..AC-9, EC-1) — set start/end points from the
  * current jogged-to position, enter a target duration, trigger a drive in
@@ -175,7 +187,7 @@ export function statusLabelFor(status: SliderStatus): string {
  * all of it comes straight from useSliderStatus(device), which the firmware
  * updates via Notify after every SET_START/SET_END/stop/arrival (design.md).
  */
-export function AutoDriveControls() {
+export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps = {}) {
   const { device } = useConnection();
   const status = useSliderStatus(device);
   const { presets, save: savePresetToStorage, remove: removePresetFromStorage } = usePresets();
@@ -241,6 +253,7 @@ export function AutoDriveControls() {
 
   const autoDriveBaseEnabled =
     !status.driving &&
+    !disabled &&
     status.hasStart &&
     status.hasEnd &&
     status.distanceSteps !== null &&
@@ -261,6 +274,11 @@ export function AutoDriveControls() {
     status.distanceSteps !== null &&
     status.distanceSteps > 0 &&
     durationValid;
+
+  // PROJ-5 T6: single OR'd flag for every element that only ever checked
+  // status.driving before — kept as one constant rather than repeating
+  // `status.driving || disabled` at each call site.
+  const lockedByOtherMode = status.driving || disabled;
 
   if (!device) {
     return null;
@@ -398,22 +416,22 @@ export function AutoDriveControls() {
       <View style={styles.buttonRow}>
         <Pressable
           onPress={handleSetStart}
-          disabled={status.driving}
+          disabled={lockedByOtherMode}
           style={({ pressed }) => [
             styles.button,
             pressed && styles.buttonPressed,
-            status.driving && styles.buttonDisabled,
+            lockedByOtherMode && styles.buttonDisabled,
           ]}
         >
           <Text style={styles.buttonLabel}>Als Start setzen</Text>
         </Pressable>
         <Pressable
           onPress={handleSetEnd}
-          disabled={status.driving}
+          disabled={lockedByOtherMode}
           style={({ pressed }) => [
             styles.button,
             pressed && styles.buttonPressed,
-            status.driving && styles.buttonDisabled,
+            lockedByOtherMode && styles.buttonDisabled,
           ]}
         >
           <Text style={styles.buttonLabel}>Als Ende setzen</Text>
@@ -427,7 +445,7 @@ export function AutoDriveControls() {
           keyboardType="decimal-pad"
           value={durationText}
           onChangeText={setDurationText}
-          editable={!status.driving}
+          editable={!lockedByOtherMode}
           placeholder={DEFAULT_DURATION_TEXT}
           placeholderTextColor={colors.mutedForeground}
         />
@@ -470,7 +488,12 @@ export function AutoDriveControls() {
       {status.driving && (
         <Pressable
           onPress={handleStop}
-          style={({ pressed }) => [styles.stopButton, pressed && styles.stopButtonPressed]}
+          disabled={disabled}
+          style={({ pressed }) => [
+            styles.stopButton,
+            pressed && !disabled && styles.stopButtonPressed,
+            disabled && styles.buttonDisabled,
+          ]}
         >
           <Text style={styles.stopButtonLabel}>Stopp</Text>
         </Pressable>
@@ -481,12 +504,12 @@ export function AutoDriveControls() {
       {presetPreconditionMet && (
         <Pressable
           onPress={handleOpenSaveDialog}
-          disabled={status.driving}
+          disabled={lockedByOtherMode}
           style={({ pressed }) => [
             styles.button,
             styles.savePresetButton,
-            pressed && !status.driving && styles.buttonPressed,
-            status.driving && styles.buttonDisabled,
+            pressed && !lockedByOtherMode && styles.buttonPressed,
+            lockedByOtherMode && styles.buttonDisabled,
           ]}
         >
           <Text style={styles.buttonLabel}>Als Preset speichern</Text>
@@ -502,11 +525,11 @@ export function AutoDriveControls() {
             <View key={preset.id} style={styles.presetRow}>
               <Pressable
                 onPress={() => handleLoadPreset(preset)}
-                disabled={status.driving}
+                disabled={lockedByOtherMode}
                 style={({ pressed }) => [
                   styles.presetInfo,
-                  pressed && !status.driving && styles.presetInfoPressed,
-                  status.driving && styles.buttonDisabled,
+                  pressed && !lockedByOtherMode && styles.presetInfoPressed,
+                  lockedByOtherMode && styles.buttonDisabled,
                 ]}
               >
                 <Text style={styles.presetName}>{preset.name}</Text>
@@ -516,11 +539,11 @@ export function AutoDriveControls() {
               </Pressable>
               <Pressable
                 onPress={() => handleDeletePreset(preset)}
-                disabled={status.driving}
+                disabled={lockedByOtherMode}
                 style={({ pressed }) => [
                   styles.deleteButton,
-                  pressed && !status.driving && styles.deleteButtonPressed,
-                  status.driving && styles.buttonDisabled,
+                  pressed && !lockedByOtherMode && styles.deleteButtonPressed,
+                  lockedByOtherMode && styles.buttonDisabled,
                 ]}
               >
                 <Text style={styles.deleteButtonLabel}>Löschen</Text>

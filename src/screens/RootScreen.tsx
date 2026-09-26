@@ -10,8 +10,10 @@ import { PermissionDeniedNotice } from '../components/PermissionDeniedNotice';
 import { PermissionRationale } from '../components/PermissionRationale';
 import { ReconnectingBanner } from '../components/ReconnectingBanner';
 import { ScanningIndicator } from '../components/ScanningIndicator';
+import { TimelapseControls } from '../components/TimelapseControls';
 import { useConnection } from '../connection/ConnectionProvider';
 import { useSliderStatus } from '../components/useSliderStatus';
+import { useTimelapseSequence, type TimelapseSequenceApi } from '../components/useTimelapseSequence';
 import { colors, spacing, typography } from '../theme/colors';
 
 /**
@@ -32,11 +34,21 @@ export function RootScreen() {
   // left as-is: a second lightweight JS listener on the same already-active
   // BLE notify subscription, not a second native subscription.)
   const status = useSliderStatus(device);
+  // PROJ-5 T6: called here (once) rather than inside TimelapseControls,
+  // because — unlike useSliderStatus's lightweight status listener — this
+  // hook owns the whole in-flight sequence (refs, timers, the run loop
+  // itself). A second call from within TimelapseControls would start a
+  // second, independent orchestrator instead of sharing state. Its full API
+  // is threaded down as props; JogControls/AutoDriveControls also need
+  // `isRunning` to lock themselves while a sequence is running.
+  const timelapse = useTimelapseSequence(device);
 
   return (
     <View style={styles.container}>
       <ConnectionHeader />
-      <View style={styles.content}>{renderContent(state.status, status.driving)}</View>
+      <View style={styles.content}>
+        {renderContent(state.status, status.driving, timelapse)}
+      </View>
     </View>
   );
 }
@@ -44,6 +56,7 @@ export function RootScreen() {
 function renderContent(
   status: ReturnType<typeof useConnection>['state']['status'],
   driving: boolean,
+  timelapse: TimelapseSequenceApi,
 ) {
   switch (status) {
     case 'checking_permissions':
@@ -62,11 +75,28 @@ function renderContent(
     case 'connected':
       // AC-9 (PROJ-3): JogControls locks its buttons/slider while an
       // auto-drive is in progress — AutoDriveControls manages its own
-      // locked state internally.
+      // locked state internally. PROJ-5 T6: both also lock while a
+      // timelapse sequence is running (timelapse.isRunning), since a
+      // sequence drives the carriage itself via TIMELAPSE_MOVE and a
+      // concurrent jog/auto-drive command would fight it. Symmetrically,
+      // TimelapseControls locks its own "start sequence" action while a
+      // manual auto-drive is already in progress (`disabled={driving}`) —
+      // AutoDriveControls' own `status.driving` checks already cover the
+      // reverse case internally.
       return (
         <View style={styles.connectedStack}>
-          <JogControls disabled={driving} />
-          <AutoDriveControls />
+          <JogControls disabled={driving || timelapse.isRunning} />
+          <AutoDriveControls disabled={timelapse.isRunning} />
+          <TimelapseControls
+            isRunning={timelapse.isRunning}
+            currentShot={timelapse.currentShot}
+            totalShots={timelapse.totalShots}
+            remainingSeconds={timelapse.remainingSeconds}
+            error={timelapse.error}
+            start={timelapse.start}
+            stop={timelapse.stop}
+            disabled={driving}
+          />
         </View>
       );
     case 'reconnecting':
