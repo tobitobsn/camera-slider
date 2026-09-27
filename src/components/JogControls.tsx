@@ -12,6 +12,21 @@ const MIN_SPEED_PERCENT = 1;
 const MAX_SPEED_PERCENT = 100;
 const DEFAULT_SPEED_PERCENT = 50;
 
+/**
+ * qa-report.md BUG-17 (PROJ-2): Pressable's default press-retention area is
+ * just its own visible bounds — a finger held on a real device rarely stays
+ * perfectly still, and the smallest wobble past the button's edge fired
+ * onPressOut, stopping the jog. EC-1 ("Finger aus dem Button-Bereich
+ * gezogen zählt als Loslassen") only ever required that leaving the button
+ * meaningfully — not by a pixel or two of natural hand tremor — counts as
+ * release; it never specified zero tolerance. pressRetentionOffset expands
+ * the area the finger can move within before that counts as "left the
+ * button", without touching hitSlop (which would also grow the *tap*
+ * target and could make two adjacent buttons overlap) — reported live on
+ * hardware, 40px chosen as a generous but still bounded margin.
+ */
+const PRESS_RETENTION_OFFSET = { top: 40, left: 40, right: 40, bottom: 40 };
+
 function statusLabelFor(status: JogStatus): string {
   switch (status) {
     case 'jogging_forward':
@@ -122,6 +137,7 @@ export function JogControls({ disabled = false }: JogControlsProps) {
           onPressIn={pressBackward}
           onPressOut={releaseBackward}
           disabled={disabled}
+          pressRetentionOffset={PRESS_RETENTION_OFFSET}
           style={({ pressed }) => [
             styles.button,
             pressed && styles.buttonPressed,
@@ -134,6 +150,7 @@ export function JogControls({ disabled = false }: JogControlsProps) {
           onPressIn={pressForward}
           onPressOut={releaseForward}
           disabled={disabled}
+          pressRetentionOffset={PRESS_RETENTION_OFFSET}
           style={({ pressed }) => [
             styles.button,
             pressed && styles.buttonPressed,
