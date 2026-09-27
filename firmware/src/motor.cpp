@@ -227,13 +227,33 @@ void motorJog(JogDirection direction, uint8_t speedPercent) {
     // runForward()/runBackward() reverse cleanly if the motor is currently
     // running the other way (FastAccelStepper.h, runForward()/runBackward()
     // doc comment).
-    if (direction == JogDirection::kForward) {
-      stepper->runForward();
+    //
+    // qa-report.md BUG-16 (PROJ-2): runForward()/runBackward() return an
+    // int8_t (MOVE_OK == 0, or a MOVE_ERR_* code, FastAccelStepper.h) that
+    // was previously discarded — jogRunning was set to true unconditionally,
+    // even on a failed start. Every following 300ms heartbeat then took the
+    // "already running, same direction" branch above (applySpeedAcceleration()
+    // on a stepper that was never actually running), so a single failed
+    // start-of-run request left jog permanently unresponsive in that
+    // direction until an unrelated STOP/motorStop() reset jogRunning — no
+    // watchdog catch either, since isRunning() correctly reports false the
+    // whole time. Reported live on hardware, specifically and repeatably
+    // right after an AUTO_DRIVE: only setting jogRunning on a successful
+    // start means a failed attempt is retried from scratch on the very next
+    // heartbeat instead of getting stuck.
+    const int8_t startResult = direction == JogDirection::kForward
+                                    ? stepper->runForward()
+                                    : stepper->runBackward();
+    if (startResult == 0) {
+      jogRunning = true;
+      jogRunningDirection = direction;
     } else {
-      stepper->runBackward();
+      // Kept as a permanent (not one-off) diagnostic — same pattern as the
+      // stepperConnectToPin() failure log above in this file. Cheap (only
+      // on the error path, never on the normal 300ms heartbeat) and the
+      // only way to ever confirm this path fires again on real hardware.
+      Serial.printf("Motor: jog start failed, MOVE_ERR=%d\n", startResult);
     }
-    jogRunning = true;
-    jogRunningDirection = direction;
   }
 
   lastJogMillis = millis();
