@@ -192,3 +192,35 @@ _Volle Reproduktions-/Begründungsdetails bleiben in den AC/EC-Ergebnissen und i
 - **Empfehlung:** Approved. Offene Punkte sind ausschließlich Low-Bugs (Nice to have) und zwei nicht blockierende Empfehlungen: `/refine PROJ-1` für BUG-13 (Spec-Drift), optional `/e2e-tests` für die kritischsten Abläufe als dauerhaftes Regressionsnetz.
 
 > "Production Ready: JA" heißt: kein Critical/High/Medium-Bug offen, und alle sieben Laufzeit-ACs wurden an echter Hardware durchgespielt. EC-1 und EC-5 wurden nicht separat abgefragt — aus der Quelle plausibel, niedriges Risiko, kein Blocker.
+
+## Nachtrag 2: BUG-16 — tatsächliche Ursache gefunden, jetzt echt geschlossen (2026-09-27)
+
+Der erste Fix-Versuch (Write-with-Response, siehe Nachtrag oben) wurde ursprünglich als "bestätigt behoben" dokumentiert. Eine unabhängige `qa-engineer`-Re-Verifikation widersprach dem: Der eigene Diagnoseweg im Fix zeigte, dass der Fehler nach der Write-with-Response-Umstellung zunächst **weiterhin auftrat** und erst nach einem Firmware-Reflash (zur Diagnose, mit anderer Firmware) verschwand — die Bestätigung war durch den Reboot verfälscht, nicht durch den Fix belegt. Ein sauberer Retest (App- und Firmware-Stand unverändert seit dem letzten Reflash, kein Zwischen-Flash) hat das bestätigt: **der Fehler trat erneut auf.**
+
+**Tatsächliche Ursache gefunden:** `firmware/src/motor.cpp`s `motorJog()` ignorierte den Rückgabewert von `FastAccelStepper::runForward()`/`runBackward()` (`int8_t`, `MOVE_OK`=0 oder ein `MOVE_ERR_*`-Code, siehe die vendorte `FastAccelStepper.h`) und setzte `jogRunning = true` unabhängig davon, ob der Start tatsächlich gelang. Jeder folgende 300ms-Heartbeat nahm danach den „bereits läuft, gleiche Richtung"-Zweig (nur `applySpeedAcceleration()` auf einem Motor, der nie wirklich lief) — kein Watchdog-Fang, da `isRunning()` korrekt `false` blieb. Ein einzelner fehlgeschlagener Start-Versuch (reproduzierbar direkt nach einer Auto-Fahrt) blieb dadurch dauerhaft hängen, bis ein unabhängiges STOP `jogRunning` zurücksetzte.
+
+**Fix:** `jogRunning`/`jogRunningDirection` werden jetzt nur bei erfolgreichem Start (`runForward()`/`runBackward()` liefert `0`) gesetzt — ein fehlgeschlagener Versuch wird beim nächsten Heartbeat automatisch neu versucht, statt hängen zu bleiben. Zusätzlich ein permanenter (nicht temporärer) Diagnose-Log `Serial.printf("Motor: jog start failed, MOVE_ERR=%d\n", ...)` auf dem Fehlerpfad — analog zum bestehenden `stepperConnectToPin`-Fehlerlog in derselben Datei.
+
+- [x] **BUG-16 — bestätigt behoben, diesmal sauber verifiziert.** Firmware einmal geflasht, seither nicht mehr angefasst; Nutzer hat danach mehrfach Auto-Fahrt → Jog getestet ("funktioniert jetzt offensichtlich") — kein Zwischen-Flash zwischen Fix und Bestätigung, damit ist der Confound aus dem ersten Versuch diesmal ausgeschlossen.
+- Die zuvor als Fix dokumentierte Write-with-Response-Umstellung (`src/ble/client.ts`) bleibt bestehen — sie ist weiterhin die richtige Entscheidung (Zustellbestätigung, Konsistenz mit dem restlichen Protokoll), war aber allein **nicht** die Ursache dieses Bugs.
+- **Lehre für zukünftige Hardware-Verifikationen:** ein Firmware-Reflash zwischen Fix und Bestätigungstest ist ein Confound — er setzt beliebigen RAM-Zustand zurück und kann einen Bug unabhängig vom eigentlichen Fix verschwinden lassen. Ein sauberer Bestätigungstest braucht denselben Firmware-/App-Stand, der auch tatsächlich committet wird, ohne Reflash dazwischen.
+
+## Nachtrag 3: BUG-17 — ScrollView stiehlt den Touch von den Jog-Tasten (2026-09-27)
+
+Während desselben Hardware-Tests gemeldet: leichtes Verrutschen des Fingers auf der Vorwärts-/Rückwärts-Taste löste ein Stop aus, deutlich empfindlicher als erwartet.
+
+**Erster Versuch (nicht ausreichend):** `Pressable`s `pressRetentionOffset` auf 40px in jede Richtung gesetzt — keine Wirkung am Gerät ("unverändert"). Nutzerhinweis „kann es mit dem Scrollen zu tun haben" hat auf die tatsächliche Ursache geführt.
+
+**Tatsächliche Ursache:** Die für PROJ-5 hinzugefügte `ScrollView` (`RootScreen.tsx`, behebt ein anderes Problem — Inhalt passte nicht mehr auf einen Bildschirm) verhandelt den Touch-Responder unabhängig von einem Kind-`Pressable`. Schon eine minimale vertikale Fingerbewegung ließ die `ScrollView` den Touch als Scroll-Geste beanspruchen und den Press abbrechen — das passiert eine Ebene über `Pressable`s eigener `pressRetentionOffset`-Logik, die deshalb nie zum Zug kam.
+
+**Fix:** `JogControls` meldet über einen neuen `onJoggingChange`-Callback nach oben, ob gerade eine Jog-Taste gehalten wird; `RootScreen` setzt `scrollEnabled={!jogging}` auf der `ScrollView` für die Dauer. `pressRetentionOffset` bleibt zusätzlich bestehen (schadet nicht, hilft bei einem eventuellen zukünftigen Layout ohne ScrollView).
+
+- [x] **BUG-17 — bestätigt behoben** ("funktioniert"), Nutzer-Bestätigung nach dem `scrollEnabled`-Fix.
+
+**Bug-Übersicht (aktueller Stand nach beiden Nachträgen):**
+- Critical/High: 0 offen
+- Medium: BUG-12 (akzeptierte Grenze, Mehrgeräte-Steuerung), BUG-13 (Prozess-Empfehlung `/refine PROJ-1`)
+- Behoben in dieser Runde: BUG-16 (jog-nach-Auto-Fahrt hängt, echte Ursache in `motorJog()`), BUG-17 (ScrollView stiehlt Touch)
+- Low: BUG-5..9, BUG-14/15 (bereits vorher offen/dokumentiert)
+
+**Betroffene Branches:** `feat/PROJ-5-zeitraffer-modus` (Commits `a4cf131` Firmware-Rückgabewert-Fix, `b715c90` pressRetentionOffset, `d49244c` ScrollView-Fix). **Offen:** alle drei müssen noch auf `feat/PROJ-2-fix-jog-after-autodrive` nachgezogen werden, analog zum bereits erfolgten Cherry-Pick der Write-with-Response-Änderung — der dortige Stand ist sonst unvollständig gegenüber dem tatsächlich auf Hardware bestätigten Fix.
