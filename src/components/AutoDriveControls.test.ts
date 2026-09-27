@@ -1,4 +1,5 @@
 import {
+  autoCorrectedDurationText,
   formatSeconds,
   maxAutoDriveDurationSeconds,
   minAutoDriveDurationSeconds,
@@ -143,6 +144,47 @@ describe('minAutoDriveDurationSeconds / maxAutoDriveDurationSeconds', () => {
 
   it('computes the slowest duration at the 200 steps/s floor', () => {
     expect(maxAutoDriveDurationSeconds(4000)).toBeCloseTo(20.025, 6);
+  });
+});
+
+describe('autoCorrectedDurationText', () => {
+  it('replaces an empty field with the minimum duration', () => {
+    expect(autoCorrectedDurationText('', 4000)).toBe(formatSeconds(minAutoDriveDurationSeconds(4000)));
+  });
+
+  it('replaces unparseable text with the minimum duration', () => {
+    expect(autoCorrectedDurationText('abc', 4000)).toBe(
+      formatSeconds(minAutoDriveDurationSeconds(4000)),
+    );
+  });
+
+  it('replaces a too-short duration (speed above the cap) with the minimum duration', () => {
+    // 4000 steps at 1s would need far more than 4000 steps/s.
+    expect(autoCorrectedDurationText('1', 4000)).toBe(
+      formatSeconds(minAutoDriveDurationSeconds(4000)),
+    );
+  });
+
+  it('leaves a too-long duration (speed below the floor) untouched', () => {
+    // 4000 steps at 100s is far slower than the 200 steps/s floor.
+    expect(autoCorrectedDurationText('100', 4000)).toBeNull();
+  });
+
+  it('leaves an already-valid duration untouched', () => {
+    expect(autoCorrectedDurationText('10', 4000)).toBeNull();
+  });
+
+  it('leaves the exact minimum-boundary duration untouched (not re-formatted)', () => {
+    const exactMin = formatSeconds(minAutoDriveDurationSeconds(4000));
+    expect(autoCorrectedDurationText(exactMin, 4000)).toBeNull();
+  });
+
+  it('returns null when no distance is known yet (nothing to correct to)', () => {
+    expect(autoCorrectedDurationText('1', null)).toBeNull();
+  });
+
+  it('returns null for a zero distance (start and end identical)', () => {
+    expect(autoCorrectedDurationText('1', 0)).toBeNull();
   });
 });
 
