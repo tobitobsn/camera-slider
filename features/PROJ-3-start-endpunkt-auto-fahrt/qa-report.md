@@ -263,3 +263,15 @@ Nach dem Re-Verifikations-Zyklus (Firmware neu geflasht ab Commit `f188420`) hat
 - [!] NOT VERIFIED — AC-6s Rand-Toleranz (0,01 Steps/s) auf exakten Grenzwerten, EC-1/EC-3/EC-4 im Detail, sowie die Mehrgeräte-BLE-Szenarien (BUG-6/BUG-7/BOOT-Taster-Reset) — nicht Teil dieses fokussierten Tests, keine bekannten Probleme aus dem Code-Review
 
 **Production Ready: JA** — kein Critical/High-Bug offen, die sicherheitskritischen Fixes (BUG-1, BUG-5) sind auf echter Hardware bestätigt.
+
+## Nachtrag: Re-Öffnung durch `/refine` — AC-11 (2026-09-27)
+
+Auf Nutzerwunsch während laufender Hardware-Tests: `/refine PROJ-3` hat AC-6 präzisiert (gilt jetzt nur noch für eine zu LANGE Dauer) und AC-11 neu ergänzt (zu kurze/leere/unlesbare Dauer wird beim Verlassen des Dauer-Felds automatisch auf die Mindestdauer korrigiert, ohne Fehlermeldung). Kehrt bewusst die ursprüngliche Product Decision vom 2026-09-23 ("keine stille Abweichung") für diesen einen Fall um — Begründung und Abgrenzung zum weiterhin geltenden "zu lang"-Fall im Decision Log von `spec.md`.
+
+**Implementiert** (Branch `feat/PROJ-3-duration-autofill`, Commits `de4ca3d` Spec, `5314ede` Code): neue reine Funktion `autoCorrectedDurationText(durationText, distanceSteps)` in `src/components/AutoDriveControls.tsx`, verdrahtet über `onBlur` am Dauer-`TextInput`. `showDurationError` zeigt jetzt nur noch die "zu lang"-Fehlermeldung.
+
+- [x] AC-11 — code-verifiziert: `AutoDriveControls.tsx` (`autoCorrectedDurationText` + `handleDurationBlur`), 8 neue Unit-Tests, rot geprüft (Bedingung invertiert → exakt 6 der 8 neuen Tests fielen durch, die beiden distanzunabhängigen Randfall-Tests blieben korrekt grün, da sie von einer separaten Guard-Bedingung abhängen). `npx tsc --noEmit` sauber, volle Suite 137/137 grün.
+- [!] AC-11 NOT VERIFIED zur Laufzeit — `probe.kind: none`, kein Weg, das Verlassen eines Textfelds hier zu simulieren. Ein Hardwaretest (Dauer-Feld mit einer zu kurzen Zahl befüllen, Feld verlassen, prüfen dass die Mindestdauer erscheint und die Fahrt-Buttons sofort nutzbar sind) steht noch aus.
+- [x] AC-6 (präzisiert) — code-verifiziert: `showDurationError` prüft jetzt ausschließlich `requestedSpeedStepsPerSec < MIN_SPEED_STEPS_PER_SEC - Toleranz` (zu lang) — der vormals auch abgedeckte "zu kurz"-Fall zeigt keinen Fehler mehr, siehe AC-11.
+
+**Status:** In Review — steht vor `/qa`-Re-Verifikation und Hardwaretest.
