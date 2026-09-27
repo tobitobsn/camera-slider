@@ -191,18 +191,20 @@ export function subscribeToDisconnect(
  *
  * qa-report.md BUG-16 (PROJ-2): used to write WITHOUT response, on the
  * (wrong) assumption that a single lost packet is harmless since this
- * repeats. Reproduced live on hardware: after an AUTO_DRIVE (Start→Ende or
- * Ende→Start), jog writes started silently failing to reach the firmware —
- * not just once, but *persistently* for the rest of the session — while the
- * app's own status view (`driving`/`timelapseMoving`) correctly read false
- * the whole time, so nothing here could tell the difference between "not
- * jogging because idle" and "not jogging because every write is being
- * dropped". Write-without-response gives no delivery confirmation at all,
- * so a sustained drop (not just an occasional one) is invisible by design.
- * Switched to WithResponse, matching every other command's already-proven
- * pattern — confirmed on hardware to close the gap (multiple AUTO_DRIVE →
- * jog round-trips all worked afterwards). The small extra GATT round-trip
- * per 300ms tick is not perceptible against JOG_REPEAT_INTERVAL_MS.
+ * repeats. Reported live on hardware: after an AUTO_DRIVE (Start→Ende or
+ * Ende→Start), jog stopped moving the carriage — while the app's own status
+ * view (`driving`) still read false the whole time, so nothing here could
+ * tell the difference between "not jogging because idle" and "not jogging
+ * because the write isn't taking effect". Write-without-response gives no
+ * delivery confirmation at all, which made this impossible to diagnose from
+ * the app side. Switched to WithResponse, matching every other command's
+ * already-proven pattern — this alone did not close the gap on hardware
+ * (see qa-report.md's Nachtrag for the full diagnosis, including a firmware
+ * hypothesis this fix does not itself address); still the correct change on
+ * its own merits (delivery confirmation, consistency with the rest of the
+ * protocol), kept regardless of whatever else BUG-16 turns out to need. The
+ * small extra GATT round-trip per 300ms tick is not perceptible against
+ * JOG_REPEAT_INTERVAL_MS.
  */
 export async function sendJogCommand(
   device: Device,

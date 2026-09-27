@@ -78,6 +78,8 @@ Nutzt die in PROJ-1 bereits angelegte Command-Characteristic (`6e400002-…`, bi
 
 **Übertragungsart:** JOG als *Write ohne Antwort* (`WRITE_NR`) — wird alle 300ms wiederholt, ein einzelner Verlust ist unkritisch, die nächste Wiederholung korrigiert es, und der Watchdog fängt einen kompletten Ausfall ohnehin ab. STOP als *Write mit Antwort* (`WRITE`) — sicherheitskritisch und selten genug, dass die zusätzliche Bestätigung (ATT-Level-ACK der Firmware) den kleinen Mehraufwand wert ist. Die Command-Characteristic bekommt dafür beide Eigenschaften (`WRITE | WRITE_NR`) statt nur `WRITE` wie bisher.
 
+> **Überholt seit qa-report.md BUG-16 (2026-09-27):** Die Annahme "ein einzelner Verlust ist unkritisch" traf auf einen *dauerhaften* Ausfall nach einer Auto-Fahrt nicht zu. JOG schreibt jetzt ebenfalls `WITH response` (`src/ble/client.ts`) — siehe qa-report.md für die volle Diagnose. Die Firmware-Characteristic bietet `WRITE_NR` weiterhin an (nicht entfernt, siehe `ble.cpp`), die App nutzt es nur nicht mehr für JOG.
+
 **Geschwindigkeits-Mapping (Prozent → Steps/s):** linear zwischen `MIN_JOG_SPEED = 200 Steps/s` und `MAX_JOG_SPEED = 4000 Steps/s` (deckt sich mit dem bereits im Firmware-Pack skizzierten `setSpeedInHz(4000)`-Wert als Maximum). 1 % → 200 Steps/s, 100 % → 4000 Steps/s, dazwischen linear interpoliert. **Vorläufig**, bis die Steps-pro-mm-Kalibrierung der Mechanik steht (offene Frage aus `spec.md`) — die Prozent-Skala selbst ändert sich dadurch nicht, nur was ein bestimmter Prozentwert in mm/s tatsächlich bedeutet.
 
 **Bewegungsart:** kontinuierlicher Lauf ohne Zielposition (`FastAccelStepper::runForward()`/`runBackward()`), nicht `moveTo()` — es gibt in diesem Feature noch keinen Zielpunkt, das kommt erst mit PROJ-3.
@@ -104,7 +106,7 @@ _Keine — kein Backend, kein Provider-Dashboard betroffen._
 
 | Entscheidung | Begründung |
 |---|---|
-| Command-Protokoll: JOG (wiederholt, ohne Antwort) + STOP (einmalig, mit Antwort) statt eines einzigen Befehlstyps | Passt zur Halten-Buttons-UX: JOG ist ein "Herzschlag", der Verlust einzelner Pakete verkraftet; STOP ist sicherheitskritisch und selten, verdient die Bestätigung |
+| Command-Protokoll: JOG (wiederholt, ohne Antwort) + STOP (einmalig, mit Antwort) statt eines einzigen Befehlstyps — **überholt seit BUG-16 (2026-09-27): JOG schreibt jetzt ebenfalls mit Antwort, siehe qa-report.md** | Passt zur Halten-Buttons-UX: JOG ist ein "Herzschlag", der Verlust einzelner Pakete verkraftet; STOP ist sicherheitskritisch und selten, verdient die Bestätigung |
 | Watchdog-Guarantee (EC-4): Firmware vergleicht Zeit seit letztem JOG gegen 1000ms (≈3 verpasste 300ms-Intervalle), unabhängig vom offiziellen BLE-Verbindungsstatus | Schützt vor App-Absturz/Hintergrund/Paketverlust, wie in `spec.md` AC-6 gefordert — dieselbe Idee wie PROJ-1s Verbindungs-Robustheit, jetzt für die Motorsteuerung konkret umgesetzt |
 | Disconnect-Guarantee (EC-3): `onDisconnect`-Callback (PROJ-1, bestehend) ruft zusätzlich `motorStop()` auf | Direkte Umsetzung von AC-5 — der Callback existierte in PROJ-1 bereits für das Advertising-Neustarten, bekommt jetzt eine zweite, sicherheitsrelevante Aufgabe |
 | Beide-Tasten-Guarantee (EC-2): rein App-seitig über die Zustandsmaschine durchgesetzt (nie zwei Richtungen gleichzeitig gesendet) | Ein Motor kann physisch ohnehin nicht in zwei Richtungen gleichzeitig laufen — die App verhindert bereits, dass ein widersprüchlicher Befehl das Gerät überhaupt erreicht |
