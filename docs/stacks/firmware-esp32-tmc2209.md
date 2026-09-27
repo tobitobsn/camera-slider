@@ -105,8 +105,9 @@ Ein einziger GATT-Service mit wenigen Characteristics reicht für dieses Produkt
 // Befehlsformat: 1 Byte Opcode + Payload.
 // Von PROJ-2 (/architecture) final festgelegt, siehe features/PROJ-2-manuelle-steuerung-jog/design.md:
 //   0x01 <uint8 direction 0=vorwärts/1=rückwärts> <uint8 speedPercent 1-100>
-//                                  JOG — Write OHNE Antwort, alle 300ms wiederholt solange
-//                                  eine Richtungstaste in der App gehalten wird
+//                                  JOG — Write MIT Antwort (seit qa-report.md BUG-16,
+//                                  features/PROJ-2-manuelle-steuerung-jog/), alle 300ms
+//                                  wiederholt solange eine Richtungstaste in der App gehalten wird
 //   0x05                          STOP — Write MIT Antwort, sofortiges Anhalten
 //
 // Weitere Opcodes (Start-/Endpunkt setzen, automatische Fahrt) sind noch NICHT festgelegt —

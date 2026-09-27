@@ -347,9 +347,14 @@ void bleSetup(bool resetBonds) {
 
   NimBLEService* pService = pServer->createService(kServiceUUID);
 
-  // Command characteristic: JOG (0x01) is written without response (fired
-  // every ~300ms while a direction button is held), STOP (0x05) is written
-  // with response — both flags are needed on the same characteristic.
+  // Command characteristic offers both WRITE and WRITE_NR (write-without-
+  // response). STOP (0x05) has always used WRITE. JOG (0x01) used WRITE_NR
+  // until qa-report.md's PROJ-2 BUG-16 (fired every ~300ms while a direction
+  // button is held) — the app now uses WRITE for JOG too (src/ble/client.ts).
+  // WRITE_NR itself is left enabled here rather than removed: any bonded
+  // client could still choose it, and removing an accepted write type is a
+  // characteristic-shape change worth its own deliberate decision, not a
+  // side effect of an app-side bugfix.
   // WRITE_ENC (BUG-3 fix) requires the link to be encrypted — i.e. the
   // central must have completed the Just Works bonding above — before
   // either write variant is accepted. Verified this applies uniformly to
