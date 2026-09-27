@@ -149,6 +149,45 @@ export function formatSeconds(value: number): string {
   return value.toFixed(1);
 }
 
+/**
+ * AC-11 (spec.md, refined 2026-09-27): what the Dauer field's onBlur handler
+ * should replace `durationText` with, or null to leave it untouched.
+ *
+ * A duration that's too SHORT (the resulting speed would be above the
+ * 4000 steps/s cap), empty, or unparseable is silently corrected to the
+ * minimum achievable duration for the current distance — no error, ready to
+ * drive with immediately. A too-LONG duration (speed below the 200 steps/s
+ * floor) is deliberately left alone — showDurationError still flags it —
+ * per spec.md's Decision Log: a silent jump down to a few seconds when the
+ * user meant a slow, deliberate move would be the more surprising direction
+ * to auto-correct, so the original "no silent deviation" reasoning from
+ * 2026-09-23 still applies to that one side.
+ *
+ * Pulled out as its own pure function (mirrors this file's existing
+ * minAutoDriveDurationSeconds/parseDurationSeconds exports) so the decision
+ * itself is unit-testable without rendering the component.
+ */
+export function autoCorrectedDurationText(
+  durationText: string,
+  distanceSteps: number | null,
+): string | null {
+  if (distanceSteps === null || distanceSteps <= 0) {
+    return null;
+  }
+
+  const durationSeconds = parseDurationSeconds(durationText);
+  const requestedSpeedStepsPerSec =
+    durationSeconds !== null
+      ? solveAutoDriveSpeedStepsPerSec(distanceSteps, roundToDeciseconds(durationSeconds))
+      : null;
+
+  const tooShortOrUnusable =
+    requestedSpeedStepsPerSec === null ||
+    requestedSpeedStepsPerSec > MAX_SPEED_STEPS_PER_SEC + AUTO_DRIVE_SPEED_TOLERANCE_STEPS_PER_SEC;
+
+  return tooShortOrUnusable ? formatSeconds(minAutoDriveDurationSeconds(distanceSteps)) : null;
+}
+
 export function statusLabelFor(status: SliderStatus): string {
   if (status.driving) {
     // SliderStatus only exposes a `driving` boolean, not which direction is
@@ -242,10 +281,25 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
     requestedSpeedStepsPerSec >= MIN_SPEED_STEPS_PER_SEC - AUTO_DRIVE_SPEED_TOLERANCE_STEPS_PER_SEC &&
     requestedSpeedStepsPerSec <= MAX_SPEED_STEPS_PER_SEC + AUTO_DRIVE_SPEED_TOLERANCE_STEPS_PER_SEC;
 
-  // AC-6: only complain once the range is actually known and the user has
-  // typed something — an empty field or missing points aren't "an invalid
-  // duration", they're "nothing to validate yet".
-  const showDurationError = rangeAvailable && durationText.trim() !== '' && !durationValid;
+  // AC-6/AC-11: a too-SHORT duration (speed above the cap) no longer shows
+  // an error at all — handleDurationBlur() below silently corrects it to
+  // the minimum once the field loses focus. Only a too-LONG duration
+  // (speed below the floor) still shows this error, and only once the
+  // range is actually known and the user has typed something — an empty
+  // field or missing points aren't "an invalid duration", they're "nothing
+  // to validate yet".
+  const showDurationError =
+    rangeAvailable &&
+    durationText.trim() !== '' &&
+    requestedSpeedStepsPerSec !== null &&
+    requestedSpeedStepsPerSec < MIN_SPEED_STEPS_PER_SEC - AUTO_DRIVE_SPEED_TOLERANCE_STEPS_PER_SEC;
+
+  const handleDurationBlur = (): void => {
+    const corrected = autoCorrectedDurationText(durationText, status.distanceSteps);
+    if (corrected !== null) {
+      setDurationText(corrected);
+    }
+  };
 
   // EC-1: start and end must differ. Shown separately from the duration
   // range error since a 0-step distance has no meaningful min/max to report.
@@ -445,6 +499,7 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
           keyboardType="decimal-pad"
           value={durationText}
           onChangeText={setDurationText}
+          onBlur={handleDurationBlur}
           editable={!lockedByOtherMode}
           placeholder={DEFAULT_DURATION_TEXT}
           placeholderTextColor={colors.mutedForeground}
