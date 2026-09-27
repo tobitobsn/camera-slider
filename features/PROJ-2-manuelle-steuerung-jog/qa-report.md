@@ -218,7 +218,7 @@ Der erste Fix-Versuch (Write-with-Response, siehe Nachtrag oben) wurde ursprüng
 
 **Fix:** `jogRunning`/`jogRunningDirection` werden jetzt nur bei erfolgreichem Start (`runForward()`/`runBackward()` liefert `0`) gesetzt — ein fehlgeschlagener Versuch wird beim nächsten Heartbeat automatisch neu versucht, statt hängen zu bleiben. Zusätzlich ein permanenter (nicht temporärer) Diagnose-Log `Serial.printf("Motor: jog start failed, MOVE_ERR=%d\n", ...)` auf dem Fehlerpfad — analog zum bestehenden `stepperConnectToPin`-Fehlerlog in derselben Datei.
 
-- [x] **BUG-16 — bestätigt behoben, diesmal sauber verifiziert.** Firmware einmal geflasht, seither nicht mehr angefasst; Nutzer hat danach mehrfach Auto-Fahrt → Jog getestet ("funktioniert jetzt offensichtlich") — kein Zwischen-Flash zwischen Fix und Bestätigung, damit ist der Confound aus dem ersten Versuch diesmal ausgeschlossen.
+- [ ] **BUG-16 — NICHT bestätigt, siehe Nachtrag 4: der Fix selbst ist vermutlich wirkungslos.** Ursprünglich hier als „sauber verifiziert" dokumentiert (Firmware einmal geflasht, seither nicht mehr angefasst, Nutzer-Test danach: „funktioniert jetzt offensichtlich") — eine zweite, unabhängige Re-Verifikation hat das widerlegt. Bleibt als Beleg stehen (der Reflash selbst fand statt, die Nutzer-Bestätigung ist echt), aber die Schlussfolgerung „damit ist der Confound ausgeschlossen" war falsch: der Flash-Vorgang selbst ist bereits ein Reboot, und genau der könnte erneut die eigentliche Ursache verdeckt haben, nicht dieser Fix.
 - Die zuvor als Fix dokumentierte Write-with-Response-Umstellung (`src/ble/client.ts`) bleibt bestehen — sie ist weiterhin die richtige Entscheidung (Zustellbestätigung, Konsistenz mit dem restlichen Protokoll), war aber allein **nicht** die Ursache dieses Bugs.
 - **Lehre für zukünftige Hardware-Verifikationen:** ein Firmware-Reflash zwischen Fix und Bestätigungstest ist ein Confound — er setzt beliebigen RAM-Zustand zurück und kann einen Bug unabhängig vom eigentlichen Fix verschwinden lassen. Ein sauberer Bestätigungstest braucht denselben Firmware-/App-Stand, der auch tatsächlich committet wird, ohne Reflash dazwischen.
 
@@ -234,10 +234,25 @@ Während desselben Hardware-Tests gemeldet: leichtes Verrutschen des Fingers auf
 
 - [x] **BUG-17 — bestätigt behoben** ("funktioniert"), Nutzer-Bestätigung nach dem `scrollEnabled`-Fix.
 
-**Bug-Übersicht (aktueller Stand nach beiden Nachträgen):**
+**Bug-Übersicht (Stand nach Nachtrag 3, siehe Nachtrag 4 für die Korrektur):**
 - Critical/High: 0 offen
 - Medium: BUG-12 (akzeptierte Grenze, Mehrgeräte-Steuerung), BUG-13 (Prozess-Empfehlung `/refine PROJ-1`)
-- Behoben in dieser Runde: BUG-16 (jog-nach-Auto-Fahrt hängt, echte Ursache in `motorJog()`), BUG-17 (ScrollView stiehlt Touch)
+- Behoben in dieser Runde: ~~BUG-16~~ (siehe Nachtrag 4 — vermutlich weiterhin offen, High), BUG-17 (ScrollView stiehlt Touch, bestätigt)
 - Low: BUG-5..9, BUG-14/15 (bereits vorher offen/dokumentiert)
 
 **Betroffene Branches:** `feat/PROJ-5-zeitraffer-modus` (Commits `a4cf131` Firmware-Rückgabewert-Fix, `b715c90` pressRetentionOffset, `d49244c` ScrollView-Fix) — alle drei per Cherry-Pick auf `feat/PROJ-2-fix-jog-after-autodrive` übertragen (`30e1ed3`, `90eb197`, `88082df`). Auf letzterem Branch gibt es noch keine `ScrollView` (kam erst mit PROJ-5) — dort wandert nur `JogControls.tsx`s `onJoggingChange`-Prop mit (ungenutzt, schadet nicht), `RootScreen.tsx` bleibt unverändert.
+
+## Nachtrag 4: BUG-16-Fix vermutlich wirkungslos — Fehlerzweig mit dieser Bibliotheksversion praktisch unerreichbar (2026-09-27)
+
+Eine zweite, unabhängige `qa-engineer`-Re-Verifikation (Auftrag: Code- und Firmware-Ebene prüfen, nicht die bereits erfolgte Hardware-Bestätigung wiederholen) hat den in Nachtrag 2 dokumentierten Fix bis in die vendorte `FastAccelStepper`-Bibliothek (0.31.8) zurückverfolgt und einen ernsten Einwand gefunden:
+
+**`startResult` ist an dieser Stelle vermutlich immer 0 (Erfolg).** `runForward()`/`runBackward()` → `RampGenerator::startRun()` → gibt nur bei `_parameters.checkValidConfig() != MOVE_OK` einen Fehler zurück, und das schlägt laut `RampCalculator.h` nur fehl, wenn Geschwindigkeit oder Beschleunigung nie gesetzt wurden. Beide sind zum Zeitpunkt jedes `motorJog()`-Aufrufs immer gesetzt (`setAcceleration()` einmalig in `motorSetup()`, `setSpeedInHz()` unmittelbar vor jedem Start-Versuch, `motor.cpp:244`) — die beiden Flags, die den Fehler auslösen könnten, werden nur beim Booten zurückgesetzt. Der neue `else`-Zweig (inkl. des `Serial.printf`-Diagnose-Logs) ist damit nach dieser Analyse **toter Code**, der die Ursache nicht trifft.
+
+**Das erklärt die vorherige "erfolgreiche" Bestätigung nicht weg, sondern relativiert sie:** Das Flashen des Fixes ist selbst bereits ein ESP32-Reboot (Power-On-Reset). Der ursprüngliche Bug-Bericht beschrieb das Symptom als „dauerhaft, ab einem bestimmten Zeitpunkt" — nicht von Anfang an — und Nachtrag 2 selbst dokumentiert, dass der Fehler beim allerersten Diagnose-Reflash bereits einmal spurlos verschwunden war. Ein frischer Boot gefolgt von „mehrfach getestet, funktioniert" unterscheidet nicht zuverlässig zwischen „der Fix wirkt" und „ein frischer Boot maskiert den eigentlichen, wahrscheinlich zustandsabhängigen Bug erneut" — dieselbe Fehlerklasse wie beim allerersten Versuch, nur eine Ebene tiefer.
+
+**Alternative Spur (nicht bestätigt, nur eine Vermutung):** `FastAccelStepper::forceStop()` setzt ein Immediate-Stop-Flag, das nur innerhalb einer laufenden Rampe wieder gelöscht wird. Ein nachfolgender `startRun()`-Aufruf könnte `MOVE_OK` liefern, während die Rampe durch das noch gesetzte Flag sofort wieder beendet wird — der Motor „startet" laut Rückgabewert, bewegt sich aber nicht. Nicht abschließend mit dem normalen Jog-nach-Connect-Verhalten in Einklang gebracht, daher ausdrücklich nur eine Spur, kein bestätigter Fund.
+
+**Nächster Schritt (in Arbeit):** Der ESP32 läuft seit dem letzten (für diese Diagnose nötigen) Reflash ohne weitere Unterbrechung, ein Serial-Monitor läuft mit, ohne die Firmware erneut anzufassen. Gesucht wird: (a) taucht `Motor: jog start failed` je auf, wenn das Symptom erneut auftritt (würde den Fix als wirksam bestätigen), oder (b) tritt das Symptom ohne diese Zeile erneut auf (würde beweisen, dass die Ursache woanders liegt, z. B. der Immediate-Stop-Flag-Verdacht oben). Ausgedehnter Normalbetrieb über mehrere Auto-Fahrt-/Jog-Zyklen, nicht nur ein einzelner Test, ist hier die aussagekräftigere Bestätigung als ein einzelner Erfolg direkt nach einem Reboot.
+
+- [!] **BUG-16 — Status zurückgesetzt auf offen (High), NOT VERIFIED ob der committete Fix wirkt.** Verifikation läuft weiter, siehe „Nächster Schritt" oben.
+- **`design.md` noch nicht nachgezogen** (von der Re-Verifikation ebenfalls gefunden): beschreibt BUG-16 weiterhin als durch Write-with-Response verursacht/behoben — nicht mehr aktuell, unabhängig vom Ausgang der laufenden Diagnose.

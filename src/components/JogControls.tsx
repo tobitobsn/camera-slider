@@ -13,17 +13,15 @@ const MAX_SPEED_PERCENT = 100;
 const DEFAULT_SPEED_PERCENT = 50;
 
 /**
- * qa-report.md BUG-17 (PROJ-2): Pressable's default press-retention area is
- * just its own visible bounds — a finger held on a real device rarely stays
- * perfectly still, and the smallest wobble past the button's edge fired
- * onPressOut, stopping the jog. EC-1 ("Finger aus dem Button-Bereich
- * gezogen zählt als Loslassen") only ever required that leaving the button
- * meaningfully — not by a pixel or two of natural hand tremor — counts as
- * release; it never specified zero tolerance. pressRetentionOffset expands
- * the area the finger can move within before that counts as "left the
- * button", without touching hitSlop (which would also grow the *tap*
- * target and could make two adjacent buttons overlap) — reported live on
- * hardware, 40px chosen as a generous but still bounded margin.
+ * qa-report.md BUG-17 (PROJ-2): Pressable's own default press-retention area
+ * (react-native's Pressability.js: DEFAULT_PRESS_RECT_OFFSETS, roughly
+ * 20-30px) turned out not to be the actual cause of the reported over-
+ * sensitivity — see this file's onJoggingChange/RootScreen's scrollEnabled
+ * for the real fix (a parent ScrollView was intercepting the touch before
+ * Pressable's own retention logic ever got a chance to apply). Raising this
+ * offset to 40px on top of that is kept anyway as a small additional
+ * margin, without touching hitSlop (which would also grow the *tap* target
+ * and could make two adjacent buttons overlap).
  */
 const PRESS_RETENTION_OFFSET = { top: 40, left: 40, right: 40, bottom: 40 };
 
