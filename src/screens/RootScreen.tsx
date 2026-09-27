@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { AutoDriveControls } from '../components/AutoDriveControls';
@@ -52,12 +52,16 @@ export function RootScreen() {
   // is threaded down as props; JogControls/AutoDriveControls also need
   // `isRunning` to lock themselves while a sequence is running.
   const timelapse = useTimelapseSequence(device, cameraCapture.capturePhoto);
+  // qa-report.md BUG-17 (PROJ-2): true while a jog button is held, reported
+  // up by JogControls via onJoggingChange — used below to disable the
+  // ScrollView's own touch responder for the duration, see its own comment.
+  const [jogging, setJogging] = useState(false);
 
   return (
     <View style={styles.container}>
       <ConnectionHeader />
       <View style={styles.content}>
-        {renderContent(state.status, device, status.driving, timelapse, cameraCapture)}
+        {renderContent(state.status, device, status.driving, timelapse, cameraCapture, jogging, setJogging)}
       </View>
     </View>
   );
@@ -69,6 +73,8 @@ function renderContent(
   driving: boolean,
   timelapse: TimelapseSequenceApi,
   cameraCapture: CameraCapture,
+  jogging: boolean,
+  setJogging: (jogging: boolean) => void,
 ) {
   switch (status) {
     case 'checking_permissions':
@@ -107,8 +113,12 @@ function renderContent(
         <ScrollView
           style={styles.connectedStack}
           contentContainerStyle={styles.connectedStackContent}
+          scrollEnabled={!jogging}
         >
-          <JogControls disabled={driving || timelapse.isRunning} />
+          <JogControls
+            disabled={driving || timelapse.isRunning}
+            onJoggingChange={setJogging}
+          />
           <AutoDriveControls disabled={timelapse.isRunning} />
           <TimelapseControls
             device={device}
