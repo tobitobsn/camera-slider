@@ -60,6 +60,20 @@ type JogControlsProps = {
    * only applies it to its own interactive elements.
    */
   disabled?: boolean;
+  /**
+   * qa-report.md BUG-17 (PROJ-2): called with `true` while a jog button is
+   * held, `false` once released — lets RootScreen disable its ScrollView's
+   * own pan-responder for the duration. A ScrollView negotiates the touch
+   * responder independently of a child Pressable's own pressRetentionOffset
+   * (increased for the same finding, this file's PRESS_RETENTION_OFFSET);
+   * the smallest vertical wobble while holding a button was enough for the
+   * ScrollView to claim the touch as a scroll gesture and cancel the press,
+   * which pressRetentionOffset alone cannot prevent since that negotiation
+   * happens a level above Pressable. Optional so this component still works
+   * standalone (e.g. in tests) without a parent ScrollView to coordinate
+   * with.
+   */
+  onJoggingChange?: (jogging: boolean) => void;
 };
 
 /**
@@ -80,10 +94,18 @@ type JogControlsProps = {
  * once per "was jogging, now isn't" transition, and never on mount since the
  * initial status is always 'idle'.
  */
-export function JogControls({ disabled = false }: JogControlsProps) {
+export function JogControls({ disabled = false, onJoggingChange }: JogControlsProps) {
   const { device } = useConnection();
   const { status, pressForward, releaseForward, pressBackward, releaseBackward } =
     useJogState();
+
+  // qa-report.md BUG-17: reports the idle/jogging transition upward, not on
+  // every render — onJoggingChange is a plain callback prop, not guaranteed
+  // referentially stable across renders, so it belongs in this effect's own
+  // dependency array rather than being called directly in the render body.
+  useEffect(() => {
+    onJoggingChange?.(directionFor(status) !== null);
+  }, [status, onJoggingChange]);
 
   const [speedPercent, setSpeedPercent] = useState(DEFAULT_SPEED_PERCENT);
   const speedRef = useRef(speedPercent);
