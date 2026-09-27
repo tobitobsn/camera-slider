@@ -196,7 +196,7 @@ export function subscribeToDisconnect(
  * repeatedly (~every 300ms) while a direction button is held — the
  * firmware's watchdog auto-stops if these stop arriving.
  *
- * qa-report.md BUG-12 (PROJ-2): used to write WITHOUT response, on the
+ * qa-report.md BUG-16 (PROJ-2): used to write WITHOUT response, on the
  * (wrong) assumption that a single lost packet is harmless since this
  * repeats. Reproduced live on hardware: after an AUTO_DRIVE (Start→Ende or
  * Ende→Start), jog writes started silently failing to reach the firmware —
