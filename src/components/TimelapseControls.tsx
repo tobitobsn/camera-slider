@@ -177,18 +177,23 @@ export function TimelapseControls(props: TimelapseControlsProps): React.JSX.Elem
       <Text style={styles.sectionTitle}>Zeitraffer</Text>
 
       {hasPermission && cameraDevice ? (
-        <Camera
-          device={cameraDevice}
-          style={styles.cameraPreview}
-          // Android: the default 'performance' mode renders through a
-          // SurfaceView, which sits on its own window layer and is not
-          // clipped or z-ordered by the ScrollView — the preview drew over
-          // the preset list above it. 'compatible' uses a TextureView, a
-          // normal view that scrolls and clips with its siblings.
-          implementationMode="compatible"
-          isActive={hasPermission}
-          outputs={[photoOutput]}
-        />
+        // The preview is scaled to fill (cover) and, on Android, its content
+        // draws past the native view's bounds — the `overflow: 'hidden'` on
+        // the Camera's own style does not clip it (measured on device: view
+        // bounds 600px tall, drawn 1178px). Clipping has to happen on a plain
+        // parent View, which is a real ViewGroup with clipChildren.
+        <View style={styles.cameraPreview}>
+          <Camera
+            device={cameraDevice}
+            style={StyleSheet.absoluteFill}
+            // Android: 'compatible' renders through a TextureView instead of
+            // a SurfaceView (own window layer, not z-ordered by the
+            // ScrollView).
+            implementationMode="compatible"
+            isActive={hasPermission}
+            outputs={[photoOutput]}
+          />
+        </View>
       ) : (
         !hasPermission && (
           <View style={styles.permissionHint}>
