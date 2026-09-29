@@ -276,3 +276,46 @@ Eine zweite, unabhängige `qa-engineer`-Re-Verifikation (Auftrag: Code- und Firm
 - Weiterhin offen: BUG-19 (Low, veraltete Kommentare), BUG-12/13 (Medium, akzeptiert/Prozess), BUG-5..9, 14, 15 (Low).
 
 **Status:** bleibt **In Review**, bis `/qa PROJ-2` (Re-Verifikation im Umfang der Fixes `4552ed5`, `655f28d`, `5feb442`) läuft. Kein Critical/High-Bug ist nach Stand des Nutzers offen.
+
+## Nachtrag 7: Unabhängige Re-Verifikation — BUG-16-Fix, DIR-Umkehr, 8000 Steps/s (2026-09-30)
+
+**Scope:** `git diff ea0b613..HEAD -- firmware/src src/ble src/components/JogControls.tsx src/components/useJogState.ts src/screens` → nur `firmware/src/motor.cpp` (`4552ed5` BUG-16, `5feb442` DIR-Umkehr). Weil `motor.cpp` von Jog, Auto-Fahrt und Zeitraffer geteilt wird: voller Fan-out mit drei `qa-engineer`-Lanes. `probe.kind: none` — Laufzeit/Hardware `[!] NOT VERIFIED — no way to run and probe this project was recorded`.
+
+**Test-Suite (einmalig, Owner):** `npm test` → 13 Suites, 210 Tests, 0 Fehler (`suite9.log`). Firmware kompiliert am HEAD (`pio run -e esp32dev`, SUCCESS, RAM 12,4 %, Flash 49,1 %, ohne Upload). Layer `firmware`: `[!] NOT VERIFIED — no test command recorded for layer firmware`.
+
+### BUG-16 — aus Code-Sicht geschlossen, Ursache korrigiert
+- [x] **Geschlossen** — `motor.cpp:258-260` (`if (jogRunning && !stepper->isRunning()) jogRunning = false;`) behandelt jeden Pfad „Flag gesetzt, Stepper steht". Belegt per Host-Simulation der vendorten FastAccelStepper 0.31.8 (Queue-Attrappe): alter Herzschlag (`applySpeedAcceleration`) → 0 Schritte, neuer Herzschlag (`runForward`) → 3242 Schritte; im Dauerlauf ist `isRunning` in 0 von 200 Takten false, also kein Ruckeln/Neustart.
+- **Tatsächliche Ursache** (die Spur aus Nachtrag 4, jetzt belegt): `motorStop()` ruft `forceStop()` auch bei stehendem Motor (`motor.cpp:318`); das setzt `force_immediate_stop` (`FastAccelStepper.cpp:674-682`), das nur in `getNextCommand()` gelöscht wird und bei inaktiver Rampe gesetzt bleibt (`:373`). Das nächste `runForward()` liefert `MOVE_OK`, die Rampe endet aber ohne einen Schritt (`RampGenerator.cpp:128-141, 252-258`). Loslassen sendet wieder STOP → der Zustand hält sich selbst, bis Reboot/Flash — passt zu „dauerhaft ab einem Zeitpunkt" und „Reflash heilt es". `moveTo()` (Auto-Fahrt) ist nicht betroffen (5000/5000 Schritte).
+- Die in Nachtrag 6 und im Code-Kommentar (`motor.cpp:249-257, 489-491, 554`) genannte Ursache („`moveTo()` überschreibt einen laufenden Jog") ist **nicht erreichbar**: `motorAutoDrive()` und `motorTimelapseMoveTo()` lehnen bei laufendem Stepper ab (`motor.cpp:398, 514`). Die Zeilen `:491` und `:554` sind harmlos, aber praktisch wirkungslos.
+- Laufzeit am Gerät: vom Nutzer am 2026-09-30 als behoben gemeldet (Nachtrag 6); in diesem Lauf `[!]`.
+
+### Acceptance Criteria
+- [x] **AC-1** — Richtungskette durchgängig: „▲ Vorwärts" → `'forward'` → 0x00 (`client.ts:36-39`) → `kForward` (`ble.cpp:155-157`) → `runForward()` (`motor.cpp:293-295`). DIR-Umkehr (`motor.cpp:216`) kippt nur den Pin-Pegel (`StepperISR.cpp:52`), Zählrichtung, Positionen und `endIsAfterStart` bleiben — eine Stelle, konsistent für alle Modi. Einschränkung: BUG-20.
+- [x] **AC-2** — Loslassen → `idle` → Cleanup sendet STOP (`useJogState.ts:86-88`, `JogControls.tsx:127-130`) → `forceStop()`
+- [x] **AC-3** — Speed pro 300-ms-Tick frisch gelesen (`JogControls.tsx:108-125`), Firmware `setSpeedInHz` + `applySpeedAcceleration` (`motor.cpp:247, 265-272`)
+- [x] **AC-4, EC-2** — `blocked`-Zustand, STOP, kein JOG bis beide Tasten los (`useJogState.ts:89-151`, Tests grün)
+- [x] **AC-5, EC-3** — `onDisconnect` → `motorStop()` bei verschlüsseltem Link (`ble.cpp:125-127`); App zeigt `reconnecting` (`RootScreen.tsx:139-147`)
+- [x] **AC-6, EC-4** — Watchdog 1000 ms (`motor.cpp:54, 338-357`), unabhängig vom BLE-Status; Nachlauf bei 8000 Steps/s bis ~51 mm
+- [x] **AC-7** — Steuerung nur in `connected` (`RootScreen.tsx:93-121`); BUG-7 (Low) unverändert
+- [x] **EC-1** — Verlassen des Rechtecks (+40 px) oder ScrollView-Übernahme → `onPressOut` (Stopp); Scrollen während Jog gesperrt (`RootScreen.tsx:116`). Anmerkung: Zurückziehen in den Button ohne Abheben startet die Fahrt erneut.
+- [x] **EC-5** — Remount startet in `idle`, Firmware stoppt beim Disconnect
+- [x] **Mapping 8000 Steps/s** — float32 nachgerechnet: 0/1→200, 50→4061, 100/255→8000, kein Überlauf (`motor.cpp:180-190`)
+
+### Security
+- [x] Keine Verschlechterung, keine neuen Critical/High/Medium. JOG-Länge/Opcode geprüft (`ble.cpp:143-152, 228-233`), Speed geklemmt, WRITE_ENC unverändert (`ble.cpp:377-379`). Der BUG-16-Fix öffnet keinen Weg, den Motor ungewollt laufen zu lassen oder den Watchdog auszuhebeln (Watchdog liest `jogRunning` nicht; Dauerlauf nur über `motorJog`, das bei `autoDriving/timelapseMoving` ablehnt). Keine Secrets (`git grep`; nur öffentliche RN-Debug-Keystore-Werte, bekannt).
+- **Zusammenfassung:** 6 Checks verifiziert, 6 NOT VERIFIED (Laufzeit; Auth/Authorization/Brute Force/Credentials in URL/API-Antworten nicht anwendbar; Rate Limiting not implemented, BLE-Pendant BUG-9).
+
+### Regression
+- [x] PROJ-3 (Richtung, Ankunft, Stopp, Watchdog-Ausnahme, Speed-Grenzen App = Firmware), PROJ-4 (Vorzeichen SET_END_FROM_DISTANCE, Migration `dirVersion`), PROJ-5 (Richtung, 8000 Steps/s, Ankunftserkennung, Timeout), PROJ-1 (Verbindungsfluss, Disconnect-Stopp) — alles aus dem Code konsistent; Modusübergänge Jog → Auto-Fahrt → Jog, Jog → Zeitraffer → Jog, Stopp → Jog ohne Befund.
+
+### Neue Bugs
+- [ ] **BUG-20 (Medium) — Der erste JOG nach einem STOP im Stillstand wird geschluckt; gefahren wird erst ab dem zweiten Herzschlag (~300 ms). Kurzes Antippen unter ~300 ms bewegt nichts.** Folge des BUG-16-Mechanismus: das Immediate-Stop-Flag schluckt den ersten Start, der Reset heilt es erst beim nächsten Herzschlag. STOP im Stillstand kommt häufig vor (nach jedem Connect, nach Ende/Abbruch des Zeitraffers, nach einem Watchdog-Stopp, nach jedem geschluckten Tipp). Simulation: erster Start 0 Schritte, zweiter 3242. Abhilfe-Idee: `forceStop()` in `motorStop()` nur bei `stepper->isRunning()`. Workaround: länger halten. Laufzeit `[!]`.
+- [ ] **BUG-21 (Medium, bedingt, deploy-relevant) — deployte App v1.2.0 und aktuelle Firmware passen nicht zusammen.** v1.2.0 hat die Preset-Migration (`a6b837d`) nicht; mit der Firmware ab `5feb442` legt ein altes Preset dort das Ende auf die Gegenseite (keine Endanschläge). App und Firmware müssen gemeinsam ausgeliefert werden; der Deployments-Eintrag hält keine Firmware-Version fest.
+- [ ] **BUG-22 (Low, Doku):** falsche BUG-16-Ursache in `motor.cpp:249-257, 489-491, 554` und Nachtrag 6; `design.md:81, 109, 119` kennen den Firmware-Fix und die DIR-Umkehr nicht; `docs/stacks/firmware-esp32-tmc2209.md:79` zeigt `setDirectionPin(26)` ohne Polarität; toter Fehlerzweig `motor.cpp:299-305` bleibt.
+- [ ] **BUG-23 (Low):** `lastJogMillis` wird erst nach dem Start gesetzt (`motor.cpp:293-308`); in einem Mikrosekunden-Fenster kann der Watchdog (anderer Task) nach >1 s Pause den frischen Start stoppen — endet immer im Stillstand, heilt beim nächsten Herzschlag.
+- Außerhalb Scope bemerkt: `FastAccelStepper @ ^0.31.1` offene Versionsbreite (Fix stützt sich auf Bibliotheksinternas); Zeitraffer-Rückfahrt bei ≤194 Steps von der Firmware verworfen (PROJ-5, Low).
+
+### Nicht verifiziert
+- [!] Laufzeit aller AC/EC, BUG-16 und BUG-20 am Gerät, physische Richtung, Schrittverluste/Wärme bei 8000 Steps/s, `forceStop()` aus voller Fahrt, Touch-Verhalten — no way to run and probe this project was recorded. Die Host-Simulation belegt die Rampenlogik, nicht das Hardware-Timing.
+
+**Production-Ready: NOT READY — not verified.** Keine Critical/High-Bugs offen (BUG-16 aus Code-Sicht geschlossen). Offen: BUG-20 und BUG-21 (Medium). Der letzte protokollierte Hardware-Test aller PROJ-2-ACs (2026-09-23) liegt vor den Firmware-Änderungen; Freigabe nur über einen neu protokollierten Nutzer-Test. Status: **In Review**.
