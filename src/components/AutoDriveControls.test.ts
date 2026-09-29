@@ -7,6 +7,7 @@ import {
   solveAutoDriveSpeedStepsPerSec,
   statusLabelFor,
   ceilToDeciseconds,
+  floorToDeciseconds,
 } from './AutoDriveControls';
 import type { SliderStatus } from '../ble/client';
 
@@ -188,6 +189,17 @@ describe('autoCorrectedDurationText', () => {
     expect(ceilToDeciseconds(1.414)).toBe(1.5);
     expect(ceilToDeciseconds(3)).toBe(3);
     expect(ceilToDeciseconds(2.2000000001)).toBe(2.3);
+  });
+
+  it('BUG-16: the range shown in the error message consists of drivable bounds', () => {
+    for (const distance of [1000, 1009, 4000, 39993, 100000]) {
+      const min = ceilToDeciseconds(minAutoDriveDurationSeconds(distance));
+      const max = floorToDeciseconds(maxAutoDriveDurationSeconds(distance));
+      expect(solveAutoDriveSpeedStepsPerSec(distance, min)).not.toBeNull();
+      expect(solveAutoDriveSpeedStepsPerSec(distance, max)).not.toBeNull();
+    }
+    expect(floorToDeciseconds(5.09)).toBe(5);
+    expect(floorToDeciseconds(3)).toBe(3);
   });
 
   it('leaves the exact minimum-boundary duration untouched (not re-formatted)', () => {

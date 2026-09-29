@@ -12,7 +12,7 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 );
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { usePresets, type Preset } from './usePresets';
+import { migrateDirection, usePresets, type Preset } from './usePresets';
 
 type PresetsApi = {
   presets: Preset[];
@@ -274,5 +274,53 @@ describe('usePresets', () => {
     expect(lastApi!.presets).toEqual([]);
 
     act(() => renderer.unmount());
+  });
+});
+
+describe('migrateDirection (PROJ-3 BUG-15)', () => {
+  const legacy: Preset = {
+    id: '1',
+    name: 'alt',
+    distanceSteps: 1000,
+    endIsAfterStart: true,
+    durationSeconds: 5,
+    createdAt: 1,
+  };
+
+  it('flips a preset without dirVersion exactly once and stamps it', () => {
+    const first = migrateDirection([legacy]);
+    expect(first.changed).toBe(true);
+    expect(first.presets[0].endIsAfterStart).toBe(false);
+    expect(first.presets[0].dirVersion).toBe(2);
+
+    const second = migrateDirection(first.presets);
+    expect(second.changed).toBe(false);
+    expect(second.presets[0].endIsAfterStart).toBe(false);
+  });
+
+  it('leaves presets that already carry dirVersion untouched', () => {
+    const current: Preset = { ...legacy, endIsAfterStart: true, dirVersion: 2 };
+    const result = migrateDirection([current]);
+    expect(result.changed).toBe(false);
+    expect(result.presets[0].endIsAfterStart).toBe(true);
+  });
+
+  it('persists the migration on load and new saves are not flipped again', async () => {
+    await AsyncStorage.clear();
+    await AsyncStorage.setItem('camera-slider.presets', JSON.stringify([legacy]));
+
+    let lastApi: PresetsApi | undefined;
+    await act(async () => {
+      ReactTestRenderer.create(renderProbe(api => (lastApi = api)));
+      await flushPromises();
+    });
+    expect(lastApi!.presets[0].endIsAfterStart).toBe(false);
+
+    await act(async () => {
+      await lastApi!.save('neu', 2000, true, 3);
+    });
+    const stored = JSON.parse((await AsyncStorage.getItem('camera-slider.presets')) as string);
+    expect(stored.find((p: Preset) => p.name === 'alt').endIsAfterStart).toBe(false);
+    expect(stored.find((p: Preset) => p.name === 'neu').endIsAfterStart).toBe(true);
   });
 });

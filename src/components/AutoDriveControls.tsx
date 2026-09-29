@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -161,6 +161,15 @@ export function ceilToDeciseconds(value: number): number {
 }
 
 /**
+ * qa-report.md (PROJ-3) BUG-16: mirror of ceilToDeciseconds() for the upper
+ * bound shown in the "erlaubt: min–max" message — the largest whole
+ * decisecond that is still <= `value`.
+ */
+export function floorToDeciseconds(value: number): number {
+  return Math.floor(value * 10 + 1e-9) / 10;
+}
+
+/**
  * AC-11 (spec.md, refined 2026-09-27): what the Dauer field's onBlur handler
  * should replace `durationText` with, or null to leave it untouched.
  *
@@ -304,6 +313,18 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
     durationText.trim() !== '' &&
     requestedSpeedStepsPerSec !== null &&
     requestedSpeedStepsPerSec < MIN_SPEED_STEPS_PER_SEC - AUTO_DRIVE_SPEED_TOLERANCE_STEPS_PER_SEC;
+
+  // qa-report.md (PROJ-3) BUG-19: AC-11's correction ran only on blur, so a
+  // duration that was already too short when the range became known (the
+  // default "10" with a long distance) left the triggers disabled with no
+  // message. Apply the same correction whenever the distance changes.
+  const knownDistanceSteps = rangeAvailable ? (status.distanceSteps as number) : null;
+  useEffect(() => {
+    if (knownDistanceSteps === null) {
+      return;
+    }
+    setDurationText(previous => autoCorrectedDurationText(previous, knownDistanceSteps) ?? previous);
+  }, [knownDistanceSteps]);
 
   const handleDurationBlur = (): void => {
     const corrected = autoCorrectedDurationText(durationText, status.distanceSteps);
@@ -518,8 +539,8 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
       </View>
       {showDurationError && minDurationSeconds !== null && maxDurationSeconds !== null && (
         <Text style={styles.errorText}>
-          Ungültige Dauer — erlaubt: {formatSeconds(minDurationSeconds)}–
-          {formatSeconds(maxDurationSeconds)} s
+          Ungültige Dauer — erlaubt: {formatSeconds(ceilToDeciseconds(minDurationSeconds))}–
+          {formatSeconds(floorToDeciseconds(maxDurationSeconds))} s
         </Text>
       )}
       {pointsIdentical && (

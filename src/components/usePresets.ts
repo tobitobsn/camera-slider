@@ -32,7 +32,39 @@ export type Preset = {
   endIsAfterStart: boolean;
   durationSeconds: number;
   createdAt: number;
+  /**
+   * qa-report.md (PROJ-3) BUG-15: the firmware's DIR polarity was inverted on
+   * 2026-09-29, which flipped the physical meaning of `endIsAfterStart`
+   * ("direction of increasing steps"). A preset without this field predates
+   * the flip; it is corrected once on read (see migrateDirection()) and
+   * stored with `dirVersion: 2` from then on.
+   */
+  dirVersion?: number;
 };
+
+const CURRENT_DIR_VERSION = 2;
+
+/**
+ * Flips `endIsAfterStart` once for every preset saved before the DIR
+ * polarity inversion, so it keeps driving the same PHYSICAL way. Presets
+ * that already carry `dirVersion` are returned untouched, so this is
+ * idempotent.
+ */
+export function migrateDirection(presets: Preset[]): { presets: Preset[]; changed: boolean } {
+  let changed = false;
+  const migrated = presets.map(preset => {
+    if (preset.dirVersion !== undefined) {
+      return preset;
+    }
+    changed = true;
+    return {
+      ...preset,
+      endIsAfterStart: !preset.endIsAfterStart,
+      dirVersion: CURRENT_DIR_VERSION,
+    };
+  });
+  return { presets: migrated, changed };
+}
 
 function sortByCreatedAtDescending(presets: Preset[]): Preset[] {
   return [...presets].sort((a, b) => b.createdAt - a.createdAt);
@@ -48,7 +80,17 @@ async function readStoredPresetsFromStorage(): Promise<Preset[]> {
   if (raw === null) {
     return [];
   }
-  return JSON.parse(raw) as Preset[];
+  const { presets, changed } = migrateDirection(JSON.parse(raw) as Preset[]);
+  if (changed) {
+    // Best effort: if this write fails, the stored list is still unmigrated
+    // and the next read migrates it again identically (idempotent).
+    try {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(presets));
+    } catch {
+      // ignore, see above
+    }
+  }
+  return presets;
 }
 
 async function readStoredPresetsForMount(): Promise<Preset[]> {
@@ -121,6 +163,7 @@ export function usePresets(): {
       endIsAfterStart,
       durationSeconds,
       createdAt: now,
+      dirVersion: CURRENT_DIR_VERSION,
     };
 
     // qa-report.md BUG-3: building the next list from the in-memory
