@@ -471,3 +471,19 @@ BUG-17, BUG-20..23 (Low). Beobachtung (Spec-konform): die App erhöht die Dauer 
 - [!] ScrollView bei offener Tastatur (erster Tipp schließt evtl. nur die Tastatur), Optik der Hinweiszeile, Kamera-Clipping beim Scrollen ohne TextureView — nur am Gerät prüfbar
 
 **Production-Ready: NOT READY — not verified.** Keine Critical/High/Medium-Bugs offen. Die Laufzeit-ACs sind in diesem Lauf nicht ausgeführt; der protokollierte Hardware-Test vom 2026-09-24 liegt vor der Firmware-Änderung (8000 Steps/s, DIR-Umkehr, BUG-16-Fix). Freigabe nur über einen neu protokollierten Nutzer-Test (Checkliste an den Nutzer übergeben). Status: **In Review**.
+
+## Nachtrag 9: Protokollierter Nutzer-Test am Gerät — Freigabe (2026-09-30)
+
+Checkliste an den Nutzer übergeben, Antwort „alles ok" für alle Punkte. Gerät: Android EB2103 (Debug-Build über Metro), Firmware-Stand `5feb442` (8000 Steps/s, DIR-Umkehr, BUG-16-Fix), App-Stand `b7de19b`/`df41c8c`.
+
+- [x] **AC-1, AC-2** — Start- und Endpunkt nach Jog gesetzt — vom Nutzer am Gerät bestätigt, 2026-09-30
+- [x] **AC-3** — „Start → Ende" mit 10 s kommt nach etwa dieser Zeit am Ende an — vom Nutzer am Gerät bestätigt, 2026-09-30
+- [x] **AC-4** — „Ende → Start" mit derselben Dauer — vom Nutzer am Gerät bestätigt, 2026-09-30
+- [x] **AC-5** — „Stopp" während der Fahrt hält sofort an — vom Nutzer am Gerät bestätigt, 2026-09-30
+- [x] **AC-9** — Jog-Tasten und „Als Start setzen" reagieren während der Fahrt nicht — vom Nutzer am Gerät bestätigt, 2026-09-30
+- [x] **AC-10** — Bluetooth am Handy aus während der Fahrt → Slider stoppt eigenständig — vom Nutzer am Gerät bestätigt, 2026-09-30
+- [x] **AC-12** — Hinweis bei zu kurzer Dauer, „Minimum übernehmen" gibt die Fahrt frei — vom Nutzer am Gerät bestätigt, 2026-09-30
+
+Einschränkung: Genauigkeit der Ankunftszeit nur „etwa" (keine Stoppuhr-Messung protokolliert); Anzahl der Durchläufe nicht protokolliert. Nicht im Nutzer-Test: EC-2 (Doppel-Tap), EC-3 (Reconnect), EC-4 (Hintergrund) — Garantien im Code bestätigt (Nachtrag 8).
+
+**Production-Ready: JA.** Keine Critical/High/Medium-Bugs offen; die Laufzeit-ACs sind durch den protokollierten Nutzer-Test ausgeführt. Offen bleiben nur Low-Bugs (BUG-17, BUG-20..23, BUG-38..41). Status: **Approved**.
