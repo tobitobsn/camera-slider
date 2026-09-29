@@ -398,3 +398,29 @@ BUG-17, BUG-20..23 (Low). Beobachtung (Spec-konform): die App erhöht die Dauer 
 - [!] Ankunft nach Dauer (AC-3/AC-4), echte Notify-Reihenfolge und ob die Firmware SET_END_FROM_DISTANCE verwirft, Stopp/Disconnect, Kamera-Optik, Release-Bundle-Secrets, Firmware-Tests, Rate Limiting (not implemented), Auth/Brute-Force/Credentials-in-URL (not applicable) — Laufzeit: no way to run and probe this project was recorded
 
 **Production-Ready: NEIN** — BUG-29 und BUG-30 (Medium) verletzen AC-12; kein Critical/High offen. Nach Behebung genügt eine Re-Verifikation im Umfang dieser Fixes. Status: **In Review**.
+
+## Nachtrag 6: Re-Verifikation der Fixes BUG-29..32 (2026-09-30)
+
+**Scope (Re-Verifikation):** `git diff 76f0599..HEAD -- src features/PROJ-3-start-endpunkt-auto-fahrt/spec.md` (Commit `aa1ce58`): `AutoDriveControls.tsx`, `AutoDriveControls.render.test.ts`, `spec.md` (AC-12 ergänzt), eine Zeile `design.md`. Ein `qa-engineer`-Lauf mit allen drei Scopes, 45 eigene Render-Proben (`probe8/`). Alles andere: _unverändert seit 2026-09-30, in diesem Lauf nicht neu geprüft (AC-1, AC-2, AC-4, AC-5, AC-7..AC-10, EC-1..EC-4, PROJ-1, PROJ-2)_. `probe.kind: none` — Laufzeit/Hardware `[!] NOT VERIFIED — no way to run and probe this project was recorded`.
+
+**Test-Suite (einmalig, Owner):** `npm test` → 13 Suites, 211 Tests, 0 Fehler, keine „did not exit"-Zeile (`suite7.log`); `npx tsc --noEmit` und `npx eslint` auf die geänderten Dateien: exit 0.
+
+### Geschlossen
+- [x] **BUG-29** — Probe: keine Punkte, „Schnell" laden, „2" tippen, anwenden → beim Eintreffen von 20000 „3.5", Auslöser aktiv; ebenso „3" mit Zwischen-Distanz und leeres Feld (`AutoDriveControls.tsx:374-389`).
+- [x] **BUG-30, Hauptpfade** — Distanz kommt nie an → bei 2,9 s „1.0", bei 3,1 s „7.3"; gar kein Notify → „13.5"; Fehler bei SET_START → sofort „13.5"; Fehler bei SET_END_FROM_DISTANCE nach Re-Render → „7.3" (`:485, 490-492`).
+- [x] **BUG-31, Hauptpfad** — zweite Anwendung nach 2,8 s ersetzt den Guard, Zwischen-Distanz lässt „1.0" stehen (`:472, 357-363`).
+- [x] **BUG-32, Jest-Symptom** — keine „did not exit"-Zeile; Unmount räumt den laufenden Timer ab (`:380`).
+- [x] **AC-6, AC-11, AC-12 Kernfälle, PROJ-4 AC-5 (App-seitig), EC-2, EC-3** — u. a. Preset-eigene Dauer bleibt für „Schnell" 3.5, „Kurz" 1.0 (exaktes Minimum), „Lang" 40.0, 16000/3.0, 12345/2.6, 1414/0.9; lange Dauern werden nie überschrieben; StrictMode idempotent. PROJ-5 unverändert (Diff leer), Suite grün.
+
+### Neue Bugs (durch `aa1ce58`)
+- [ ] **BUG-33 (High, Regression PROJ-4 AC-4, 3-s-Fenster):** ein noch laufender oder verwaister Guard-Timer der vorigen Anwendung überschreibt die Dauer eines danach geladenen, noch nicht angewendeten Presets; die Fahrt läuft ohne Meldung mit falscher Dauer. Repros: Distanz 20000, „Schnell" anwenden (gleiche Distanz, Effekt feuert nicht), nach 1 s „Kurz" laden („1.0") → bei 3 s „3.5"; Preset-Distanz trifft vor der Write-Antwort ein → Timer wird erst danach gesetzt und bleibt aktiv, „Kurz" nach 1,5 s laden → „3.5", „Start → Ende" sendet 3.5 statt 1.0; A-Distanz kommt nie an, B nach 1 s laden → „1.0" wird „8.5". Ursache: `handleLoadPreset` (`:517-523`) beendet den Guard nicht; der Timer entsteht erst nach dem `await` (`:485`), auch wenn `endPresetApply` schon lief. Ob Notify vor der Write-Antwort eintrifft, ist auf dem Gerät ein Race (`firmware/src/main.cpp:56` vs. `ble.cpp:209`) — `[!]`, aus Code abgeleitet.
+- [ ] **BUG-34 (Low):** Doppel-Tap auf „Als Start setzen" hinterlässt einen verwaisten Timer (`:485` überschreibt die Referenz ohne Abräumen), der später den Guard einer neuen Anwendung beendet („1.0" → „4.8").
+- [ ] **BUG-35 (Low):** Korrektur im Fehlerpfad nutzt eine veraltete Distanz — `endPresetApply` liest `previousKnownDistanceRef` (`:374`), der erst im Effekt gesetzt wird (`:384`). Zwischen-Notify 1500 im selben Tick wie der Schreibfehler → „13.5" statt „1.0", Meldung „erlaubt: 0.9–7.5 s", Auslöser gesperrt. Der Test „a failed SET_END_FROM_DISTANCE write also catches up" prüft nur `not.toBe('1.0')` und erkennt das nicht. Batching auf dem Gerät `[!]`.
+- [ ] **BUG-36 (Low):** Unmount während offenem SET_END_FROM_DISTANCE → der Timer entsteht nach dem Unmount und wird nie abgebrochen; widerspricht `design.md:124`. Kein `console.error`.
+- [ ] **BUG-37 (Low, UX):** die Timer-Korrektur greift während des Tippens („2" bei 2,9 s → bei 3 s „7.3" → weitertippen „7.35").
+- Außerhalb Scope bemerkt (nicht neu): ein geladenes Preset bleibt nach dem Anwenden aktiv, jedes weitere „Als Start setzen" wendet es erneut an; ein kurzes Preset ist bei bekannter größerer Distanz bis zum Anwenden stumm gesperrt.
+
+### Nicht verifiziert
+- [!] Echte Notify-Reihenfolge relativ zur Write-Antwort (entscheidet, wie oft BUG-33 vorkommt), Batching in React Native (BUG-35), Ankunft nach Dauer, Stopp/Disconnect, Optik, Release-Bundle-Secrets, Firmware-Tests — no way to run and probe this project was recorded; Rate Limiting not implemented; Auth/Brute-Force/Credentials-in-URL not applicable.
+
+**Production-Ready: NEIN** — BUG-33 (High, Regression PROJ-4 AC-4). Status: **In Review**.
