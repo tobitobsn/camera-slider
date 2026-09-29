@@ -430,3 +430,44 @@ BUG-17, BUG-20..23 (Low). Beobachtung (Spec-konform): die App erhöht die Dauer 
 - **Umbau `df41c8c`:** automatische Korrektur bei Distanzänderung samt Preset-Schutzphase und 3-s-Timer entfernt. Ist die Dauer zu kurz, leer oder unlesbar, zeigt die App „Zu kurz für diese Strecke — Minimum X s" bzw. „Keine gültige Dauer — Minimum X s" mit Button „Minimum übernehmen"; die Dauer wird außerhalb von AC-11 nie selbst geändert. AC-12 in `spec.md` neu gefasst, `design.md` ersetzt die drei früheren AC-12-Einträge. Damit entfallen die Mechanismen hinter BUG-33 bis BUG-37. 210 Tests grün; Red-Check der Render-Tests: ohne Hinweis 4 rot, mit der alten Auto-Korrektur 8 rot.
 - [x] **Nutzer-Test am Gerät („alles ok", 2026-09-30, Android EB2103, Debug-Build über Metro):** neue Dauer-Anzeige mit „Minimum übernehmen" und Preset-Ablauf (Dauer bleibt). Umfang und Anzahl der Durchläufe nicht protokolliert.
 - **Nicht durch einen unabhängigen `/qa`-Lauf verifiziert:** `df41c8c`. Status bleibt **In Review**.
+
+## Nachtrag 8: Re-Verifikation nach AC-12-Neufassung — voller Fan-out (2026-09-30)
+
+**Scope:** Vertragswechsel (AC-12 neu gefasst, `df41c8c`) → volle Breite mit drei `qa-engineer`-Lanes (Acceptance, Security, Regression). Diff seit dem letzten QA-Lauf: `git diff 69cd64f..HEAD -- src` → `AutoDriveControls.tsx` (+ Tests), `TimelapseControls.tsx` (PROJ-5, `b7de19b`). Firmware, `src/ble`, `src/connection`, `src/screens`, `usePresets.ts` unverändert (`git diff --quiet`, exit 0). `probe.kind: none` — Laufzeit/Hardware `[!] NOT VERIFIED — no way to run and probe this project was recorded`.
+
+**Test-Suite (einmalig, Owner):** `npm test` → 13 Suites, 210 Tests, 0 Fehler, keine „did not exit"-Zeile (`suite8.log`); `npx tsc --noEmit` exit 0; `npx eslint` auf die geänderten Dateien 0 Fehler (eine ältere `no-void`-Warnung in `TimelapseControls.tsx:161`, nicht aus dem Diff). Layer `firmware`: `[!] NOT VERIFIED — no test command recorded for layer firmware`.
+
+### Acceptance Criteria (eigene Render-Probe mit 9 Szenarien, ~230 Zustände; Numerik-Simulation d = 1–160000)
+- [x] **AC-1, AC-2** — Code: `AutoDriveControls.tsx:407-428`, `motor.cpp:361-378`; physisch `[!]`
+- [x] **AC-3, AC-4** — Code + Probe: nach „Minimum übernehmen" wird `auto startToEnd 21` gesendet; Richtungen `atStart`/`atEnd` (`:360-361`, `motor.cpp:409-411`). Bekannte Hz-Rundung quantifiziert: schlimmster Fall 160000 Steps / 798 s → Ankunft ~1,95 s zu früh (−0,245 %). Ankunft nach Dauer `[!]`
+- [x] **AC-5** — Stopp nur bei `driving` (`:608-620`), Firmware `motor.cpp:311-336`; „sofort" `[!]`
+- [x] **AC-6** — „900" bleibt, „erlaubt: 13.5–500.0 s"; angezeigte Grenzen in 0 Fällen ungültig (d ≥ 35). BUG-20 (Meldung schon beim Tippen) unverändert
+- [x] **AC-7, AC-8, EC-1** — Probe: ohne/mit einem Punkt beide Auslöser aus + „Kein Start-/Endpunkt gesetzt"; Distanz 0 → EC-1-Meldung; `atEnd` → nur „Ende → Start" aktiv
+- [x] **AC-9** — alle Bedienelemente an `lockedByOtherMode` (`:378, 516, 527, 549, 568, 627, 648, 662`), Jog `RootScreen.tsx:119`, Firmware `motor.cpp:239, 365, 373, 381`; physisch `[!]`
+- [x] **AC-10, EC-2, EC-4** — Garantien im Code (`ble.cpp:125-127`, `motor.cpp:342-350, 397-398`, serielle Writes); Laufzeit `[!]`
+- [x] **AC-11** — „1", leer, „abc", „13.44" → „13.5" nach Blur (d = 100000); eingetragener Wert nie größer als nötig. Rest BUG-17 (28 Distanzen ≤ 34 Steps)
+- [x] **AC-12** — Hinweis exakt („Zu kurz für diese Strecke — Minimum 21.0 s" / „Keine gültige Dauer — Minimum 13.5 s"), Mindestwert aufgerundet (d=1414 → 0.9), Button trägt ein und gibt frei, bei Fahrt/Zeitraffer gesperrt; 160 Kombinationen: 0× beide Meldungen, 0× gesperrt ohne Meldung (bei `atStart`); die App ändert die Dauer nie selbst (4 Schreiber, kein `useEffect`/`setTimeout`; „4.2" bleibt über 12 Distanz-Notifies); Preset-Dauer bleibt für „Schnell" 3.5, „Lang" 90.0 (Rückrichtung), „Mini" 1414/0.9, Zwischen-Distanz 0
+- [x] **EC-3** — Code `ble.cpp:87-89`, `useSliderStatus.ts:50-53`; Restfall BUG-18 unverändert
+
+### Security
+- [x] Keine neuen Bugs, keine Verschlechterung. „Minimum übernehmen" setzt nur State, sendet nichts (`:326-338`); gesendet wird nur bei `durationValid`. Simulation: übernommener Mindestwert 0× zu kurz, 0× von der Firmware abgelehnt, wenn die App ihn gültig findet. Manipulierte Preset-Daten und gefälschte Status-Distanz bleiben in den Firmware-Grenzen. Alle Timer/Effekte entfernt → keine State-Updates nach Unmount. Keine Secrets im Diff/Quelltext (`git grep`).
+- **Zusammenfassung:** 8 Checks verifiziert, 5 NOT VERIFIED (Laufzeit; Authorization/Brute Force/Enumeration/Credentials in URL nicht anwendbar; Rate Limiting not implemented; Release-Bundle vom 27.09. veraltet, nicht neu gebaut).
+
+### Regression
+- [x] **PROJ-4** (eigene Probe, 8/8): AC-1..AC-9, EC-2..EC-5, Migration `dirVersion` unverändert; Preset-Dauer während der Anwendung bleibt („3.5").
+- [x] **PROJ-5** (eigene Probe, 4/4): Kamera-Wrapper ohne `implementationMode`, Permission-Zweig, „kein Gerät"-Zweig; `useTimelapseSequence` nutzt `minAutoDriveDurationSeconds` unverändert.
+- [x] **PROJ-1, PROJ-2**: Dateien unverändert, zugehörige Tests grün.
+- [x] Keine verwaisten Referenzen auf entfernte Symbole im Code.
+
+### Neue Befunde (alle Low)
+- [ ] **BUG-38 (Low, UX):** nach dem Laden eines Presets bezieht sich der Zu-kurz-Hinweis bis zum Eintreffen der Preset-Distanz auf die alte bzw. Zwischen-Distanz; tippt der Nutzer genau dann „Minimum übernehmen", geht die Preset-Dauer verloren (Probe: „Mini" 0.9 → „8.5" → danach „erlaubt: 0.9–7.0 s"). Nur per Nutzeraktion, Workaround: Preset neu laden. Spec-konform im Wortlaut.
+- [ ] **BUG-39 (Low, UX):** ein langes Preset zeigt bis zum Anwenden die AC-6-Meldung „Ungültige Dauer" für die alte Distanz.
+- [ ] **BUG-40 (Low):** steht der Schlitten an keinem der beiden Punkte (nach jedem Jog weg), sind beide Auslöser gesperrt, die Statuszeile zeigt „Bereit" — kein sichtbarer Grund. AC-8 verlangt nur die Sperre; verwandt mit BUG-10.
+- [ ] **BUG-41 (Low, Doku-Drift):** Kommentar `AutoDriveControls.tsx:304-310` („no longer shows an error at all") ist seit `df41c8c` falsch; `design.md:121-124` beschreiben den entfernten Mechanismus noch im Präsens (Zeile 125 markiert sie als ersetzt).
+- Weiterhin offen: BUG-17, BUG-20..23 (Low).
+
+### Nicht verifiziert
+- [!] Alle Laufzeit-/Hardware-Aussagen (physisches Setzen, Ankunft nach Dauer, Sofort-Stopp, Tastensperre, Disconnect-Stopp, Doppel-Tap, Reconnect, Hintergrund, Notify-Reihenfolge) — no way to run and probe this project was recorded
+- [!] ScrollView bei offener Tastatur (erster Tipp schließt evtl. nur die Tastatur), Optik der Hinweiszeile, Kamera-Clipping beim Scrollen ohne TextureView — nur am Gerät prüfbar
+
+**Production-Ready: NOT READY — not verified.** Keine Critical/High/Medium-Bugs offen. Die Laufzeit-ACs sind in diesem Lauf nicht ausgeführt; der protokollierte Hardware-Test vom 2026-09-24 liegt vor der Firmware-Änderung (8000 Steps/s, DIR-Umkehr, BUG-16-Fix). Freigabe nur über einen neu protokollierten Nutzer-Test (Checkliste an den Nutzer übergeben). Status: **In Review**.
