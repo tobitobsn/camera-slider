@@ -240,21 +240,23 @@ void motorJog(JogDirection direction, uint8_t speedPercent) {
     return;
   }
 
+  // qa-report.md (PROJ-2) BUG-23: refresh the heartbeat timestamp BEFORE a
+  // run can start, so motorWatchdogCheck() (loop() task) never sees a
+  // freshly started run together with a stale timestamp.
+  lastJogMillis = millis();
+
   // setSpeedInHz() only takes effect once one of move()/moveTo()/
   // runForward()/runBackward()/applySpeedAcceleration()/moveByAcceleration()
   // is called afterwards (FastAccelStepper.h, "## Speed" doc comment) — set
   // it before (re-)issuing whichever of those this call needs.
   stepper->setSpeedInHz(speedPercentToStepsPerSecond(speedPercent));
 
-  // qa-report.md BUG-16: jogRunning was only ever cleared by motorStop(), so
-  // any way the motor ended up idle without a motorStop() — most notably a
-  // moveTo() (AUTO_DRIVE / TIMELAPSE_MOVE) superseding a continuous run that
-  // was still flagged as running, then arriving — left jogRunning true on an
-  // idle stepper. Every following heartbeat then took the "already running"
-  // branch below (applySpeedAcceleration() on a motor that isn't moving) and
-  // jog stayed dead in that direction until an unrelated STOP. The flag is
-  // therefore never trusted over the stepper itself: if it says running but
-  // the stepper is idle, start fresh.
+  // qa-report.md BUG-16 (safety net): never trust the jogRunning flag over
+  // the stepper itself — if it says running but the stepper is idle, start
+  // fresh instead of only calling applySpeedAcceleration() on a motor that
+  // isn't moving. The actual cause of BUG-16 is handled in motorStop() (see
+  // there); this also covers any other way a run could end without a
+  // motorStop() (e.g. the library aborting a ramp).
   if (jogRunning && !stepper->isRunning()) {
     jogRunning = false;
   }
@@ -305,7 +307,6 @@ void motorJog(JogDirection direction, uint8_t speedPercent) {
     }
   }
 
-  lastJogMillis = millis();
 }
 
 void motorStop() {
@@ -315,7 +316,20 @@ void motorStop() {
   // forceStop() halts within ~20ms without a deceleration ramp — the
   // immediate stop STOP/disconnect/watchdog need (design.md "sofortiges
   // Anhalten"), as opposed to stopMove()'s normal deceleration.
-  stepper->forceStop();
+  //
+  // qa-report.md BUG-16/BUG-20: only when the stepper is actually running.
+  // On an idle stepper forceStop() sets FastAccelStepper's
+  // force_immediate_stop flag, which is only cleared while a ramp runs —
+  // so it stayed set, and the next runForward()/runBackward() returned
+  // MOVE_OK but ended the ramp without a single step (RampGenerator.cpp).
+  // Releasing the button then sent another STOP on the idle stepper, so
+  // jog stayed dead until a reboot (BUG-16) — and with the safety net in
+  // motorJog() the first jog after any idle STOP was still swallowed for
+  // one heartbeat (BUG-20). STOP on an idle stepper happens often (after
+  // every connect, after a timelapse, after a watchdog stop).
+  if (stepper->isRunning()) {
+    stepper->forceStop();
+  }
 
   // The next motorJog() call, whatever direction, must be treated as
   // starting fresh (calls runForward()/runBackward()), not as "already
@@ -486,8 +500,8 @@ void motorAutoDrive(JogDirection direction, uint16_t durationDeciseconds) {
   // active once the stepper can possibly start running.
   autoDriveStartMillis = millis();
   autoDriving = true;
-  // moveTo() supersedes any continuous jog run (BUG-16): the next jog must
-  // start fresh, not think it is still "already running".
+  // Defensive: motorAutoDrive() only gets here with an idle stepper, so no
+  // jog run can be superseded — this just clears a possibly stale flag.
   jogRunning = false;
   stepper->moveTo(targetPosition, /*blocking=*/false);
 }
@@ -551,7 +565,7 @@ void motorTimelapseMoveTo(bool endIsAfterStart, uint32_t distanceSteps) {
   // stepper can possibly start running.
   timelapseMoveStartMillis = millis();
   timelapseMoving = true;
-  jogRunning = false;  // BUG-16, same as motorAutoDrive()
+  jogRunning = false;  // defensive, same as motorAutoDrive()
   stepper->moveTo(targetPosition, /*blocking=*/false);
 }
 
