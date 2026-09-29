@@ -210,7 +210,10 @@ void motorSetup() {
     Serial.println("Motor: stepperConnectToPin failed");
     return;
   }
-  stepper->setDirectionPin(kDirPin);
+  // dirHighCountsUp=false: motor wiring/mounting made "forward" move the
+  // slider the wrong way, so the DIR polarity is flipped here — one place,
+  // and jog, auto-drive and timelapse stay consistent with each other.
+  stepper->setDirectionPin(kDirPin, /*dirHighCountsUp=*/false);
   stepper->setEnablePin(kEnablePin, /*low_active_enables_stepper=*/true);
   stepper->setAutoEnable(true);
   stepper->setAcceleration(kAcceleration);
