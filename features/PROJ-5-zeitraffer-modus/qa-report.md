@@ -277,3 +277,9 @@ BUG-5 wurde behoben (Commit `248cf19`, 1 Produktionsdatei → eine Lane mit alle
 3. Entscheidung des Nutzers, ob BUG-8/BUG-9 (Medium) vor oder nach `/deploy` behoben werden — beide sind kein Blocker für „Approved" laut Skill (kein Critical/High mehr offen), aber offene Medium-Bugs sollten bewusst entschieden, nicht übersehen werden.
 
 **Status bleibt „In Review"** — kein „Approved", bis mindestens Punkt 1 und 2 am echten Gerät bestätigt sind.
+
+## Nachtrag: Kameravorschau überlagerte andere Bereiche (2026-09-30)
+
+- **Fund (Nutzer, am Gerät):** Kamerabild und Preset-Liste überlagerten sich. Gemessen per `uiautomator dump`: Kamera-View 600 px hoch (`[96,974][984,1574]`), gezeichnet aber 1178 px hoch, zentriert — die formatfüllend skalierte Vorschau überschreitet die Grenzen des nativen Views, das `overflow: 'hidden'` auf dem Kamera-Style schneidet sie nicht ab.
+- **Fix:** `0cd291b` — die Kamera liegt in einem Eltern-`View` mit `overflow: 'hidden'` und `borderRadius`, `implementationMode="compatible"` (TextureView). Screenshot nach dem Fix: Vorschau sitzt zwischen „Zeitraffer" und „Aufnahmen", mit runden Ecken. Nutzer: „alles ok" (2026-09-30).
+- **Einordnung:** Layout-Fehler, Severity Medium (Bedienelemente teils verdeckt, Workaround nur Kamera-Zugriff verweigern). Bestehende PROJ-5-Prüfung (`/qa PROJ-5`) steht weiterhin aus; dieser Fund ist dort mitzunehmen.

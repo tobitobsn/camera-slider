@@ -363,3 +363,11 @@ Nach dem Re-Verifikations-Zyklus (Firmware neu geflasht ab Commit `f188420`) hat
 - [!] Echte Notify-Reihenfolge SET_START → Zwischen-Distanz → SET_END_FROM_DISTANCE auf dem ESP32, Ankunft nach Dauer, physisches Verhalten (no way to run and probe this project was recorded); PROJ-4 EC-2 nicht geprüft; Release-Bundle nicht gebaut; Optik/Layout; Firmware-Tests; Rate Limiting (not implemented).
 
 **Production-Ready: NEIN** — BUG-27 (High, Regression PROJ-4) ist offen, dazu BUG-28 (Medium) und BUG-25 (Medium, bedingt). Status: **In Review**.
+
+## Nachtrag 4: Fixes BUG-27/28, Nutzer-Test am Gerät (2026-09-30)
+
+- **Fixes seit Nachtrag 3:** `b5c92da` (BUG-27/BUG-28: Auto-Korrektur bei jeder Änderung der bekannten Distanz, außer während ein Preset angewendet wird; `presetTargetDistanceRef`, `shouldAutoCorrectOnDistanceChange` mit drei Parametern), `3bccc04` (BUG-26: Design-Doku, PROJ-4 `dirVersion`, `docs/data-model.md`). 207 Tests grün, davon 7 neue Render-Tests in `AutoDriveControls.render.test.ts` (Preset-Ablauf komplett, Red-Check: ohne Guard 3 rot, ohne Änderungs-Regel 3 rot).
+- [x] **BUG-25 erledigt — vom Nutzer bestätigt (2026-09-30):** im Zeitfenster 2026-09-29 20:26 – 2026-09-30 00:18 wurde kein Preset gespeichert, es gibt keine Presets mit falsch gedrehter Richtung; auf dem Gerät existierte vor dem Update kein altes Preset.
+- [x] **BUG-26 geschlossen** — `design.md` (PROJ-3, PROJ-4) und `docs/data-model.md` aktualisiert (`3bccc04`).
+- [x] **Nutzer-Test am Gerät („alles ok", 2026-09-30, Android EB2103, Debug-Build über Metro):** geprüft wurden das Laden eines Presets mit anschließendem „Als Start setzen" (Dauer bleibt) und die automatische Korrektur der Dauer bei langen Strecken. Umfang und Anzahl der Durchläufe nicht protokolliert.
+- **Nicht durch einen unabhängigen `/qa`-Lauf verifiziert:** BUG-27 und BUG-28 (die Fixes `b5c92da`/`3bccc04` liegen nach dem letzten QA-Lauf). Status bleibt **In Review** bis zu einem weiteren `/qa PROJ-3` im Umfang dieser Commits.
