@@ -45,7 +45,7 @@ const TIMELAPSE_MOVE_START_TIMEOUT_MS = 2000;
  * qa-report.md BUG-5: a fixed arrival timeout (originally 15000ms, chosen
  * when design.md judged "a single fixed upper bound is good enough for this
  * hobby project's rail lengths") turned out to be wrong — TIMELAPSE_MOVE
- * always targets the firmware's max speed (kJogSpeedMaxHz, 4000 steps/s,
+ * always targets the firmware's max speed (kJogSpeedMaxHz, 8000 steps/s,
  * motor.cpp), so a single step's actual travel time scales directly with
  * that step's distance and has no fixed upper bound: a sequence with few
  * shots over a long rail moves the full distance (or close to it) in one
@@ -90,7 +90,7 @@ const SETTLE_PAUSE_MS = 400;
  * Safety margin on top of the theoretical fastest-possible duration
  * (minAutoDriveDurationSeconds, AutoDriveControls.tsx) used for the return
  * drive. Sending exactly the theoretical minimum risks the firmware's speed
- * computation landing a hair over the 4000 steps/s cap from pure
+ * computation landing a hair over the 8000 steps/s cap from pure
  * floating-point rounding — the same concern AutoDriveControls' own
  * AUTO_DRIVE_SPEED_TOLERANCE_STEPS_PER_SEC works around on the read side. A
  * small buffer avoids that without noticeably slowing the return drive down.
@@ -110,7 +110,7 @@ const MIN_RETURN_DRIVE_DURATION_SECONDS = 1;
  * (AC-2) from the frozen start/end distance — design.md leaves the exact
  * choice open ("wähle einen sinnvollen festen Wert oder leite ihn aus der
  * Distanz ab"); reusing AutoDriveControls' own speed-solving formula keeps
- * this in sync with the firmware's actual 200-4000 steps/s speed bounds
+ * this in sync with the firmware's actual 200-8000 steps/s speed bounds
  * instead of guessing a value that might be too fast (rejected) or
  * needlessly slow for a short rail.
  */

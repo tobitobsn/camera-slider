@@ -226,12 +226,12 @@ describe('useTimelapseSequence', () => {
       await jest.advanceTimersByTimeAsync(0);
     });
 
-    // 2 shots over 100000 steps: the single step (i=2) travels the full
-    // distance in one move. At max speed (4000 steps/s) that's a real
-    // ~25.5s trip (100000/4000 + 4000/8000 acceleration overhead) — well
+    // 2 shots over 200000 steps: the single step (i=2) travels the full
+    // distance in one move. At max speed (8000 steps/s) that's a real
+    // ~26s trip (200000/8000 + 8000/8000 acceleration overhead) — well
     // past the old fixed 15000ms timeout this bug was about.
     await act(async () => {
-      broadcastStatus(fullStatus({ distanceSteps: 100000 }));
+      broadcastStatus(fullStatus({ distanceSteps: 200000 }));
       await jest.advanceTimersByTimeAsync(0);
     });
 
@@ -241,7 +241,7 @@ describe('useTimelapseSequence', () => {
     });
 
     await act(async () => {
-      broadcastStatus(fullStatus({ distanceSteps: 100000, timelapseMoving: true }));
+      broadcastStatus(fullStatus({ distanceSteps: 200000, timelapseMoving: true }));
       await jest.advanceTimersByTimeAsync(0);
     });
 
@@ -255,7 +255,7 @@ describe('useTimelapseSequence', () => {
 
     // Arrival confirmed for real, well within the distance-scaled timeout.
     await act(async () => {
-      broadcastStatus(fullStatus({ distanceSteps: 100000, timelapseMoving: false }));
+      broadcastStatus(fullStatus({ distanceSteps: 200000, timelapseMoving: false }));
       await jest.advanceTimersByTimeAsync(5000);
     });
 

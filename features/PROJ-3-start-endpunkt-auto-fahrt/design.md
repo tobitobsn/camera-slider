@@ -80,7 +80,7 @@ firmware/src/ble.cpp (PROJ-1/2, erweitert)
 
 firmware/src/motor.h / motor.cpp (PROJ-2, erweitert)
 +-- motorSetStart() / motorSetEnd() — merkt sich stepper->getCurrentPosition() als Referenzpunkt (nur gültig/aussagekräftig im Stillstand, siehe Technische Entscheidungen)
-+-- motorAutoDrive(direction, durationDeciseconds) — berechnet Geschwindigkeit aus eigener Distanz-Kenntnis und Dauer, validiert 200–4000 Steps/s unabhängig von der App, startet moveTo() zum jeweiligen Zielpunkt
++-- motorAutoDrive(direction, durationDeciseconds) — berechnet Geschwindigkeit aus eigener Distanz-Kenntnis und Dauer, validiert 200–8000 Steps/s unabhängig von der App, startet moveTo() zum jeweiligen Zielpunkt
 +-- motorAutoDriveCheck() — in loop() aufgerufen: erkennt Zielankunft (isRunning() wird false, während intern `autoDriving` gesetzt ist), löst Status-Update aus
 +-- motorGetStatus() — liefert die Flags + Distanz für die Status-Characteristic
 +-- motorClearPoints() — setzt `hasStart`/`hasEnd` (und damit implizit `atStart`/`atEnd`/`distanceSteps`) zurück; aufgerufen von `onConnect`

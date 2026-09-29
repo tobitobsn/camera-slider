@@ -47,7 +47,7 @@ Gleiches Verschlüsselungs-/Antwortmuster wie alle bisherigen sicherheitsrelevan
 - Verlangt `hasStart` (ohne registrierten Startpunkt gibt es keine Referenz)
 - Verweigert, wenn der Motor bereits läuft, eine Auto-Fahrt läuft, oder bereits eine Zeitraffer-Bewegung läuft
 - Verweigert, wenn die Distanz die bestehende Plausibilitätsgrenze überschreitet (dieselbe Konstante wie PROJ-4s BUG-1-Fix, `kMaxPlausibleDistanceSteps`, aktuell 160000 Steps — auf 1000mm Schienenlänge neu kalibriert, 2026-09-26, nachdem der Nutzer den Schlitten umgebaut hat; ursprünglich 76800 Steps/480mm) — dieselbe Schutzlogik, kein zweiter Wert zum Pflegen
-- Bewegungsgeschwindigkeit: fester technischer Wert, die bestehende `kJogSpeedMaxHz`-Konstante (4000 Steps/s) — kein neues Tuning, keine neue Nutzer-Einstellung
+- Bewegungsgeschwindigkeit: fester technischer Wert, die bestehende `kJogSpeedMaxHz`-Konstante (8000 Steps/s, seit 2026-09-29; ursprünglich 4000) — kein neues Tuning, keine neue Nutzer-Einstellung
 
 **Umgekehrter Schutz:** `motorAutoDrive()` bekommt eine zusätzliche Verweigerungsbedingung (`!timelapseMoving`), `motorWatchdogCheck()`s bestehender Früh-Ausstieg wird um `timelapseMoving` erweitert (dieselbe Begründung wie für `autoDriving`: kein Jog-Herzschlag-Muster während einer laufenden Zeitraffer-Bewegung nötig) — genau dieselben Absicherungen, die PROJ-3 schon für Auto-Fahrt eingeführt hat, jetzt symmetrisch auf die neue Bewegungsart angewendet.
 

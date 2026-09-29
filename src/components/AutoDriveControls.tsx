@@ -25,12 +25,12 @@ import { useSliderStatus } from './useSliderStatus';
 import { usePresets, type Preset } from './usePresets';
 
 /**
- * Same 200-4000 steps/s range as PROJ-2's jog — verified against
- * firmware/src/motor.cpp's kJogSpeedMinHz (200.0f) / kJogSpeedMaxHz (4000.0f),
+ * Same 200-8000 steps/s range as PROJ-2's jog — verified against
+ * firmware/src/motor.cpp's kJogSpeedMinHz (200.0f) / kJogSpeedMaxHz (8000.0f),
  * which spec.md's Technical Requirements explicitly call out as shared.
  */
 const MIN_SPEED_STEPS_PER_SEC = 200;
-const MAX_SPEED_STEPS_PER_SEC = 4000;
+const MAX_SPEED_STEPS_PER_SEC = 8000;
 
 /**
  * Mirrors firmware/src/motor.cpp's kAcceleration (steps/s^2) — needed here
@@ -42,7 +42,7 @@ const ACCELERATION_STEPS_PER_SEC2 = 8000;
 /**
  * Mirrors firmware/src/motor.cpp's kAutoDriveSpeedToleranceHz — qa-report.md
  * BUG-3 residual: this function's double and the firmware's float32 can
- * land on opposite sides of the 200/4000 boundary for a duration whose
+ * land on opposite sides of the 200/8000 boundary for a duration whose
  * exact value sits right on it, independent of the numerically-stable form
  * below. Keeping both sides' tolerance identical is what makes them agree.
  */
@@ -59,7 +59,7 @@ const DEFAULT_DURATION_TEXT = '10';
  * the actual trapezoidal move land on the entered duration exactly. Returns
  * null when durationSeconds is below the physical minimum for this distance
  * at this acceleration (2*sqrt(distance/acceleration), the pure-triangular
- * case) — impossible at any speed, not just out of the 200-4000 range.
+ * case) — impossible at any speed, not just out of the 200-8000 range.
  */
 export function solveAutoDriveSpeedStepsPerSec(
   distanceSteps: number,
@@ -86,7 +86,7 @@ export function solveAutoDriveSpeedStepsPerSec(
 }
 
 /**
- * The fastest a move of this distance can ever complete, given the 4000
+ * The fastest a move of this distance can ever complete, given the 8000
  * steps/s cap and the shared acceleration — used as the lower bound of the
  * displayed valid-duration range. Below the cap-relevant distance
  * (MAX_SPEED_STEPS_PER_SEC^2 / ACCELERATION_STEPS_PER_SEC2 = 2000 steps),
@@ -154,7 +154,7 @@ export function formatSeconds(value: number): string {
  * should replace `durationText` with, or null to leave it untouched.
  *
  * A duration that's too SHORT (the resulting speed would be above the
- * 4000 steps/s cap), empty, or unparseable is silently corrected to the
+ * 8000 steps/s cap), empty, or unparseable is silently corrected to the
  * minimum achievable duration for the current distance — no error, ready to
  * drive with immediately. A too-LONG duration (speed below the 200 steps/s
  * floor) is deliberately left alone — showDurationError still flags it —

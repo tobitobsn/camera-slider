@@ -26,9 +26,9 @@ constexpr uint16_t kMicrosteps = 16;      // 400 full steps x 16 = 6400 steps/re
 constexpr int32_t kAcceleration = 8000;  // steps/s^2
 
 // Jog speed mapping — design.md "Geschwindigkeits-Mapping (Prozent ->
-// Steps/s)": 1-100% maps linearly to 200-4000 steps/s.
+// Steps/s)": 1-100% maps linearly to 200-8000 steps/s.
 constexpr float kJogSpeedMinHz = 200.0f;
-constexpr float kJogSpeedMaxHz = 4000.0f;
+constexpr float kJogSpeedMaxHz = 8000.0f;
 
 // qa-report.md BUG-3 (residual after the numerically-stable-form fix):
 // this file's float32 and src/components/AutoDriveControls.tsx's double
@@ -42,7 +42,7 @@ constexpr float kJogSpeedMaxHz = 4000.0f;
 // commanded speed (motorAutoDrive() rounds to the nearest integer Hz
 // before calling setSpeedInHz() — well inside a 0.5 Hz margin).
 // qa-report.md BUG-7 re-verification round 3 (NEU-D): 0.01 still clears
-// the actual float32 error (roughly 1e-5 to 4e-4 across the 200-4000
+// the actual float32 error (roughly 1e-5 to 4e-4 across the 200-8000
 // range) by a wide margin, while barely nudging the duration range
 // AutoDriveControls.tsx displays to the user away from what it actually
 // accepts — a larger tolerance (0.1, the first value tried) widened that
@@ -147,8 +147,8 @@ volatile bool autoDriving = false;
 volatile unsigned long autoDriveStartMillis = 0;
 constexpr unsigned long kAutoDriveStartGraceMs = 100;
 
-// The shared 200-4000 steps/s range (spec.md Technical Requirements: "muss
-// innerhalb 200-4000 Steps/s liegen (derselbe Bereich wie PROJ-2s Jog)") is
+// The shared 200-8000 steps/s range (spec.md Technical Requirements: "muss
+// innerhalb 200-8000 Steps/s liegen (derselbe Bereich wie PROJ-2s Jog)") is
 // already captured by kJogSpeedMinHz/kJogSpeedMaxHz above — reused here
 // as-is rather than duplicated under a second name.
 
@@ -427,7 +427,7 @@ void motorAutoDrive(JogDirection direction, uint16_t durationDeciseconds) {
   // negative discriminant means durationSeconds is below the absolute
   // minimum time reachable at this acceleration for this distance
   // (2*sqrt(distance/a), the pure-triangular case) — impossible at any
-  // speed, not just outside the 200-4000 steps/s range.
+  // speed, not just outside the 200-8000 steps/s range.
   const float aTimesDuration = static_cast<float>(kAcceleration) * durationSeconds;
   const float discriminant = aTimesDuration * aTimesDuration -
       4.0f * static_cast<float>(kAcceleration) * static_cast<float>(distanceSteps);
@@ -449,7 +449,7 @@ void motorAutoDrive(JogDirection direction, uint16_t durationDeciseconds) {
       (aTimesDuration + sqrtf(discriminant));
   if (speedHz < kJogSpeedMinHz - kAutoDriveSpeedToleranceHz ||
       speedHz > kJogSpeedMaxHz + kAutoDriveSpeedToleranceHz) {
-    // AC-6: requested duration would need a speed outside 200-4000 steps/s.
+    // AC-6: requested duration would need a speed outside 200-8000 steps/s.
     return;
   }
 

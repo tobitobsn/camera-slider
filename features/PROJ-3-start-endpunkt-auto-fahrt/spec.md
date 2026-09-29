@@ -25,7 +25,7 @@
 - [ ] **AC-4** — Angenommen Start- und Endpunkt sind gesetzt und der Schlitten steht am Endpunkt, wenn der Nutzer eine gültige Dauer eingibt und „Ende → Start" auslöst, dann fährt der Schlitten automatisch zurück zum Startpunkt und kommt nach der eingegebenen Dauer dort an
 - [ ] **AC-5** — Angenommen eine Auto-Fahrt läuft, wenn der Nutzer „Stopp" drückt, dann hält der Motor sofort an, unabhängig davon wie weit die Fahrt fortgeschritten ist
 - [ ] **AC-6** — Angenommen Start- und Endpunkt sind gesetzt, wenn der Nutzer beim Verlassen des Dauer-Felds eine Dauer eingetragen hat, die bei der Distanz zwischen den Punkten eine Geschwindigkeit unter der Mindestgeschwindigkeit (200 Steps/s) ergäbe (die Dauer ist zu lang), dann zeigt die App eine Fehlermeldung mit dem erlaubten Dauer-Bereich und startet keine Fahrt — das Feld behält die eingegebene, zu lange Dauer bei
-- [ ] **AC-11** — Angenommen Start- und Endpunkt sind gesetzt, wenn der Nutzer das Dauer-Feld verlässt und die eingetragene Dauer leer ist, nicht als Zahl auswertbar ist, oder eine Geschwindigkeit über der Höchstgeschwindigkeit (4000 Steps/s) ergäbe (die Dauer ist zu kurz oder fehlt), dann trägt die App automatisch die für die aktuelle Distanz kürzestmögliche gültige Dauer in das Feld ein, ohne eine Fehlermeldung zu zeigen — der Nutzer kann direkt mit diesem Wert „Start → Ende"/„Ende → Start" auslösen
+- [ ] **AC-11** — Angenommen Start- und Endpunkt sind gesetzt, wenn der Nutzer das Dauer-Feld verlässt und die eingetragene Dauer leer ist, nicht als Zahl auswertbar ist, oder eine Geschwindigkeit über der Höchstgeschwindigkeit (8000 Steps/s) ergäbe (die Dauer ist zu kurz oder fehlt), dann trägt die App automatisch die für die aktuelle Distanz kürzestmögliche gültige Dauer in das Feld ein, ohne eine Fehlermeldung zu zeigen — der Nutzer kann direkt mit diesem Wert „Start → Ende"/„Ende → Start" auslösen
 - [ ] **AC-7** — Angenommen kein Startpunkt oder kein Endpunkt ist gesetzt, wenn der Nutzer den Hauptbildschirm sieht, dann sind die Auto-Fahrt-Auslöser („Start → Ende" / „Ende → Start") deaktiviert
 - [ ] **AC-8** — Angenommen der Schlitten steht nicht exakt am Startpunkt der jeweiligen Richtung, wenn der Nutzer diese Richtung auslösen will, dann ist der entsprechende Auslöser deaktiviert (analog für die Gegenrichtung und deren Startpunkt)
 - [ ] **AC-9** — Angenommen eine Auto-Fahrt läuft, wenn der Nutzer die Jog-Tasten oder die „Setzen"-Buttons betätigt, dann reagieren sie nicht — nur der Stopp-Button ist bedienbar
@@ -38,7 +38,7 @@
 - **EC-4** — Angenommen eine Auto-Fahrt läuft und die App wird in den Hintergrund geschickt oder stürzt ab, während die BLE-Verbindung formal bestehen bleibt, dann läuft die Fahrt trotzdem bis zum Ziel weiter — kein Watchdog-Timeout wie beim Jog nötig, da kein fortlaufendes Halte-Signal erwartet wird
 
 ## Technical Requirements
-- Geschwindigkeit wird aus der Distanz (Steps) zwischen Start und Ende und der eingegebenen Dauer berechnet: `speed = distance_steps / duration_seconds`, muss innerhalb 200–4000 Steps/s liegen (derselbe Bereich wie PROJ-2s Jog)
+- Geschwindigkeit wird aus der Distanz (Steps) zwischen Start und Ende und der eingegebenen Dauer berechnet: `speed = distance_steps / duration_seconds`, muss innerhalb 200–8000 Steps/s liegen (derselbe Bereich wie PROJ-2s Jog)
 - Baut auf PROJ-2s Motoransteuerung auf, braucht aber erstmals eine absolute Positions-Verfolgung in der Firmware (PROJ-2 kennt nur kontinuierlichen Lauf ohne Ziel) — technische Entscheidung von `/architecture`
 
 ## Open Questions
@@ -60,3 +60,4 @@
 | Start-/Endpunkt werden nicht persistiert, nur für die aktuelle Sitzung | Konsistent mit PROJ-1/2s „keine Persistenz"-Linie; dauerhaftes Speichern mehrerer Fahrten kommt mit PROJ-4 (Presets) | 2026-09-23 |
 | Disconnect während Auto-Fahrt → Firmware stoppt sofort (wie beim Jog) | Ein konsistentes Sicherheitsprinzip über alle Fahrmodi hinweg statt pro Modus unterschiedlicher Regeln | 2026-09-23 |
 | UI während Auto-Fahrt komplett gesperrt bis auf den Stopp-Button | Verhindert widersprüchliche gleichzeitige Befehle (Jog + Auto-Fahrt), einfacher zu bauen und zu testen | 2026-09-23 |
+| Höchstgeschwindigkeit von 4000 auf 8000 Steps/s erhöht (AC-11, Technical Requirements) — Änderung über `/refine PROJ-2` | Gleicher Bereich wie PROJ-2s Jog; am echten Slider mit 6000 und 8000 getestet, ohne Probleme. AC-IDs unverändert | 2026-09-29 |

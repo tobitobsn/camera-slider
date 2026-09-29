@@ -19,7 +19,7 @@ enum class JogDirection : uint8_t {
 void motorSetup();
 
 // Starts/continues a continuous run in the given direction at the given
-// speed (1-100, mapped linearly to 200-4000 steps/s — see below). Resets
+// speed (1-100, mapped linearly to 200-8000 steps/s — see below). Resets
 // the internal watchdog timestamp. Safe to call repeatedly while already
 // running (e.g. every 300ms from the app's JOG heartbeat).
 void motorJog(JogDirection direction, uint8_t speedPercent);
@@ -99,7 +99,7 @@ void motorClearPoints();
 //     requested direction (exact getCurrentPosition() match)
 //   - the distance between the two points is 0 (EC-1)
 //   - durationDeciseconds is 0
-//   - the computed speed is outside 200-4000 steps/s
+//   - the computed speed is outside 200-8000 steps/s
 void motorAutoDrive(JogDirection direction, uint16_t durationDeciseconds);
 
 // Call from loop(). Detects arrival at the target during an active
@@ -177,7 +177,7 @@ MotorStatus motorGetStatus();
 //     plausibility bound as motorSetEndFromDistance(), PROJ-4's BUG-1 fix —
 //     reused as-is, not duplicated under a second constant)
 //
-// Speed is the fixed kJogSpeedMaxHz (4000 steps/s) — a technical constant,
+// Speed is the fixed kJogSpeedMaxHz (8000 steps/s) — a technical constant,
 // not a user-facing setting (design.md: "kein neues Tuning, keine neue
 // Nutzer-Einstellung").
 void motorTimelapseMoveTo(bool endIsAfterStart, uint32_t distanceSteps);

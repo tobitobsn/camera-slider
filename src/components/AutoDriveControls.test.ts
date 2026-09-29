@@ -92,9 +92,9 @@ describe('solveAutoDriveSpeedStepsPerSec', () => {
   });
 
   it('returns exactly the max-speed boundary at minAutoDriveDurationSeconds (cap-limited distance)', () => {
-    const speed = solveAutoDriveSpeedStepsPerSec(4000, minAutoDriveDurationSeconds(4000));
+    const speed = solveAutoDriveSpeedStepsPerSec(16000, minAutoDriveDurationSeconds(16000));
     expect(speed).not.toBeNull();
-    expect(speed as number).toBeCloseTo(4000, 6);
+    expect(speed as number).toBeCloseTo(8000, 6);
   });
 
   it('returns null when the duration is below the physical minimum for the distance', () => {
@@ -131,13 +131,13 @@ describe('solveAutoDriveSpeedStepsPerSec', () => {
 
 describe('minAutoDriveDurationSeconds / maxAutoDriveDurationSeconds', () => {
   it('uses the trapezoidal-at-max-speed formula once the cap is reachable', () => {
-    // 4000 steps: peak speed sqrt(8000*4000) = 5656.8 > 4000, so the cap is
-    // reachable and binding.
-    expect(minAutoDriveDurationSeconds(4000)).toBeCloseTo(1.5, 6);
+    // 16000 steps: peak speed sqrt(8000*16000) = 11313.7 > 8000, so the cap is
+    // reachable and binding: 16000/8000 + 8000/8000 = 3s.
+    expect(minAutoDriveDurationSeconds(16000)).toBeCloseTo(3, 6);
   });
 
   it('falls back to the physical (triangular) floor below the cap-relevant distance', () => {
-    // 1000 steps: peak speed sqrt(8000*1000) ≈ 2828 < 4000, so the move
+    // 1000 steps: peak speed sqrt(8000*1000) ≈ 2828 < 8000, so the move
     // never reaches the cap — the floor is the pure acceleration/deceleration
     // profile, not distance/maxSpeed + maxSpeed/acceleration.
     expect(minAutoDriveDurationSeconds(1000)).toBeCloseTo(2 * Math.sqrt(1000 / 8000), 6);
@@ -176,8 +176,8 @@ describe('autoCorrectedDurationText', () => {
   });
 
   it('leaves the exact minimum-boundary duration untouched (not re-formatted)', () => {
-    const exactMin = formatSeconds(minAutoDriveDurationSeconds(4000));
-    expect(autoCorrectedDurationText(exactMin, 4000)).toBeNull();
+    const exactMin = formatSeconds(minAutoDriveDurationSeconds(16000));
+    expect(autoCorrectedDurationText(exactMin, 16000)).toBeNull();
   });
 
   it('returns null when no distance is known yet (nothing to correct to)', () => {
