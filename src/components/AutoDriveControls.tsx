@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -161,6 +161,22 @@ export function ceilToDeciseconds(value: number): number {
 }
 
 /**
+ * qa-report.md (PROJ-3) BUG-19/BUG-24: the duration is auto-corrected when
+ * the range FIRST becomes known (distance goes from unknown to a number) —
+ * not on every later distance change. Setting a new start with an end
+ * already present makes the firmware report an intermediate distance
+ * (new start vs. old end) before SET_END_FROM_DISTANCE lands the preset's
+ * real one; correcting on that intermediate value overwrote a loaded
+ * preset's duration.
+ */
+export function shouldAutoCorrectOnDistanceChange(
+  previousDistanceSteps: number | null,
+  nextDistanceSteps: number | null,
+): boolean {
+  return previousDistanceSteps === null && nextDistanceSteps !== null;
+}
+
+/**
  * qa-report.md (PROJ-3) BUG-16: mirror of ceilToDeciseconds() for the upper
  * bound shown in the "erlaubt: min–max" message — the largest whole
  * decisecond that is still <= `value`.
@@ -317,13 +333,18 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
   // qa-report.md (PROJ-3) BUG-19: AC-11's correction ran only on blur, so a
   // duration that was already too short when the range became known (the
   // default "10" with a long distance) left the triggers disabled with no
-  // message. Apply the same correction whenever the distance changes.
+  // message. Apply the same correction once when the range first becomes
+  // known (BUG-24: not on every later distance change, see
+  // shouldAutoCorrectOnDistanceChange()).
   const knownDistanceSteps = rangeAvailable ? (status.distanceSteps as number) : null;
+  const previousKnownDistanceRef = useRef<number | null>(null);
   useEffect(() => {
-    if (knownDistanceSteps === null) {
+    const previous = previousKnownDistanceRef.current;
+    previousKnownDistanceRef.current = knownDistanceSteps;
+    if (knownDistanceSteps === null || !shouldAutoCorrectOnDistanceChange(previous, knownDistanceSteps)) {
       return;
     }
-    setDurationText(previous => autoCorrectedDurationText(previous, knownDistanceSteps) ?? previous);
+    setDurationText(prev => autoCorrectedDurationText(prev, knownDistanceSteps) ?? prev);
   }, [knownDistanceSteps]);
 
   const handleDurationBlur = (): void => {
