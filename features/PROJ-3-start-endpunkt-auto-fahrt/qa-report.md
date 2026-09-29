@@ -424,3 +424,9 @@ BUG-17, BUG-20..23 (Low). Beobachtung (Spec-konform): die App erhöht die Dauer 
 - [!] Echte Notify-Reihenfolge relativ zur Write-Antwort (entscheidet, wie oft BUG-33 vorkommt), Batching in React Native (BUG-35), Ankunft nach Dauer, Stopp/Disconnect, Optik, Release-Bundle-Secrets, Firmware-Tests — no way to run and probe this project was recorded; Rate Limiting not implemented; Auth/Brute-Force/Credentials-in-URL not applicable.
 
 **Production-Ready: NEIN** — BUG-33 (High, Regression PROJ-4 AC-4). Status: **In Review**.
+
+## Nachtrag 7: AC-12 neu umgesetzt, Nutzer-Test am Gerät (2026-09-30)
+
+- **Umbau `df41c8c`:** automatische Korrektur bei Distanzänderung samt Preset-Schutzphase und 3-s-Timer entfernt. Ist die Dauer zu kurz, leer oder unlesbar, zeigt die App „Zu kurz für diese Strecke — Minimum X s" bzw. „Keine gültige Dauer — Minimum X s" mit Button „Minimum übernehmen"; die Dauer wird außerhalb von AC-11 nie selbst geändert. AC-12 in `spec.md` neu gefasst, `design.md` ersetzt die drei früheren AC-12-Einträge. Damit entfallen die Mechanismen hinter BUG-33 bis BUG-37. 210 Tests grün; Red-Check der Render-Tests: ohne Hinweis 4 rot, mit der alten Auto-Korrektur 8 rot.
+- [x] **Nutzer-Test am Gerät („alles ok", 2026-09-30, Android EB2103, Debug-Build über Metro):** neue Dauer-Anzeige mit „Minimum übernehmen" und Preset-Ablauf (Dauer bleibt). Umfang und Anzahl der Durchläufe nicht protokolliert.
+- **Nicht durch einen unabhängigen `/qa`-Lauf verifiziert:** `df41c8c`. Status bleibt **In Review**.
