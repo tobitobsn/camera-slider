@@ -319,3 +319,18 @@ Eine zweite, unabhängige `qa-engineer`-Re-Verifikation (Auftrag: Code- und Firm
 - [!] Laufzeit aller AC/EC, BUG-16 und BUG-20 am Gerät, physische Richtung, Schrittverluste/Wärme bei 8000 Steps/s, `forceStop()` aus voller Fahrt, Touch-Verhalten — no way to run and probe this project was recorded. Die Host-Simulation belegt die Rampenlogik, nicht das Hardware-Timing.
 
 **Production-Ready: NOT READY — not verified.** Keine Critical/High-Bugs offen (BUG-16 aus Code-Sicht geschlossen). Offen: BUG-20 und BUG-21 (Medium). Der letzte protokollierte Hardware-Test aller PROJ-2-ACs (2026-09-23) liegt vor den Firmware-Änderungen; Freigabe nur über einen neu protokollierten Nutzer-Test. Status: **In Review**.
+
+## Nachtrag 8: Fix BUG-20/22/23 und protokollierter Nutzer-Test am Gerät (2026-09-30)
+
+- **Fix `a763cb3`:** `motorStop()` ruft `forceStop()` nur bei `stepper->isRunning()` (tatsächliche Ursache von BUG-16, behebt BUG-20); `lastJogMillis` wird vor dem Start gesetzt (BUG-23); Kommentare korrigiert. **Doku `8b33168`:** PROJ-2 `design.md` (richtige BUG-16-Ursache, DIR-Umkehr, Zeitstempel), Stack-Pack-Beispiel mit Polarität (BUG-22). Firmware kompiliert und geflasht (`pio run -e esp32dev -t upload`, SUCCESS).
+- **Protokollierter Nutzer-Test** — Checkliste an den Nutzer übergeben, Antwort „alles ok" für alle Punkte. Gerät: Android EB2103 (Debug-Build über Metro), Firmware-Stand `a763cb3`, ohne Neustart zwischen den Punkten:
+  - [x] **AC-1** — Vorwärts/Rückwärts halten fährt in die richtige Richtung — vom Nutzer am Gerät bestätigt, 2026-09-30
+  - [x] **AC-1 / BUG-20** — kurzes Antippen direkt nach dem Verbinden bewegt den Slider sofort — vom Nutzer am Gerät bestätigt, 2026-09-30
+  - [x] **AC-2** — Loslassen stoppt sofort — vom Nutzer am Gerät bestätigt, 2026-09-30
+  - [x] **AC-3** — Regler während des Haltens ändert das Tempo direkt — vom Nutzer am Gerät bestätigt, 2026-09-30
+  - [x] **AC-4** — zweite Taste zusätzlich → Stopp — vom Nutzer am Gerät bestätigt, 2026-09-30
+  - [x] **BUG-16** — Auto-Fahrt und Jog mehrfach im Wechsel, Jog springt jedes Mal an — vom Nutzer am Gerät bestätigt, 2026-09-30
+  - [x] **AC-5** — Bluetooth aus beim Joggen → Slider stoppt eigenständig — vom Nutzer am Gerät bestätigt, 2026-09-30
+  - [x] **AC-6** — App im Hintergrund/geschlossen beim Joggen → Stopp nach etwa 1 s — vom Nutzer am Gerät bestätigt, 2026-09-30
+  - [x] **AC-7** — nicht verbunden → Jog-Tasten nicht bedienbar — vom Nutzer am Gerät bestätigt, 2026-09-30
+- Einschränkung: Anzahl der Durchläufe nicht protokolliert; EC-1 (Finger herausziehen), EC-5 (Reconnect) nicht separat abgefragt. Der Fix `a763cb3` ist noch nicht durch einen unabhängigen `qa-engineer`-Lauf geprüft.
