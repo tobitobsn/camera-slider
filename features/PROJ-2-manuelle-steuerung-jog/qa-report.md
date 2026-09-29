@@ -239,3 +239,30 @@ Eine zweite, unabhängige `qa-engineer`-Re-Verifikation (Auftrag: Code- und Firm
 
 - [!] **BUG-16 — Status zurückgesetzt auf offen (High), NOT VERIFIED ob der committete Fix wirkt.** Verifikation läuft weiter, siehe „Nächster Schritt" oben.
 - **`design.md` noch nicht nachgezogen** (von der Re-Verifikation ebenfalls gefunden): beschreibt BUG-16 weiterhin als durch Write-with-Response verursacht/behoben — nicht mehr aktuell, unabhängig vom Ausgang der laufenden Diagnose.
+
+## Nachtrag 5: Re-Verifikation nach Erhöhung der Höchstgeschwindigkeit 4000 → 8000 Steps/s (2026-09-29)
+
+**Scope (Re-Verifikation):** `git diff 0f08bd1..HEAD -- src firmware/src` (Commits `94ba380`, `5d65f78`). Im Code ändern sich nur `kJogSpeedMaxHz` (`firmware/src/motor.cpp:31`) und der App-Spiegel `MAX_SPEED_STEPS_PER_SEC` (`src/components/AutoDriveControls.tsx:33`); der Rest sind Kommentare, Test-Fixtures und Doku. Ein `qa-engineer`-Lauf mit allen drei Scopes (2 → 3 → 4), eingegrenzt auf den Diff — bewusst nicht der volle Fan-out, weil der Diff faktisch zwei Konstanten sind. Alles andere ist aus dem Bericht oben übernommen: _unverändert seit 2026-09-27, in diesem Lauf nicht neu geprüft_ (AC-4, AC-5, AC-7, EC-1, EC-2, EC-3, EC-5 — ihre Dateien liegen nicht im Diff).
+
+**Test-Suite (einmalig, Owner):** `npm test` → 12 Suites, 193 Tests, 0 Fehler (Log im Scratchpad `suite.log`). Layer `firmware`: `[!] NOT VERIFIED — no test command recorded for layer firmware`.
+
+**Ergebnis:**
+- [x] Mapping 1–100 % → 200–8000 Steps/s, Klemmung, kein Overflow — `motor.cpp:180-190` (Nachbau der Formel in float32: 1 % → 200, 50 % → 4061, 100 % → 8000, Byte 255 → 8000)
+- [x] Toleranz Firmware ↔ App identisch (200/8000, 0,01) — `motor.cpp:30-31,50,450-451` ↔ `AutoDriveControls.tsx:32-33,49,281-282`
+- [x] Zeitraffer-Timeout passt zur neuen Geschwindigkeit — `useTimelapseSequence.ts:74-77`, `motor.cpp:520`
+- [x] AC-1, AC-2, AC-3, AC-6 / EC-4 — Steuerlogik unverändert (`motor.cpp:219-341`); Laufzeit: `[!] NOT VERIFIED — no way to run and probe this project was recorded`
+- [x] Security: Speed-Byte > 100 wird geklemmt (`motor.cpp:181-185`), Opcode-/Längenprüfung unverändert (`ble.cpp:143-233`), keine neuen Secrets
+- [ ] **BUG-18 (High nach Regressions-Regel, Wirkung Medium) — PROJ-3 AC-11:** `autoCorrectedDurationText()` trägt `formatSeconds(minAutoDriveDurationSeconds(d))` ein (`AutoDriveControls.tsx:188`); `formatSeconds` rundet mit `toFixed(1)` auf die nächste Zehntelsekunde statt aufzurunden (`:148-150`). Liegt der gerundete Wert unter dem echten Minimum, bleibt die Dauer ungültig, die Fahrt-Buttons bleiben gesperrt und jedes weitere Verlassen des Felds setzt denselben Wert erneut ein. Die Fehlerklasse existierte schon bei 4000, der Diff verschiebt die betroffenen Distanzen: jetzt z. B. d=4000 → „1.4" (echt 1,414), d=3000 → „1.2", d=9920 → „2.2" (vorher fahrbar). Workaround: Dauer manuell um 0,1 s erhöhen. Die Tests bleiben grün, weil sie nur `text == formatSeconds(min)` prüfen, nicht die Fahrbarkeit. Fix gehört in `/build` (aufrunden), Bezug: PROJ-3 BUG-4 (Rundung in der Fehlermeldung).
+- [ ] BUG-19 (Low): veraltete Kommentare — `AutoDriveControls.tsx:92` („= 2000 steps" → 8000), `useTimelapseSequence.test.ts:305-307` (Werte 13000/18000/30500 → 7250/12250/18500 ms), `AutoDriveControls.test.ts:107-111` (Aussage „must reject" stimmt bei Deckel 8000 nicht mehr).
+- BUG-16 (High, offen): vom Diff nicht berührt (`motorJog()`/`motorStop()`/`forceStop()` unverändert), bleibt offen.
+
+**Nebenwirkungen, kein Verstoß gegen ein AC (zur Kenntnis):**
+- Der Standardwert 50 % fährt jetzt ca. 4061 statt 2081 Steps/s (etwa doppelt so schnell).
+- Der Watchdog-Nachlauf (AC-6, 1 s) beträgt bei voller Geschwindigkeit jetzt bis ca. 50 mm statt 25 mm (8000 Steps/s ÷ 160 Steps/mm); der Slider hat keine Endanschläge.
+
+**Nicht verifiziert in diesem Lauf:**
+- [!] Motor bei 8000 Steps/s (Schrittverluste, StealthChop-Drehmoment, Wärme, ungebremster `forceStop()` aus voller Fahrt) — no way to run and probe this project was recorded. Der Nutzer-Test mit 6000 und 8000 („soweit funktioniert's", 2026-09-29) ist eine Aussage im Chat, kein protokollierter Testlauf.
+- [!] Settle-Pause von 400 ms (`useTimelapseSequence.ts:87`) bei schnelleren Zeitraffer-Schritten — Hardware.
+- [!] Laufzeit AC-1..7, EC-1..5, PROJ-3/4/5 an echter Hardware.
+
+**Production-Ready: NEIN** — BUG-16 (High) ist weiterhin offen und BUG-18 (PROJ-3 AC-11) ist neu; zusätzlich Laufzeit nicht verifiziert. Status: **In Review**.
