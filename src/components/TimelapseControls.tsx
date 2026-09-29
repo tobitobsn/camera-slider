@@ -186,10 +186,6 @@ export function TimelapseControls(props: TimelapseControlsProps): React.JSX.Elem
           <Camera
             device={cameraDevice}
             style={StyleSheet.absoluteFill}
-            // Android: 'compatible' renders through a TextureView instead of
-            // a SurfaceView (own window layer, not z-ordered by the
-            // ScrollView).
-            implementationMode="compatible"
             isActive={hasPermission}
             outputs={[photoOutput]}
           />
