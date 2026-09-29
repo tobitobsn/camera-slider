@@ -243,6 +243,19 @@ void motorJog(JogDirection direction, uint8_t speedPercent) {
   // it before (re-)issuing whichever of those this call needs.
   stepper->setSpeedInHz(speedPercentToStepsPerSecond(speedPercent));
 
+  // qa-report.md BUG-16: jogRunning was only ever cleared by motorStop(), so
+  // any way the motor ended up idle without a motorStop() — most notably a
+  // moveTo() (AUTO_DRIVE / TIMELAPSE_MOVE) superseding a continuous run that
+  // was still flagged as running, then arriving — left jogRunning true on an
+  // idle stepper. Every following heartbeat then took the "already running"
+  // branch below (applySpeedAcceleration() on a motor that isn't moving) and
+  // jog stayed dead in that direction until an unrelated STOP. The flag is
+  // therefore never trusted over the stepper itself: if it says running but
+  // the stepper is idle, start fresh.
+  if (jogRunning && !stepper->isRunning()) {
+    jogRunning = false;
+  }
+
   const bool alreadyRunningSameDirection =
       jogRunning && jogRunningDirection == direction;
 
@@ -470,6 +483,9 @@ void motorAutoDrive(JogDirection direction, uint16_t durationDeciseconds) {
   // active once the stepper can possibly start running.
   autoDriveStartMillis = millis();
   autoDriving = true;
+  // moveTo() supersedes any continuous jog run (BUG-16): the next jog must
+  // start fresh, not think it is still "already running".
+  jogRunning = false;
   stepper->moveTo(targetPosition, /*blocking=*/false);
 }
 
@@ -532,6 +548,7 @@ void motorTimelapseMoveTo(bool endIsAfterStart, uint32_t distanceSteps) {
   // stepper can possibly start running.
   timelapseMoveStartMillis = millis();
   timelapseMoving = true;
+  jogRunning = false;  // BUG-16, same as motorAutoDrive()
   stepper->moveTo(targetPosition, /*blocking=*/false);
 }
 
