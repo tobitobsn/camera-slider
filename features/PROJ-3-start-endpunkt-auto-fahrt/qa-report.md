@@ -263,3 +263,50 @@ Nach dem Re-Verifikations-Zyklus (Firmware neu geflasht ab Commit `f188420`) hat
 - [!] NOT VERIFIED — AC-6s Rand-Toleranz (0,01 Steps/s) auf exakten Grenzwerten, EC-1/EC-3/EC-4 im Detail, sowie die Mehrgeräte-BLE-Szenarien (BUG-6/BUG-7/BOOT-Taster-Reset) — nicht Teil dieses fokussierten Tests, keine bekannten Probleme aus dem Code-Review
 
 **Production Ready: JA** — kein Critical/High-Bug offen, die sicherheitskritischen Fixes (BUG-1, BUG-5) sind auf echter Hardware bestätigt.
+
+## Nachtrag: Re-Verifikation nach 8000 Steps/s, BUG-18-Fix, DIR-Umkehr (2026-09-29)
+
+**Scope: voller Lauf, drei `qa-engineer`-Lanes (Acceptance, Security, Regression).** Kein reiner Diff-Lauf, weil der letzte Report (`dc9bffa`, 2026-09-24) älter ist als die Spec-Verfeinerung von AC-11 (2026-09-27) und die Änderungen an geteiltem Code (`kJogSpeedMaxHz`, DIR-Polarität) alle Nachbar-Features berühren. `probe.kind: none` (App und Layer `firmware`) — jede Laufzeit-/Hardware-Prüfung ist `[!] NOT VERIFIED — no way to run and probe this project was recorded`.
+
+**Test-Suite (einmalig, Owner):** `npm test` → 12 Suites, 195 Tests, 0 Fehler (Log `suite3.log` im Scratchpad). Layer `firmware`: `[!] NOT VERIFIED — no test command recorded for layer firmware`.
+
+### Acceptance Criteria
+- [x] **AC-1, AC-2** — Code + Render-Probe: `motor.cpp:361-378`, `ble.cpp:160-173`, `AutoDriveControls.tsx:375-396`; Hardware `[!]`
+- [x] **AC-3, AC-4** — Code + Render-Probe: Kodierung `client.ts:294-304`, Richtung/Ist-Position `motor.cpp:408-418`, Zeit inkl. Rampe `motor.cpp:447-465`; Ankunft nach Dauer auf Hardware `[!]`
+- [x] **AC-5** — Code + Probe (Stopp-Button nur bei `driving`), `ble.cpp:189-195`, `motor.cpp:311-336`; „sofort" auf Hardware `[!]`
+- [ ] **AC-6 — teilweise FAIL (BUG-16, Medium):** zu lange Dauer bleibt stehen und wird gemeldet (Probe: `'100'` bei 1000 Steps → Meldung, Auslöser aus). Die Meldung nennt aber den erlaubten Bereich mit `toFixed(1)` (`AutoDriveControls.tsx:519-523`) — Untergrenze gerundet statt aufgerundet, Obergrenze gerundet statt abgerundet. Beispiel: 1000 Steps zeigt „0.7–5.0 s", 0.7 wird zu 0.8 korrigiert; 1009 Steps zeigt „0.7–5.1 s", 5.1 wird abgelehnt (bei ~50 % der Distanzen falsch, Simulation über 1–160000 Steps). Identisch mit der Klasse des früheren BUG-4. Fix: `ceilToDeciseconds` für die Untergrenze, `floor` für die Obergrenze.
+- [x] **AC-7, AC-8, AC-9** — Render-Probe + Code (`AutoDriveControls.tsx:319-329`, `motor.cpp:397-418`, `RootScreen.tsx:118-119`); Hardware für AC-9 `[!]`
+- [x] **AC-10** — Code-Garantie `ble.cpp:125-127`; Laufzeit `[!]` (Hardware-Nachweis vom 2026-09-24 im Erstlauf)
+- [x] **AC-11 für Distanzen ≥ 35 Steps** — `ceilToDeciseconds` (`AutoDriveControls.tsx:159-161`), Simulation über 1–160000 Steps: der eingetragene Wert ist immer gültig, die Firmware (float32) lehnt keinen ab; 195 Tests grün.
+- [ ] **AC-11 für 1–14 und 21–34 Steps — FAIL (BUG-17, Low):** in 0,1-s-Schritten gibt es keine gültige Dauer; die Korrektur trägt „0.1"/„0.2" ein, danach erscheint „erlaubt: 0.1–0.1 s". Höchstens ~0,2 mm Distanz, praktisch irrelevant.
+
+### Edge Cases
+- [x] **EC-1** (Distanz 0) — Probe + `motor.cpp:423-426`
+- [x] **EC-2** — Garantie `motor.cpp:397-398` (Ablehnung bei `autoDriving || isRunning()`), serielle Verarbeitung auf dem NimBLE-Host-Task; Race nicht provoziert
+- [ ] **EC-3 — Lücke (BUG-18, Low, aus Code abgeleitet):** `motorClearPoints()` nur beim Übergang 0→1 verbundene Zentrale (`ble.cpp:87-89`); besteht beim Reconnect noch ein zweiter Link (alter Link vor dem Supervision-Timeout, fremdes Gerät), bleiben Punkte erhalten. Keine Sicherheitsfolge.
+- [x] **EC-4** — Code `motor.cpp:342-350, 495-509`; Laufzeit `[!]`
+
+### Weitere Befunde
+- [ ] **BUG-15 (High, Regression PROJ-4): DIR-Umkehr `5feb442` dreht die physische Richtung gespeicherter Presets.** Ein Preset speichert `endIsAfterStart` in Zählrichtung (`usePresets.ts:28-35`, `AutoDriveControls.tsx:462-467`); `setDirectionPin(kDirPin, false)` (`motor.cpp:216`) kehrt um, welche physische Richtung „steigende Schritte" ist. Ohne Migration/Versionsfeld (`STORAGE_KEY` unverändert) legt „Als Start setzen" nach dem Laden eines **vor dem 2026-09-29 gespeicherten** Presets das Ende auf die Gegenseite; der Slider hat keine Endanschläge (`kMaxPlausibleDistanceSteps` prüft nur den Betrag). Workaround: alte Presets löschen und neu speichern. Innerhalb einer Sitzung sind Start/Ende/`moveTo`/Zeitraffer konsistent (`motor.cpp:409-418, 532-534`).
+- [ ] **BUG-19 (Medium, UE-1):** zu kurze Dauer ohne Blur (Default „10", Wert von vor dem Setzen neuer Punkte) deaktiviert die Auslöser stumm, Statuszeile zeigt „Bereit". Repro (Probe): Distanz 160000, Feld unberührt → `disabled=true`, keine Meldung. Betrifft jede Distanz über ~72.000 Steps (~450 mm). Workaround: Feld antippen und verlassen.
+- [ ] Low: **BUG-20** Fehlermeldung erscheint schon beim Tippen, nicht erst beim Verlassen des Felds (`AutoDriveControls.tsx:302-306`, AC-6-Wortlaut); **BUG-21** `motorSetStart/End` ohne `autoDriving`-Wache (`motor.cpp:365, 373`, nur theoretisches Zeitfenster) und `moveTo()`-Rückgabewert verworfen (`motor.cpp:492`, bereits BUG-14); **BUG-22** Sicherheits-Doku irreführend: `platformio.ini:27` nennt späteres Pairing „harmless", der BUG-7-Fix lehnt aber nur das Speichern des Bonds ab, der verschlüsselte Link kommt trotzdem zustande (`ble_sm.c:1027-1033`, Just-Works-Entscheidung unverändert); **BUG-23** Doku/Kommentar-Drift: `AutoDriveControls.tsx:92` („= 2000 steps" → 8000), `design.md:64-69` (Status 5 Byte statt 6), `spec.md` Technical Requirements (`speed = distance/duration` statt Rampen-Formel), `docs/stacks/firmware-esp32-tmc2209.md:79` (`setDirectionPin` ohne Polarität) und `:113-114` (Opcodes „noch nicht festgelegt"); App: Dauer ohne uint16-Obergrenze (`client.ts:294-297`, physisch unerreichbar) und `Number()` nimmt Hex/Exponent an.
+- **Bekannte Bugs unverändert, nicht verschlechtert:** BUG-8, BUG-12, BUG-13, BUG-14, BUG-6-Restfall.
+
+### Security (Red-Team)
+- [x] Verschlüsselungspflicht `WRITE_ENC` für beide Write-Arten (`ble.cpp:377-379`)
+- [x] Längenprüfung vor jedem Zugriff (`ble.cpp:143-233`), Dauer 0 abgelehnt (`motor.cpp:398`), Geschwindigkeit 200–8000 (`motor.cpp:466-470`); float32-Nachrechnung aller 65 535 Dauerwerte × 19 Distanzen: 0 NaN/Inf, kommandierter Wert immer in 200–8000
+- [x] Keine Secrets in Quelle (`git grep`); Release-Bundle (Stand 2026-09-27, nicht aktueller Stand) ohne Treffer
+- [x] Status-Notify enthält keine sensiblen Daten (6 Byte, `ble.cpp:54-69`)
+- [!] Authorization, Brute Force, Enumeration, Credentials in URLs — not applicable (kein Login/keine HTTP-Oberfläche); Rate Limiting — not implemented (optional); alle Laufzeit-Checks — no way to run and probe this project was recorded
+- **Zusammenfassung:** 4 Checks verifiziert, mehrere NOT VERIFIED (Laufzeit/nicht anwendbar). Just-Works-Risiko (fremdes Gerät kann alle Opcodes schreiben) bleibt die akzeptierte Grenze aus PROJ-2.
+
+### Regression
+- [x] Status-Characteristic 6 Byte App↔Firmware (`ble.cpp:54-69`, `client.ts:409-445`), Opcodes 0x01–0x07 und Längen deckungsgleich, gemeinsamer Bereich 200–8000 in Jog/Auto-Fahrt/Zeitraffer, gespeicherte Preset-Dauern bleiben gültig (Bereich nur breiter), Zustandsflags `jogRunning/autoDriving/timelapseMoving` konsistent (`motor.cpp:239, 258-260, 293-305, 491`), PROJ-1-Verbindungsfluss unberührt (nur Kommentar-Diff)
+- [x] App gültig / Firmware ablehnend: 0 Fälle (Simulation). Umgekehrt 18 Fälle an der 200-Steps/s-Grenze — sichere Richtung.
+- [!] E2E-Suite: keine vorhanden. Layer firmware ohne Test.
+
+### Nicht verifiziert in diesem Lauf
+- [!] Alle Laufzeit-/Hardware-Ergebnisse (AC-1..5, AC-9, AC-10, EC-2..4 real): no way to run and probe this project was recorded — inklusive Fahrt und Stopp bei 8000 Steps/s (Schrittverluste, `forceStop` aus voller Fahrt) und die physische Richtung nach der DIR-Umkehr
+- [!] Optik/Layout (Deaktiviert-Darstellung, Fehlerfarbe), Firmware-Tests
+
+**Production-Ready: NEIN.** BUG-15 ist High (Regression PROJ-4, gespeicherte Presets nach der DIR-Umkehr), dazu BUG-16 und BUG-19 (Medium) und Laufzeit nicht verifiziert. Status: **In Review**.
