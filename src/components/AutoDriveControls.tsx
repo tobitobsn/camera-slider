@@ -29,6 +29,9 @@ import { usePresets, type Preset } from './usePresets';
  * firmware/src/motor.cpp's kJogSpeedMinHz (200.0f) / kJogSpeedMaxHz (8000.0f),
  * which spec.md's Technical Requirements explicitly call out as shared.
  */
+/** How long after SET_END_FROM_DISTANCE the AC-12 auto-correction stays suppressed at most. */
+const PRESET_APPLY_GUARD_MS = 3000;
+
 const MIN_SPEED_STEPS_PER_SEC = 200;
 const MAX_SPEED_STEPS_PER_SEC = 8000;
 
@@ -161,19 +164,29 @@ export function ceilToDeciseconds(value: number): number {
 }
 
 /**
- * qa-report.md (PROJ-3) BUG-19/BUG-24: the duration is auto-corrected when
- * the range FIRST becomes known (distance goes from unknown to a number) —
- * not on every later distance change. Setting a new start with an end
- * already present makes the firmware report an intermediate distance
- * (new start vs. old end) before SET_END_FROM_DISTANCE lands the preset's
- * real one; correcting on that intermediate value overwrote a loaded
- * preset's duration.
+ * qa-report.md (PROJ-3) BUG-19/24/27/28: whether the duration should be
+ * auto-corrected (AC-12) when the known distance changes.
+ *
+ * Yes for every change to a newly known distance made by the user — first
+ * time both points exist, or a later "Als Start/Ende setzen" — so a too-short
+ * duration never leaves the triggers silently locked (BUG-28). No while a
+ * preset is being applied (`presetTargetDistanceSteps !== null`, from
+ * "Als Start setzen" until the preset's own distance arrives): setting the
+ * start makes the firmware report an intermediate distance (new start vs.
+ * old end) before SET_END_FROM_DISTANCE lands the preset's real one, and
+ * correcting on that intermediate value overwrote the preset's duration
+ * (BUG-24/27).
  */
 export function shouldAutoCorrectOnDistanceChange(
   previousDistanceSteps: number | null,
   nextDistanceSteps: number | null,
+  presetTargetDistanceSteps: number | null,
 ): boolean {
-  return previousDistanceSteps === null && nextDistanceSteps !== null;
+  return (
+    presetTargetDistanceSteps === null &&
+    nextDistanceSteps !== null &&
+    nextDistanceSteps !== previousDistanceSteps
+  );
 }
 
 /**
@@ -331,17 +344,26 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
     requestedSpeedStepsPerSec < MIN_SPEED_STEPS_PER_SEC - AUTO_DRIVE_SPEED_TOLERANCE_STEPS_PER_SEC;
 
   // qa-report.md (PROJ-3) BUG-19: AC-11's correction ran only on blur, so a
-  // duration that was already too short when the range became known (the
+  // duration that was already too short when the distance became known (the
   // default "10" with a long distance) left the triggers disabled with no
-  // message. Apply the same correction once when the range first becomes
-  // known (BUG-24: not on every later distance change, see
+  // message. Apply the same correction whenever the known distance changes,
+  // except while a preset is being applied (see
   // shouldAutoCorrectOnDistanceChange()).
   const knownDistanceSteps = rangeAvailable ? (status.distanceSteps as number) : null;
   const previousKnownDistanceRef = useRef<number | null>(null);
+  const presetTargetDistanceRef = useRef<number | null>(null);
   useEffect(() => {
     const previous = previousKnownDistanceRef.current;
     previousKnownDistanceRef.current = knownDistanceSteps;
-    if (knownDistanceSteps === null || !shouldAutoCorrectOnDistanceChange(previous, knownDistanceSteps)) {
+    const presetTarget = presetTargetDistanceRef.current;
+    if (presetTarget !== null && knownDistanceSteps === presetTarget) {
+      // The preset's own distance arrived: the apply is done.
+      presetTargetDistanceRef.current = null;
+    }
+    if (
+      knownDistanceSteps === null ||
+      !shouldAutoCorrectOnDistanceChange(previous, knownDistanceSteps, presetTarget)
+    ) {
       return;
     }
     setDurationText(prev => autoCorrectedDurationText(prev, knownDistanceSteps) ?? prev);
@@ -415,6 +437,11 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
   // that decision rather than shipping something that fails more often
   // than the bug it was meant to close.
   const handleSetStart = async (): Promise<void> => {
+    if (loadedPreset !== null) {
+      // Suppress the AC-12 auto-correction until the preset's own distance
+      // arrives (BUG-27); safety net below in case it never does.
+      presetTargetDistanceRef.current = loadedPreset.distanceSteps;
+    }
     try {
       await sendSetStartCommand(device);
       if (loadedPreset !== null) {
@@ -423,10 +450,14 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
           loadedPreset.endIsAfterStart,
           loadedPreset.distanceSteps,
         );
+        setTimeout(() => {
+          presetTargetDistanceRef.current = null;
+        }, PRESET_APPLY_GUARD_MS);
       }
     } catch {
       // fire-and-forget, matching this file's existing .catch(() => {})
       // convention on every other handler
+      presetTargetDistanceRef.current = null;
     }
   };
 
@@ -434,6 +465,7 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
     // EC-3: a deliberate manual end-set always wins over a stale
     // preset-derived one, regardless of whether the write itself succeeds.
     setLoadedPreset(null);
+    presetTargetDistanceRef.current = null;
     sendSetEndCommand(device).catch(() => {});
   };
 
