@@ -56,6 +56,7 @@ jest.mock('./useSliderStatus', () => {
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AutoDriveControls } from './AutoDriveControls';
+import { sendSetEndFromDistanceCommand } from '../ble/client';
 
 const flush = () => new Promise<void>(r => setImmediate(() => r()));
 
@@ -203,5 +204,100 @@ describe('preset flow keeps its duration (BUG-24/27)', () => {
     expect(value(r)).toBe('3.5');
     await notify(both(160000)); // user sets a new, far end point
     expect(value(r)).toBe('21.0');
+  });
+});
+
+describe('preset apply guard ends cleanly (BUG-29/30/31/32)', () => {
+  const type = (r: ReactTestRenderer.ReactTestRenderer, text: string) =>
+    act(async () => {
+      const input = r.root.findByType(TextInput);
+      input.props.onChangeText(text);
+      input.props.onBlur();
+      await flush();
+    });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('BUG-29: a hand-typed too-short duration is caught up when the preset distance arrives', async () => {
+    await seed([SCHNELL]);
+    const r = await mount();
+    await press(r, 'Schnell');
+    await type(r, '2'); // no distance known yet -> stays "2"
+    expect(value(r)).toBe('2');
+    await press(r, 'Als Start setzen');
+    await notify({ ...both(0), distanceSteps: null, hasEnd: false });
+    await notify(both(20000)); // preset distance arrives, minimum 3.5 s
+    expect(value(r)).toBe('3.5');
+    expect(pressable(r, 'Start → Ende').props.disabled).toBe(false);
+  });
+
+  it('BUG-30: preset distance never arrives -> after the safety timeout the current distance is corrected', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
+    await seed([KURZ]);
+    const r = await mount();
+    await notify(both(100000));
+    await press(r, 'Kurz');
+    expect(value(r)).toBe('1.0');
+    await press(r, 'Als Start setzen');
+    await notify(both(50000)); // intermediate, the preset's 2000 never follows
+    expect(value(r)).toBe('1.0'); // suppressed during the apply phase
+    await act(async () => {
+      jest.advanceTimersByTime(3100);
+    });
+    expect(value(r)).toBe('7.3'); // caught up against 50000 steps
+    expect(pressable(r, 'Start → Ende').props.disabled).toBe(false);
+  });
+
+  it('BUG-30: a failed SET_END_FROM_DISTANCE write also catches up', async () => {
+    await seed([KURZ]);
+    const r = await mount();
+    await notify(both(100000));
+    await press(r, 'Kurz');
+    // the intermediate distance arrives while the guard is up, then the write fails
+    (sendSetEndFromDistanceCommand as jest.Mock).mockImplementationOnce(async () => {
+      mockSetStatus(both(50000));
+      throw new Error('write failed');
+    });
+    await press(r, 'Als Start setzen');
+    // caught up: no longer the too-short "1.0", and the trigger is usable
+    expect(value(r)).not.toBe('1.0');
+    expect(pressable(r, 'Start → Ende').props.disabled).toBe(false);
+  });
+
+  it('BUG-31/32: a new apply cancels the old guard timer, and unmount cancels the pending one', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
+    const setSpy = jest.spyOn(globalThis, 'setTimeout');
+    const clearSpy = jest.spyOn(globalThis, 'clearTimeout');
+    await seed([SCHNELL, KURZ]);
+    const r = await mount();
+    await notify(both(100000));
+    await press(r, 'Schnell');
+    await press(r, 'Als Start setzen');
+    const guardTimerIds = () =>
+      setSpy.mock.calls
+        .map((call: unknown[], i: number) => (call[1] === 3000 ? setSpy.mock.results[i].value : undefined))
+        .filter(id => id !== undefined);
+    expect(guardTimerIds()).toHaveLength(1);
+    const firstId = guardTimerIds()[0];
+    await act(async () => {
+      jest.advanceTimersByTime(2800);
+    });
+    await press(r, 'Kurz');
+    await press(r, 'Als Start setzen'); // must cancel the first timer
+    expect(clearSpy).toHaveBeenCalledWith(firstId);
+    await act(async () => {
+      jest.advanceTimersByTime(300); // the first timer would have fired here
+    });
+    await notify(both(30000)); // intermediate of the second apply: still suppressed
+    expect(value(r)).toBe('1.0');
+    const secondId = guardTimerIds()[1];
+    await act(async () => {
+      r.unmount();
+    });
+    expect(clearSpy).toHaveBeenCalledWith(secondId);
+    setSpy.mockRestore();
+    clearSpy.mockRestore();
   });
 });

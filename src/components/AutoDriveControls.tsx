@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -352,13 +352,41 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
   const knownDistanceSteps = rangeAvailable ? (status.distanceSteps as number) : null;
   const previousKnownDistanceRef = useRef<number | null>(null);
   const presetTargetDistanceRef = useRef<number | null>(null);
+  const presetGuardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearPresetGuard = useCallback((): void => {
+    presetTargetDistanceRef.current = null;
+    if (presetGuardTimerRef.current !== null) {
+      clearTimeout(presetGuardTimerRef.current);
+      presetGuardTimerRef.current = null;
+    }
+  }, []);
+
+  // The apply phase is over (preset distance arrived, write failed, or the
+  // safety timeout ran out). qa-report.md BUG-29/30: the suppressed
+  // correction must be caught up here against the distance that is known NOW
+  // — otherwise a hand-typed duration that is too short for the preset's
+  // distance, or a preset whose distance never arrived, leaves the triggers
+  // silently locked. A preset's own duration is always valid for its own
+  // distance, so this never touches it.
+  const endPresetApply = useCallback((): void => {
+    clearPresetGuard();
+    const current = previousKnownDistanceRef.current;
+    if (current !== null) {
+      setDurationText(prev => autoCorrectedDurationText(prev, current) ?? prev);
+    }
+  }, [clearPresetGuard]);
+
+  useEffect(() => clearPresetGuard, [clearPresetGuard]);
+
   useEffect(() => {
     const previous = previousKnownDistanceRef.current;
     previousKnownDistanceRef.current = knownDistanceSteps;
     const presetTarget = presetTargetDistanceRef.current;
     if (presetTarget !== null && knownDistanceSteps === presetTarget) {
       // The preset's own distance arrived: the apply is done.
-      presetTargetDistanceRef.current = null;
+      endPresetApply();
+      return;
     }
     if (
       knownDistanceSteps === null ||
@@ -367,7 +395,7 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
       return;
     }
     setDurationText(prev => autoCorrectedDurationText(prev, knownDistanceSteps) ?? prev);
-  }, [knownDistanceSteps]);
+  }, [knownDistanceSteps, endPresetApply]);
 
   const handleDurationBlur = (): void => {
     const corrected = autoCorrectedDurationText(durationText, status.distanceSteps);
@@ -439,7 +467,9 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
   const handleSetStart = async (): Promise<void> => {
     if (loadedPreset !== null) {
       // Suppress the AC-12 auto-correction until the preset's own distance
-      // arrives (BUG-27); safety net below in case it never does.
+      // arrives (BUG-27); a fresh apply replaces any earlier guard/timer
+      // (BUG-31).
+      clearPresetGuard();
       presetTargetDistanceRef.current = loadedPreset.distanceSteps;
     }
     try {
@@ -450,14 +480,16 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
           loadedPreset.endIsAfterStart,
           loadedPreset.distanceSteps,
         );
-        setTimeout(() => {
-          presetTargetDistanceRef.current = null;
-        }, PRESET_APPLY_GUARD_MS);
+        // Safety net if the preset's distance never shows up (the firmware
+        // silently rejects SET_END_FROM_DISTANCE in some states).
+        presetGuardTimerRef.current = setTimeout(endPresetApply, PRESET_APPLY_GUARD_MS);
       }
     } catch {
       // fire-and-forget, matching this file's existing .catch(() => {})
       // convention on every other handler
-      presetTargetDistanceRef.current = null;
+      if (loadedPreset !== null) {
+        endPresetApply();
+      }
     }
   };
 
@@ -465,7 +497,7 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
     // EC-3: a deliberate manual end-set always wins over a stale
     // preset-derived one, regardless of whether the write itself succeeds.
     setLoadedPreset(null);
-    presetTargetDistanceRef.current = null;
+    clearPresetGuard();
     sendSetEndCommand(device).catch(() => {});
   };
 
