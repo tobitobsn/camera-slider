@@ -150,6 +150,17 @@ export function formatSeconds(value: number): string {
 }
 
 /**
+ * qa-report.md BUG-18: the smallest whole-decisecond duration that is still
+ * >= `value`. formatSeconds() rounds to the NEAREST tenth, so the minimum
+ * duration for a distance (e.g. 1.414s) came out as "1.4" — below the real
+ * minimum, i.e. an invalid duration. The tiny epsilon keeps an exact
+ * boundary (3.0s) from being bumped a full tenth by float noise.
+ */
+export function ceilToDeciseconds(value: number): number {
+  return Math.ceil(value * 10 - 1e-9) / 10;
+}
+
+/**
  * AC-11 (spec.md, refined 2026-09-27): what the Dauer field's onBlur handler
  * should replace `durationText` with, or null to leave it untouched.
  *
@@ -185,7 +196,7 @@ export function autoCorrectedDurationText(
     requestedSpeedStepsPerSec === null ||
     requestedSpeedStepsPerSec > MAX_SPEED_STEPS_PER_SEC + AUTO_DRIVE_SPEED_TOLERANCE_STEPS_PER_SEC;
 
-  return tooShortOrUnusable ? formatSeconds(minAutoDriveDurationSeconds(distanceSteps)) : null;
+  return tooShortOrUnusable ? formatSeconds(ceilToDeciseconds(minAutoDriveDurationSeconds(distanceSteps))) : null;
 }
 
 export function statusLabelFor(status: SliderStatus): string {

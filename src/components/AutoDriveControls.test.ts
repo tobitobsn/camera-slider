@@ -6,6 +6,7 @@ import {
   parseDurationSeconds,
   solveAutoDriveSpeedStepsPerSec,
   statusLabelFor,
+  ceilToDeciseconds,
 } from './AutoDriveControls';
 import type { SliderStatus } from '../ble/client';
 
@@ -150,20 +151,16 @@ describe('minAutoDriveDurationSeconds / maxAutoDriveDurationSeconds', () => {
 
 describe('autoCorrectedDurationText', () => {
   it('replaces an empty field with the minimum duration', () => {
-    expect(autoCorrectedDurationText('', 4000)).toBe(formatSeconds(minAutoDriveDurationSeconds(4000)));
+    expect(autoCorrectedDurationText('', 4000)).toBe('1.5');
   });
 
   it('replaces unparseable text with the minimum duration', () => {
-    expect(autoCorrectedDurationText('abc', 4000)).toBe(
-      formatSeconds(minAutoDriveDurationSeconds(4000)),
-    );
+    expect(autoCorrectedDurationText('abc', 4000)).toBe('1.5');
   });
 
   it('replaces a too-short duration (speed above the cap) with the minimum duration', () => {
     // 4000 steps at 1s would need far more than 4000 steps/s.
-    expect(autoCorrectedDurationText('1', 4000)).toBe(
-      formatSeconds(minAutoDriveDurationSeconds(4000)),
-    );
+    expect(autoCorrectedDurationText('1', 4000)).toBe('1.5');
   });
 
   it('leaves a too-long duration (speed below the floor) untouched', () => {
@@ -173,6 +170,24 @@ describe('autoCorrectedDurationText', () => {
 
   it('leaves an already-valid duration untouched', () => {
     expect(autoCorrectedDurationText('10', 4000)).toBeNull();
+  });
+
+  it('always fills in a duration that is actually drivable (BUG-18: nearest-tenth rounding went below the minimum)', () => {
+    // 4000 steps: minimum is 1.414s — "1.4" would be invalid, "1.5" is the
+    // smallest valid tenth. 3000 and 9920 were the other reported cases.
+    for (const distance of [3000, 4000, 9920, 12080, 777, 5000, 100000]) {
+      const text = autoCorrectedDurationText('', distance) as string;
+      const seconds = Number(text);
+      expect(solveAutoDriveSpeedStepsPerSec(distance, seconds)).not.toBeNull();
+      // and it is then left alone by a second blur
+      expect(autoCorrectedDurationText(text, distance)).toBeNull();
+    }
+  });
+
+  it('ceilToDeciseconds rounds up but keeps an exact tenth', () => {
+    expect(ceilToDeciseconds(1.414)).toBe(1.5);
+    expect(ceilToDeciseconds(3)).toBe(3);
+    expect(ceilToDeciseconds(2.2000000001)).toBe(2.3);
   });
 
   it('leaves the exact minimum-boundary duration untouched (not re-formatted)', () => {
