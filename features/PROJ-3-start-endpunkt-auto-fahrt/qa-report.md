@@ -338,3 +338,28 @@ Nach dem Re-Verifikations-Zyklus (Firmware neu geflasht ab Commit `f188420`) hat
 - [!] Ob Presets aus dem Zeitfenster von BUG-25 existieren; Release-Bundle nicht neu gebaut; Optik/Layout
 
 **Production-Ready: NEIN** — BUG-24 (High, Regression) ist offen; BUG-15/16/19 sind geschlossen. Status: **In Review**.
+
+## Nachtrag 3: Re-Verifikation des BUG-24-Fixes (2026-09-30)
+
+**Scope (Re-Verifikation):** `git diff d105b00..HEAD -- src features/PROJ-3-start-endpunkt-auto-fahrt/spec.md` (Commit `fd34882`): `AutoDriveControls.tsx` (+Test), `spec.md` (AC-12 präzisiert). Ein `qa-engineer`-Lauf mit allen drei Scopes. Alles andere: _unverändert seit 2026-09-29/30, in diesem Lauf nicht neu geprüft (AC-1..5, AC-7..10, EC-1..4 — Diff berührt sie nicht)_. `probe.kind: none` — Laufzeit/Hardware `[!] NOT VERIFIED — no way to run and probe this project was recorded`.
+
+**Test-Suite (einmalig, Owner):** `npm test` → 12 Suites, 200 Tests, 0 Fehler (`suite5.log`). `npx eslint` auf die geänderten Dateien: exit 0. Layer `firmware`: `[!] NOT VERIFIED — no test command recorded for layer firmware`.
+
+### Ergebnis
+- [x] **BUG-24, Hauptpfad geschlossen** — Render-Probe: Bereich 100000 → Preset „Schnell" (20000 Steps, 3.5 s) → „Als Start setzen" bei 50000 → Zwischen-Notify → bleibt „3.5"; gesendet wird `setStart`, `endFromDist(true, 20000)`, `auto(startToEnd, 3.5)` (`AutoDriveControls.tsx:172-177, 340-348`). Auch: Zwischen-Distanz 0, Preset ohne vorhandenen Endpunkt, React StrictMode (Doppel-Effekt idempotent).
+- [x] **BUG-19/AC-12, erste Distanz** — Standardwert „10" + Distanz 160000 → „21.0", Auslöser aktiv; leer → „12.3" (90000); „abc" → „11.0" (80000); lange Dauer „900" bleibt (Probe, `:340-348`).
+- [x] **AC-6, AC-11 unverändert korrekt** — „600" bleibt, Meldung „13.5–500.0 s"; „1" → „13.5" nach Blur; Distanz 1414 + leer → „0.9" (`:159-161, 184-186, 224`).
+- [x] **PROJ-5** — `useTimelapseSequence.ts:28` importiert nur das unveränderte `minAutoDriveDurationSeconds`; mit `disabled=true` bleibt das Feld gesperrt (`RootScreen.tsx:122`, Probe).
+- [x] **Security** — Diff fügt nur `useRef` und eine reine Funktion hinzu, keine neuen Eingabepfade/Secrets (`git diff d105b00..HEAD`).
+
+### Offene / neue Bugs
+- [ ] **BUG-27 (High) — Restpfad von BUG-24:** Ist vor dem Laden eines Presets **nur ein Endpunkt** gesetzt (kein Start), wird die Zwischen-Distanz nach „Als Start setzen" zur _ersten_ bekannten Distanz; die Korrektur überschreibt die Preset-Dauer. Repro (Probe C): Notify `hasEnd=true, hasStart=false` (bei 100000) → Preset „Schnell" laden („3.5") → „Als Start setzen" bei 50000 → Zwischen-Notify → „7.3" → End-Notify 20000 → bleibt „7.3"; „Start → Ende" sendet 7.3 statt 3.5. Schlimmer (Probe C2): Preset „Kurz" (2000 Steps, 1.0 s), Zwischen-Distanz 150000 → „19.8" → „Ungültige Dauer — erlaubt: 1.0–10.0 s", Fahrt gesperrt. Ursache: `AutoDriveControls.tsx:344` unterscheidet „erstmals bekannt" nicht von „Zwischen-Distanz während der Preset-Ableitung". Verletzt PROJ-4 AC-4/AC-5 und die AC-12-Zusicherung „Laden eines Presets überschreibt die Dauer nicht". Der neue Unit-Test (`AutoDriveControls.test.ts:206-213`) prüft nur die reine Funktion und wertet `(null, 160000) → true` als gewollt — deckt diesen Pfad daher nicht ab. Workaround: Dauer nach dem Setzen neu eintippen. _Notify-Reihenfolge auf dem Gerät `[!]` — aus Code (`motor.cpp:361-370, 599-606`, `main.cpp:56`, `ble.cpp:402-420`) und Probe abgeleitet._
+- [ ] **BUG-28 (Medium) — Teil-Regression von BUG-19 durch `fd34882`:** wird die Distanz nach dem ersten Bekanntwerden _größer_ und ist die unberührte Dauer dann zu kurz, sind die Auslöser ohne Meldung gesperrt (Probe E: Distanz 50000, Feld „10" gültig → „Als Ende setzen" → Distanz 160000 → bleibt „10", „Start → Ende" deaktiviert, keine Meldung; nach Blur „21.0"). Der präzisierte AC-12-Text widerspricht sich hier: „Spätere Änderungen der Distanz … überschreiben die Dauer nicht" vs. „die Auto-Fahrt-Auslöser bleiben nie stumm gesperrt wegen einer zu kurzen Dauer". Zu kurze Dauern zeigen keine Meldung, nur zu lange (`showDurationError`, `:327-331`) — Klärung per `/refine PROJ-3`.
+- [ ] **BUG-26 (Low)** weiterhin offen: `design.md` kennt AC-12 und den Distanz-Effekt nicht.
+- Weiterhin offen aus Nachtrag 2: **BUG-25** (Medium, bedingt: Presets aus dem Zeitfenster 2026-09-29 20:26 – 2026-09-30 00:18 würden von der Migration gedreht — der Nutzer muss klären, ob es solche gibt), BUG-17, BUG-20..23.
+- Beobachtung (harmlos): Wird die Distanz bekannt → null → wieder bekannt, läuft die Korrektur erneut (Probe F); ein Disconnect läuft nicht über diesen Weg, weil `RootScreen.tsx:93-122` die Komponente außerhalb von `connected` aushängt.
+
+### Nicht verifiziert
+- [!] Echte Notify-Reihenfolge SET_START → Zwischen-Distanz → SET_END_FROM_DISTANCE auf dem ESP32, Ankunft nach Dauer, physisches Verhalten (no way to run and probe this project was recorded); PROJ-4 EC-2 nicht geprüft; Release-Bundle nicht gebaut; Optik/Layout; Firmware-Tests; Rate Limiting (not implemented).
+
+**Production-Ready: NEIN** — BUG-27 (High, Regression PROJ-4) ist offen, dazu BUG-28 (Medium) und BUG-25 (Medium, bedingt). Status: **In Review**.
