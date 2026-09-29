@@ -79,7 +79,7 @@ void setupMotion() {
   stepper->setDirectionPin(26);
   stepper->setEnablePin(27, /*low_active_out=*/true);
   stepper->setAutoEnable(true);               // schaltet EN nur während einer Fahrt scharf
-  stepper->setSpeedInHz(4000);                // Schritte/Sekunde, aus gewünschter mm/s + Spindelsteigung ableiten
+  stepper->setSpeedInHz(8000);                // Schritte/Sekunde, aus gewünschter mm/s + Spindelsteigung ableiten
   stepper->setAcceleration(8000);
 }
 
