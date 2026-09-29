@@ -180,6 +180,12 @@ export function TimelapseControls(props: TimelapseControlsProps): React.JSX.Elem
         <Camera
           device={cameraDevice}
           style={styles.cameraPreview}
+          // Android: the default 'performance' mode renders through a
+          // SurfaceView, which sits on its own window layer and is not
+          // clipped or z-ordered by the ScrollView — the preview drew over
+          // the preset list above it. 'compatible' uses a TextureView, a
+          // normal view that scrolls and clips with its siblings.
+          implementationMode="compatible"
           isActive={hasPermission}
           outputs={[photoOutput]}
         />
