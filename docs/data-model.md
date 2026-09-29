@@ -12,7 +12,7 @@ _Source: `/init`-Interview mit dem Nutzer, 2026-09-22. Kein Backend — reine lo
 
 | Entität | Bedeutung | Gehört zu / sichtbar für |
 |---------|-----------|---------------------------|
-| Preset | Ein gespeichertes Fahrprofil (Name, Distanz + Richtung zwischen Start und Ende, Dauer) — bewusst keine absoluten Positionen, siehe PROJ-4s Decision Log | der Nutzer selbst, nur lokal auf dem Handy |
+| Preset | Ein gespeichertes Fahrprofil (Name, Distanz + Richtung zwischen Start und Ende, Dauer) — bewusst keine absoluten Positionen, siehe PROJ-4s Decision Log; trägt ein `dirVersion`-Feld, das die Richtungs-Migration nach der DIR-Umkehr vom 2026-09-29 markiert | der Nutzer selbst, nur lokal auf dem Handy |
 
 > Kein "zuletzt verbundenes Gerät" (Stand PROJ-1): Die App scannt bei jedem Start per Service-UUID neu und verbindet sich automatisch zum ersten passenden Treffer — kein gespeicherter Geräte-Bezug nötig. Entschieden im `/write-spec`-Interview zu PROJ-1, 2026-09-22.
 

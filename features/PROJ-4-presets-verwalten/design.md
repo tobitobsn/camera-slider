@@ -88,6 +88,7 @@ Jedes Preset hat:
 - endIsAfterStart: true/false (Richtung des Endpunkts relativ zum Startpunkt)
 - durationSeconds: positive Zahl, eine Nachkommastelle (Zehntelsekunden-Genauigkeit, wie PROJ-3s Dauer-Feld)
 - createdAt: Zeitstempel (Millisekunden) — bestimmt die Anzeige-Reihenfolge (neueste zuerst)
+- dirVersion: optional, `2` bei allen Presets, die nach der DIR-Umkehr (2026-09-29) gespeichert oder migriert wurden. Ein Preset ohne dieses Feld ist älter; `endIsAfterStart` ist dort in der alten Zählrichtung gespeichert und wird beim ersten Lesen einmalig umgedreht und mit `dirVersion: 2` zurückgeschrieben (`migrateDirection` in `usePresets.ts`)
 
 Gehört zu: dem Nutzer selbst, rein lokal auf dem Gerät.
 Gespeichert in: AsyncStorage, eine JSON-Liste unter einem einzigen Schlüssel.
@@ -120,6 +121,7 @@ _Keine — kein Backend, kein Provider-Dashboard betroffen._
 | Geladenes Preset wird automatisch verworfen: beim manuellen Setzen des Endpunkts (EC-3 aus spec.md), beim Laden eines anderen Presets, oder beim Trennen der Verbindung (EC-5) | Verhindert, dass eine veraltete Distanz-Ableitung nach einer bewussten manuellen Änderung unbemerkt weiterwirkt |
 | „Als Start setzen" sendet bei geladenem Preset zusätzlich SET_END_FROM_DISTANCE, direkt im Anschluss an die Antwort auf SET_START | Beide Writes laufen seriell im selben NimBLE-Host-Task (wie schon bei PROJ-3s Command-Verarbeitung) — kein Risiko, dass die Firmware den zweiten Befehl vor dem ersten sieht, solange die App auf die Antwort des ersten wartet, bevor sie den zweiten schickt |
 | Presets in der Liste sortiert nach Erstellungsdatum, neueste zuerst | Ohne Sortier-/Filterfunktion (spec.md → Out of Scope) ist die Erstellungsreihenfolge die einfachste, vorhersagbare Ordnung |
+| `endIsAfterStart` wird per `dirVersion` migriert, als die DIR-Polarität der Firmware invertiert wurde (2026-09-29, `/build` zu PROJ-3 BUG-15) | `endIsAfterStart` meint „Richtung steigender Schritte"; die Umkehr des DIR-Pins drehte dessen physische Bedeutung, ohne Migration hätte ein altes Preset das Ende auf die Gegenseite gelegt (keine Endanschläge). Ein Versionsfeld statt eines Zeitstempel-Stichtags, weil es idempotent ist und unabhängig vom Flash-Zeitpunkt |
 
 ## Open Questions
 
