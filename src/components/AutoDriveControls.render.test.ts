@@ -1,9 +1,9 @@
 /**
- * Render-level tests for AC-12 (duration auto-correction when the known
- * distance changes) and its interplay with PROJ-4's "load preset, then
- * Als Start setzen" flow (qa-report.md BUG-19/24/27/28). The pure helpers are
- * covered in AutoDriveControls.test.ts; these prove the wiring in the
- * component, which is where BUG-24/BUG-27 actually lived.
+ * Render-level tests for AC-12 (refined 2026-09-30): a too-short duration is
+ * never overwritten on its own; the app shows the minimum and offers
+ * "Minimum übernehmen". Also covers PROJ-4's "load preset, then Als Start
+ * setzen" flow, whose intermediate distance used to overwrite the preset's
+ * duration (qa-report.md BUG-24/27/33).
  */
 import React from 'react';
 import ReactTestRenderer, { act } from 'react-test-renderer';
@@ -56,7 +56,6 @@ jest.mock('./useSliderStatus', () => {
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AutoDriveControls } from './AutoDriveControls';
-import { sendSetEndFromDistanceCommand } from '../ble/client';
 
 const flush = () => new Promise<void>(r => setImmediate(() => r()));
 
@@ -124,24 +123,47 @@ beforeEach(async () => {
   mockSent.length = 0;
 });
 
-describe('AC-12 auto-correction (render)', () => {
-  it('BUG-19: default "10" is corrected once a long distance becomes known', async () => {
+const hint = (r: ReactTestRenderer.ReactTestRenderer) =>
+  r.root
+    .findAllByType(Text)
+    .map(label)
+    .find(t => t.includes('Minimum') && !t.includes('übernehmen')) ?? null;
+
+describe('AC-12: too-short duration is shown, not overwritten', () => {
+  it('BUG-19: default "10" with a long distance shows the minimum and a way to take it', async () => {
     const r = await mount();
     await notify(both(160000));
+    expect(value(r)).toBe('10'); // never overwritten on its own
+    expect(pressable(r, 'Start → Ende').props.disabled).toBe(true);
+    expect(hint(r)).toContain('Zu kurz für diese Strecke');
+    expect(hint(r)).toContain('21.0 s');
+    await press(r, 'Minimum übernehmen');
     expect(value(r)).toBe('21.0');
     expect(pressable(r, 'Start → Ende').props.disabled).toBe(false);
+    expect(hint(r)).toBeNull();
   });
 
-  it('BUG-28: a later, larger distance corrects a now-too-short untouched duration', async () => {
+  it('a later, larger distance makes the duration too short: shown, not silently locked (BUG-28)', async () => {
     const r = await mount();
     await notify(both(50000));
-    expect(value(r)).toBe('10');
+    expect(hint(r)).toBeNull();
     await notify(both(160000));
-    expect(value(r)).toBe('21.0');
-    expect(pressable(r, 'Start → Ende').props.disabled).toBe(false);
+    expect(value(r)).toBe('10');
+    expect(hint(r)).toContain('21.0 s');
   });
 
-  it('a deliberately long duration is never overwritten', async () => {
+  it('an empty field shows the minimum as well', async () => {
+    const r = await mount();
+    await act(async () => {
+      r.root.findByType(TextInput).props.onChangeText('');
+      await flush();
+    });
+    await notify(both(100000));
+    expect(hint(r)).toContain('Keine gültige Dauer');
+    expect(hint(r)).toContain('13.5 s');
+  });
+
+  it('a deliberately long duration is never overwritten and gets no too-short hint', async () => {
     const r = await mount();
     await act(async () => {
       r.root.findByType(TextInput).props.onChangeText('900');
@@ -150,11 +172,30 @@ describe('AC-12 auto-correction (render)', () => {
     await notify(both(100000));
     await notify(both(120000));
     expect(value(r)).toBe('900');
+    expect(hint(r)).toBeNull();
+  });
+
+  it('AC-11 still corrects on blur', async () => {
+    const r = await mount();
+    await notify(both(100000));
+    await act(async () => {
+      const input = r.root.findByType(TextInput);
+      input.props.onChangeText('1');
+      input.props.onBlur();
+      await flush();
+    });
+    expect(value(r)).toBe('13.5');
+  });
+
+  it('no hint without both points', async () => {
+    const r = await mount();
+    await notify(onlyEnd());
+    expect(hint(r)).toBeNull();
   });
 });
 
-describe('preset flow keeps its duration (BUG-24/27)', () => {
-  it('both points set before: intermediate distance does not overwrite the preset duration', async () => {
+describe('preset flow keeps its duration (BUG-24/27/33)', () => {
+  it('both points set before: intermediate distance does not touch the preset duration', async () => {
     await seed([SCHNELL]);
     const r = await mount();
     await notify(both(100000));
@@ -165,24 +206,13 @@ describe('preset flow keeps its duration (BUG-24/27)', () => {
     expect(value(r)).toBe('3.5');
     await notify(both(20000)); // SET_END_FROM_DISTANCE landed
     expect(value(r)).toBe('3.5');
+    expect(hint(r)).toBeNull();
     mockSent.length = 0;
     await press(r, 'Start → Ende');
     expect(mockSent).toEqual([['auto', 'startToEnd', 3.5]]);
   });
 
-  it('only an end point set before: the intermediate distance is not "first known" (BUG-27)', async () => {
-    await seed([SCHNELL]);
-    const r = await mount();
-    await notify(onlyEnd());
-    await press(r, 'Schnell');
-    await press(r, 'Als Start setzen');
-    await notify(both(50000));
-    expect(value(r)).toBe('3.5');
-    await notify(both(20000));
-    expect(value(r)).toBe('3.5');
-  });
-
-  it('BUG-27 worst case: a short preset is not turned into a locked, too-long duration', async () => {
+  it('only an end point set before (BUG-27): preset duration stays', async () => {
     await seed([KURZ]);
     const r = await mount();
     await notify(onlyEnd());
@@ -194,110 +224,45 @@ describe('preset flow keeps its duration (BUG-24/27)', () => {
     expect(pressable(r, 'Start → Ende').props.disabled).toBe(false);
   });
 
-  it('after the preset is applied, a later user change corrects again (guard released)', async () => {
-    await seed([SCHNELL]);
-    const r = await mount();
-    await notify(both(100000));
-    await press(r, 'Schnell');
-    await press(r, 'Als Start setzen');
-    await notify(both(20000));
-    expect(value(r)).toBe('3.5');
-    await notify(both(160000)); // user sets a new, far end point
-    expect(value(r)).toBe('21.0');
-  });
-});
-
-describe('preset apply guard ends cleanly (BUG-29/30/31/32)', () => {
-  const type = (r: ReactTestRenderer.ReactTestRenderer, text: string) =>
-    act(async () => {
-      const input = r.root.findByType(TextInput);
-      input.props.onChangeText(text);
-      input.props.onBlur();
-      await flush();
-    });
-
-  afterEach(() => {
-    jest.useRealTimers();
-  });
-
-  it('BUG-29: a hand-typed too-short duration is caught up when the preset distance arrives', async () => {
-    await seed([SCHNELL]);
-    const r = await mount();
-    await press(r, 'Schnell');
-    await type(r, '2'); // no distance known yet -> stays "2"
-    expect(value(r)).toBe('2');
-    await press(r, 'Als Start setzen');
-    await notify({ ...both(0), distanceSteps: null, hasEnd: false });
-    await notify(both(20000)); // preset distance arrives, minimum 3.5 s
-    expect(value(r)).toBe('3.5');
-    expect(pressable(r, 'Start → Ende').props.disabled).toBe(false);
-  });
-
-  it('BUG-30: preset distance never arrives -> after the safety timeout the current distance is corrected', async () => {
-    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
-    await seed([KURZ]);
-    const r = await mount();
-    await notify(both(100000));
-    await press(r, 'Kurz');
-    expect(value(r)).toBe('1.0');
-    await press(r, 'Als Start setzen');
-    await notify(both(50000)); // intermediate, the preset's 2000 never follows
-    expect(value(r)).toBe('1.0'); // suppressed during the apply phase
-    await act(async () => {
-      jest.advanceTimersByTime(3100);
-    });
-    expect(value(r)).toBe('7.3'); // caught up against 50000 steps
-    expect(pressable(r, 'Start → Ende').props.disabled).toBe(false);
-  });
-
-  it('BUG-30: a failed SET_END_FROM_DISTANCE write also catches up', async () => {
-    await seed([KURZ]);
-    const r = await mount();
-    await notify(both(100000));
-    await press(r, 'Kurz');
-    // the intermediate distance arrives while the guard is up, then the write fails
-    (sendSetEndFromDistanceCommand as jest.Mock).mockImplementationOnce(async () => {
-      mockSetStatus(both(50000));
-      throw new Error('write failed');
-    });
-    await press(r, 'Als Start setzen');
-    // caught up: no longer the too-short "1.0", and the trigger is usable
-    expect(value(r)).not.toBe('1.0');
-    expect(pressable(r, 'Start → Ende').props.disabled).toBe(false);
-  });
-
-  it('BUG-31/32: a new apply cancels the old guard timer, and unmount cancels the pending one', async () => {
-    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
-    const setSpy = jest.spyOn(globalThis, 'setTimeout');
-    const clearSpy = jest.spyOn(globalThis, 'clearTimeout');
+  it('loading a second preset right after applying the first keeps the second one\'s duration (BUG-33)', async () => {
     await seed([SCHNELL, KURZ]);
     const r = await mount();
+    await notify(both(20000));
+    await press(r, 'Schnell');
+    await press(r, 'Als Start setzen');
+    await press(r, 'Kurz');
+    expect(value(r)).toBe('1.0');
+    await press(r, 'Als Start setzen');
+    await notify(both(30000));
+    await notify(both(2000));
+    expect(value(r)).toBe('1.0');
+    mockSent.length = 0;
+    await press(r, 'Start → Ende');
+    expect(mockSent).toEqual([['auto', 'startToEnd', 1]]);
+  });
+
+  it('while an intermediate distance makes the preset duration too short, the hint shows but nothing is overwritten', async () => {
+    await seed([KURZ]);
+    const r = await mount();
+    await notify(both(100000));
+    await press(r, 'Kurz');
+    await press(r, 'Als Start setzen');
+    await notify(both(50000)); // preset distance never arrives
+    expect(value(r)).toBe('1.0');
+    expect(hint(r)).toContain('7.3 s');
+  });
+
+  it('no timers are started by the preset flow (BUG-31/32/34/36)', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
+    const setSpy = jest.spyOn(globalThis, 'setTimeout');
+    await seed([SCHNELL]);
+    const r = await mount();
     await notify(both(100000));
     await press(r, 'Schnell');
     await press(r, 'Als Start setzen');
-    const guardTimerIds = () =>
-      setSpy.mock.calls
-        .map((call: unknown[], i: number) => (call[1] === 3000 ? setSpy.mock.results[i].value : undefined))
-        .filter(id => id !== undefined);
-    expect(guardTimerIds()).toHaveLength(1);
-    const firstId = guardTimerIds()[0];
-    await act(async () => {
-      jest.advanceTimersByTime(2800);
-    });
-    await press(r, 'Kurz');
-    await press(r, 'Als Start setzen'); // must cancel the first timer
-    expect(clearSpy).toHaveBeenCalledWith(firstId);
-    await act(async () => {
-      jest.advanceTimersByTime(300); // the first timer would have fired here
-    });
-    await notify(both(30000)); // intermediate of the second apply: still suppressed
-    expect(value(r)).toBe('1.0');
-    const secondId = guardTimerIds()[1];
-    await act(async () => {
-      r.unmount();
-    });
-    expect(clearSpy).toHaveBeenCalledWith(secondId);
+    await press(r, 'Als Start setzen');
+    expect(setSpy.mock.calls.filter(c => c[1] === 3000)).toHaveLength(0);
     setSpy.mockRestore();
-    clearSpy.mockRestore();
+    jest.useRealTimers();
   });
 });

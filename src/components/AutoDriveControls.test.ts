@@ -8,7 +8,6 @@ import {
   statusLabelFor,
   ceilToDeciseconds,
   floorToDeciseconds,
-  shouldAutoCorrectOnDistanceChange,
 } from './AutoDriveControls';
 import type { SliderStatus } from '../ble/client';
 
@@ -201,18 +200,6 @@ describe('autoCorrectedDurationText', () => {
     }
     expect(floorToDeciseconds(5.09)).toBe(5);
     expect(floorToDeciseconds(3)).toBe(3);
-  });
-
-  it('BUG-24/27/28: corrects on every newly known distance, but not while a preset is being applied', () => {
-    expect(shouldAutoCorrectOnDistanceChange(null, 160000, null)).toBe(true);
-    // later user change to a larger distance (BUG-28)
-    expect(shouldAutoCorrectOnDistanceChange(50000, 160000, null)).toBe(true);
-    // intermediate distance while a preset is being applied (BUG-24/27)
-    expect(shouldAutoCorrectOnDistanceChange(null, 50000, 20000)).toBe(false);
-    expect(shouldAutoCorrectOnDistanceChange(100000, 50000, 20000)).toBe(false);
-    // unchanged / unknown distance
-    expect(shouldAutoCorrectOnDistanceChange(50000, 50000, null)).toBe(false);
-    expect(shouldAutoCorrectOnDistanceChange(160000, null, null)).toBe(false);
   });
 
   it('leaves the exact minimum-boundary duration untouched (not re-formatted)', () => {

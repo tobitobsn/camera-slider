@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Alert,
   Modal,
@@ -29,9 +29,6 @@ import { usePresets, type Preset } from './usePresets';
  * firmware/src/motor.cpp's kJogSpeedMinHz (200.0f) / kJogSpeedMaxHz (8000.0f),
  * which spec.md's Technical Requirements explicitly call out as shared.
  */
-/** How long after SET_END_FROM_DISTANCE the AC-12 auto-correction stays suppressed at most. */
-const PRESET_APPLY_GUARD_MS = 3000;
-
 const MIN_SPEED_STEPS_PER_SEC = 200;
 const MAX_SPEED_STEPS_PER_SEC = 8000;
 
@@ -161,32 +158,6 @@ export function formatSeconds(value: number): string {
  */
 export function ceilToDeciseconds(value: number): number {
   return Math.ceil(value * 10 - 1e-9) / 10;
-}
-
-/**
- * qa-report.md (PROJ-3) BUG-19/24/27/28: whether the duration should be
- * auto-corrected (AC-12) when the known distance changes.
- *
- * Yes for every change to a newly known distance made by the user — first
- * time both points exist, or a later "Als Start/Ende setzen" — so a too-short
- * duration never leaves the triggers silently locked (BUG-28). No while a
- * preset is being applied (`presetTargetDistanceSteps !== null`, from
- * "Als Start setzen" until the preset's own distance arrives): setting the
- * start makes the firmware report an intermediate distance (new start vs.
- * old end) before SET_END_FROM_DISTANCE lands the preset's real one, and
- * correcting on that intermediate value overwrote the preset's duration
- * (BUG-24/27).
- */
-export function shouldAutoCorrectOnDistanceChange(
-  previousDistanceSteps: number | null,
-  nextDistanceSteps: number | null,
-  presetTargetDistanceSteps: number | null,
-): boolean {
-  return (
-    presetTargetDistanceSteps === null &&
-    nextDistanceSteps !== null &&
-    nextDistanceSteps !== previousDistanceSteps
-  );
 }
 
 /**
@@ -343,59 +314,28 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
     requestedSpeedStepsPerSec !== null &&
     requestedSpeedStepsPerSec < MIN_SPEED_STEPS_PER_SEC - AUTO_DRIVE_SPEED_TOLERANCE_STEPS_PER_SEC;
 
-  // qa-report.md (PROJ-3) BUG-19: AC-11's correction ran only on blur, so a
-  // duration that was already too short when the distance became known (the
-  // default "10" with a long distance) left the triggers disabled with no
-  // message. Apply the same correction whenever the known distance changes,
-  // except while a preset is being applied (see
-  // shouldAutoCorrectOnDistanceChange()).
-  const knownDistanceSteps = rangeAvailable ? (status.distanceSteps as number) : null;
-  const previousKnownDistanceRef = useRef<number | null>(null);
-  const presetTargetDistanceRef = useRef<number | null>(null);
-  const presetGuardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // AC-12 (refined 2026-09-30): a too-short, empty or unparseable duration
+  // is never overwritten on its own (outside AC-11's on-blur correction) —
+  // instead the minimum is shown with a one-tap "Minimum übernehmen", so the
+  // triggers are never locked without a visible reason (BUG-19) and a loaded
+  // preset's duration is never touched. An earlier approach auto-corrected
+  // on every distance change and needed a preset-apply guard + timer to
+  // tell the user's changes apart from the firmware's intermediate distance
+  // while a preset is applied; it kept producing races (qa-report.md
+  // BUG-24, 27, 29–37) and was dropped.
+  const minimumDurationSeconds =
+    minDurationSeconds !== null ? ceilToDeciseconds(minDurationSeconds) : null;
+  const showDurationTooShort =
+    rangeAvailable &&
+    minimumDurationSeconds !== null &&
+    (requestedSpeedStepsPerSec === null ||
+      requestedSpeedStepsPerSec > MAX_SPEED_STEPS_PER_SEC + AUTO_DRIVE_SPEED_TOLERANCE_STEPS_PER_SEC);
 
-  const clearPresetGuard = useCallback((): void => {
-    presetTargetDistanceRef.current = null;
-    if (presetGuardTimerRef.current !== null) {
-      clearTimeout(presetGuardTimerRef.current);
-      presetGuardTimerRef.current = null;
+  const handleUseMinimumDuration = (): void => {
+    if (minimumDurationSeconds !== null) {
+      setDurationText(formatSeconds(minimumDurationSeconds));
     }
-  }, []);
-
-  // The apply phase is over (preset distance arrived, write failed, or the
-  // safety timeout ran out). qa-report.md BUG-29/30: the suppressed
-  // correction must be caught up here against the distance that is known NOW
-  // — otherwise a hand-typed duration that is too short for the preset's
-  // distance, or a preset whose distance never arrived, leaves the triggers
-  // silently locked. A preset's own duration is always valid for its own
-  // distance, so this never touches it.
-  const endPresetApply = useCallback((): void => {
-    clearPresetGuard();
-    const current = previousKnownDistanceRef.current;
-    if (current !== null) {
-      setDurationText(prev => autoCorrectedDurationText(prev, current) ?? prev);
-    }
-  }, [clearPresetGuard]);
-
-  useEffect(() => clearPresetGuard, [clearPresetGuard]);
-
-  useEffect(() => {
-    const previous = previousKnownDistanceRef.current;
-    previousKnownDistanceRef.current = knownDistanceSteps;
-    const presetTarget = presetTargetDistanceRef.current;
-    if (presetTarget !== null && knownDistanceSteps === presetTarget) {
-      // The preset's own distance arrived: the apply is done.
-      endPresetApply();
-      return;
-    }
-    if (
-      knownDistanceSteps === null ||
-      !shouldAutoCorrectOnDistanceChange(previous, knownDistanceSteps, presetTarget)
-    ) {
-      return;
-    }
-    setDurationText(prev => autoCorrectedDurationText(prev, knownDistanceSteps) ?? prev);
-  }, [knownDistanceSteps, endPresetApply]);
+  };
 
   const handleDurationBlur = (): void => {
     const corrected = autoCorrectedDurationText(durationText, status.distanceSteps);
@@ -465,13 +405,6 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
   // that decision rather than shipping something that fails more often
   // than the bug it was meant to close.
   const handleSetStart = async (): Promise<void> => {
-    if (loadedPreset !== null) {
-      // Suppress the AC-12 auto-correction until the preset's own distance
-      // arrives (BUG-27); a fresh apply replaces any earlier guard/timer
-      // (BUG-31).
-      clearPresetGuard();
-      presetTargetDistanceRef.current = loadedPreset.distanceSteps;
-    }
     try {
       await sendSetStartCommand(device);
       if (loadedPreset !== null) {
@@ -480,16 +413,10 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
           loadedPreset.endIsAfterStart,
           loadedPreset.distanceSteps,
         );
-        // Safety net if the preset's distance never shows up (the firmware
-        // silently rejects SET_END_FROM_DISTANCE in some states).
-        presetGuardTimerRef.current = setTimeout(endPresetApply, PRESET_APPLY_GUARD_MS);
       }
     } catch {
       // fire-and-forget, matching this file's existing .catch(() => {})
       // convention on every other handler
-      if (loadedPreset !== null) {
-        endPresetApply();
-      }
     }
   };
 
@@ -497,7 +424,6 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
     // EC-3: a deliberate manual end-set always wins over a stale
     // preset-derived one, regardless of whether the write itself succeeds.
     setLoadedPreset(null);
-    clearPresetGuard();
     sendSetEndCommand(device).catch(() => {});
   };
 
@@ -612,7 +538,10 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
       <View style={styles.durationRow}>
         <Text style={styles.durationLabel}>Dauer (s)</Text>
         <TextInput
-          style={[styles.durationInput, showDurationError && styles.durationInputError]}
+          style={[
+            styles.durationInput,
+            (showDurationError || showDurationTooShort) && styles.durationInputError,
+          ]}
           keyboardType="decimal-pad"
           value={durationText}
           onChangeText={setDurationText}
@@ -627,6 +556,25 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
           Ungültige Dauer — erlaubt: {formatSeconds(ceilToDeciseconds(minDurationSeconds))}–
           {formatSeconds(floorToDeciseconds(maxDurationSeconds))} s
         </Text>
+      )}
+      {showDurationTooShort && minimumDurationSeconds !== null && (
+        <View style={styles.tooShortRow}>
+          <Text style={[styles.errorText, styles.tooShortText]}>
+            {durationSeconds === null ? 'Keine gültige Dauer' : 'Zu kurz für diese Strecke'} —
+            Minimum {formatSeconds(minimumDurationSeconds)} s
+          </Text>
+          <Pressable
+            onPress={handleUseMinimumDuration}
+            disabled={lockedByOtherMode}
+            style={({ pressed }) => [
+              styles.useMinimumButton,
+              pressed && styles.buttonPressed,
+              lockedByOtherMode && styles.buttonDisabled,
+            ]}
+          >
+            <Text style={styles.useMinimumLabel}>Minimum übernehmen</Text>
+          </Pressable>
+        </View>
       )}
       {pointsIdentical && (
         <Text style={styles.errorText}>Start und Ende müssen sich unterscheiden</Text>
@@ -833,6 +781,30 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
     fontSize: typography.size.sm,
     color: colors.destructive,
+  },
+  tooShortRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  tooShortText: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  useMinimumButton: {
+    minHeight: minTouchTarget,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.base,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  useMinimumLabel: {
+    fontSize: typography.size.sm,
+    fontWeight: typography.weight.heading,
+    color: colors.primary,
   },
   stopButton: {
     minHeight: minTouchTarget,
