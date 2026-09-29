@@ -76,7 +76,7 @@ FastAccelStepper *stepper = nullptr;
 void setupMotion() {
   engine.init();
   stepper = engine.stepperConnectToPin(25);   // STEP-Pin
-  stepper->setDirectionPin(26);
+  stepper->setDirectionPin(26, /*dirHighCountsUp=*/false); // Polarität je nach Verkabelung; hier invertiert
   stepper->setEnablePin(27, /*low_active_out=*/true);
   stepper->setAutoEnable(true);               // schaltet EN nur während einer Fahrt scharf
   stepper->setSpeedInHz(8000);                // Schritte/Sekunde, aus gewünschter mm/s + Spindelsteigung ableiten
