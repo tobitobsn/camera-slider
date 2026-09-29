@@ -266,3 +266,13 @@ Eine zweite, unabhängige `qa-engineer`-Re-Verifikation (Auftrag: Code- und Firm
 - [!] Laufzeit AC-1..7, EC-1..5, PROJ-3/4/5 an echter Hardware.
 
 **Production-Ready: NEIN** — BUG-16 (High) ist weiterhin offen und BUG-18 (PROJ-3 AC-11) ist neu; zusätzlich Laufzeit nicht verifiziert. Status: **In Review**.
+
+## Nachtrag 6: BUG-16 — Fix am Gerät bestätigt, BUG-18 behoben (2026-09-29)
+
+- [x] **BUG-16 — vom Nutzer am echten Slider als behoben gemeldet** („bug16 behoben", 2026-09-29), nach Commit `4552ed5`. **Neue Ursachenvermutung und Fix:** `jogRunning` wurde nur von `motorStop()` zurückgesetzt; ein `moveTo()` (Auto-Fahrt/Zeitraffer), das einen als laufend markierten Jog überschrieb und dann ankam, ließ das Flag auf einem stehenden Stepper auf „läuft" stehen — jeder Herzschlag rief danach nur `applySpeedAcceleration()` auf. Jetzt: `motorJog()` setzt das Flag zurück, wenn `!stepper->isRunning()`, und `motorAutoDrive()`/`motorTimelapseMoveTo()` setzen `jogRunning = false` (`firmware/src/motor.cpp`). Der frühere Rückgabewert-Fix bleibt bestehen.
+  - **Einschränkungen (ehrlich):** Die Ursache ist aus dem Code hergeleitet, nicht am Gerät nachgestellt (kein Serial-Log). Nach dem Flash lief der Test nicht auf einem lange laufenden Gerät — der Flash-Confound aus Nachtrag 4 gilt weiter, und die Stichprobengröße (Anzahl Durchläufe) ist nicht protokolliert. `[!]` Die Wirksamkeit ist damit vom Nutzer bestätigt, aber nicht durch einen unabhängigen `/qa`-Lauf verifiziert.
+- [x] **BUG-18 — behoben** in `655f28d` (`ceilToDeciseconds`, `AutoDriveControls.tsx`), 195 Tests grün, Red-Check durchgeführt (4 Tests rot ohne Fix). Fahrbarkeit an der Hardware nicht separat getestet.
+- **Zusatzänderung `5feb442`:** DIR-Polarität invertiert (`setDirectionPin(kDirPin, false)`), weil „vorwärts/rückwärts" physisch vertauscht war; vom Nutzer bestätigt („passt"). Wirkt konsistent auf Jog, Auto-Fahrt und Zeitraffer.
+- Weiterhin offen: BUG-19 (Low, veraltete Kommentare), BUG-12/13 (Medium, akzeptiert/Prozess), BUG-5..9, 14, 15 (Low).
+
+**Status:** bleibt **In Review**, bis `/qa PROJ-2` (Re-Verifikation im Umfang der Fixes `4552ed5`, `655f28d`, `5feb442`) läuft. Kein Critical/High-Bug ist nach Stand des Nutzers offen.
