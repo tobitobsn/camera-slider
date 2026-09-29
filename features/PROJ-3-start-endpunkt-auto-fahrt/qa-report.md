@@ -310,3 +310,31 @@ Nach dem Re-Verifikations-Zyklus (Firmware neu geflasht ab Commit `f188420`) hat
 - [!] Optik/Layout (Deaktiviert-Darstellung, Fehlerfarbe), Firmware-Tests
 
 **Production-Ready: NEIN.** BUG-15 ist High (Regression PROJ-4, gespeicherte Presets nach der DIR-Umkehr), dazu BUG-16 und BUG-19 (Medium) und Laufzeit nicht verifiziert. Status: **In Review**.
+
+## Nachtrag 2: Re-Verifikation der Fixes BUG-15/16/19 (2026-09-30)
+
+**Scope (Re-Verifikation):** `git diff 442c552..HEAD -- src features/PROJ-3-start-endpunkt-auto-fahrt/spec.md` (Commits `a6b837d`, `c44e0e8`): `usePresets.ts`, `AutoDriveControls.tsx` (jeweils + Test), `spec.md` (neues AC-12). Ein `qa-engineer`-Lauf mit allen drei Scopes (2 → 3 → 4), eingegrenzt auf den Diff und die offenen Bugs. Alles andere aus dem Nachtrag vom 2026-09-29 gilt weiter — _unverändert seit 2026-09-29, in diesem Lauf nicht neu geprüft (Diff berührt AC-1, AC-2, AC-5, AC-7..AC-10, EC-1..EC-4 nicht)_. `probe.kind: none` — Laufzeit/Hardware ist `[!] NOT VERIFIED — no way to run and probe this project was recorded`.
+
+**Test-Suite (einmalig, Owner):** `npm test` → 12 Suites, 199 Tests, 0 Fehler (`suite4.log`). Layer `firmware`: `[!] NOT VERIFIED — no test command recorded for layer firmware`.
+
+### Fix-Status
+- [x] **BUG-19 geschlossen** — Render-Probe: Standardwert „10", dann Distanz 160000 → „21.0", „Start → Ende" aktiv, 2 Renders, keine Schleife (`AutoDriveControls.tsx:321-327`). Eine zu lange Dauer wird nicht überschrieben (Probe: „900" bleibt nach Distanzwechsel).
+- [x] **BUG-16 geschlossen (Distanzen ≥ 35 Steps)** — `AutoDriveControls.tsx:168-170, 542-543`; Simulation über 1–160000 Steps: angezeigte Grenzen sind in 0 Fällen in der App ungültig und in 0 Fällen in der Firmware (float32) abgelehnt. Rest: BUG-17 (jetzt Anzeige „0.1–0.0 s"/„0.2–0.1 s" bei 1–34 Steps, weiterhin Low, höchstens ~0,2 mm).
+- [x] **BUG-15 geschlossen auf Code-Ebene** — `migrateDirection` (`usePresets.ts:53-67`), Best-Effort-Schreiben (`:78-94`), Stempel `dirVersion: 2` (`:166`); idempotent, bei fehlgeschlagenem Schreiben kein Doppel-Flip (Probe), Vorzeichen passt zu `motor.cpp:216, 380-389`. PROJ-5 nutzt keine Presets. Bedingung siehe BUG-25. Physische Richtung nach dem Laden eines alten Presets: `[!]` Hardware.
+- [x] **AC-12** — Probe: leer → „12.3" (Distanz 90000), „abc" → „11.0" (80000); Distanz ändert sich nicht → getippte Zeit bleibt.
+
+### Neue Bugs
+- [ ] **BUG-24 (High, Regression PROJ-4 AC-4/AC-5/EC-2; ausgelöst durch den BUG-19-Fix): Die Dauer eines geladenen Presets wird durch eine Zwischen-Distanz still überschrieben.** `handleSetStart` (`AutoDriveControls.tsx:396-410`) sendet SET_START und danach SET_END_FROM_DISTANCE; dazwischen meldet die Firmware per Notify (`main.cpp:56`, `ble.cpp:402-420`) eine Zwischen-Distanz (neuer Start gegen alten Endpunkt), auf die der neue Effekt (`:321-327`) korrigiert. Die spätere Preset-Distanz holt den Wert nicht zurück. Repro (Render-Probe): Bereich 0…100000, Preset „Schnell" (20000 Steps, 3.5 s) laden → „3.5"; „Als Start setzen" bei 50000 → Zwischen-Notify → „7.3"; End-Notify 20000 → bleibt „7.3"; „Start → Ende" sendet 7.3 statt 3.5. Tritt auf, wenn schon ein Endpunkt existiert und |alter Endpunkt − neuer Start| größer als die Preset-Distanz ist (häufig). Schlimmer Fall: Ziel-Distanz klein → Wert wird „zu lang", Fehlermeldung, Fahrt gesperrt. Workaround: Dauer nach dem Setzen neu eintippen. _Notify-Reihenfolge auf dem Gerät `[!]` — aus Code + Probe abgeleitet._
+- [ ] **BUG-25 (Medium, bedingt): Migration erkennt „alte Polarität" nur am fehlenden `dirVersion`.** Presets, die zwischen dem Flash der Firmware `5feb442` (2026-09-29 20:26) und der Installation eines App-Builds ab `a6b837d` (2026-09-30 00:18) gespeichert wurden, sind schon in neuer Polarität gespeichert und werden trotzdem gedreht (`usePresets.ts:56-64`); dasselbe, wenn die neue App ohne neu geflashte Firmware läuft. Ob solche Presets existieren, kann nur der Nutzer sagen.
+- [ ] **BUG-26 (Low, Doku-Drift):** `dirVersion`/Migration fehlen in `docs/data-model.md` und PROJ-4 `design.md`; AC-12 und der Distanz-Effekt fehlen in PROJ-3 `design.md`.
+- [ ] Low, vorbestehend: `durationSeconds` als String im Speicher lässt `formatSeconds` werfen (`AutoDriveControls.tsx:624`, nur mit Zugriff auf den privaten App-Speicher); eine korrupte Preset-Liste (`[null, …]`) blockiert Speichern/Löschen (Toast statt Datenverlust).
+
+### Security / Regression
+- [x] Manipulierte AsyncStorage-Daten (NaN, negativ, Bruchzahl, falscher Bool) erreichen die Firmware nur innerhalb ihrer Grenzen: `client.ts:333-343`, `motor.cpp:381-382, 450-470`. Keine neuen Secrets im Diff. Restliche Punkte not applicable / not implemented (Rate Limiting) / `[!]`.
+- [x] PROJ-4 AC-1, AC-3, AC-6, AC-9 (Probe + Suite); PROJ-5 unberührt (kein Preset-Zugriff, `useTimelapseSequence.ts:28, 475-476`). PROJ-4 AC-4+AC-5 zusammen und EC-2: FAIL → BUG-24.
+
+### Nicht verifiziert
+- [!] Alle Laufzeit-/Hardware-Ergebnisse: Ankunft nach Dauer, physische Richtung migrierter Presets, echte Notify-Reihenfolge (no way to run and probe this project was recorded)
+- [!] Ob Presets aus dem Zeitfenster von BUG-25 existieren; Release-Bundle nicht neu gebaut; Optik/Layout
+
+**Production-Ready: NEIN** — BUG-24 (High, Regression) ist offen; BUG-15/16/19 sind geschlossen. Status: **In Review**.
