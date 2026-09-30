@@ -16,7 +16,8 @@ Kein Navigationsmenü — die App ist eine einzelne Bildschirmseite. Presets (PR
 
 ## Layout-Bereiche
 
-- **Header:** Verbindungsstatus (verbunden/getrennt, Gerätename), Reconnect-Aktion
+- **Header:** Verbindungsstatus (verbunden/getrennt, Gerätename), Reconnect-Aktion; im Zustand `connected` rechts die Akkuanzeige (PROJ-6)
+- **Sperr-Banner (PROJ-6):** unter dem Header, nur wenn der Slider nach einem Schutz-Stopp gesperrt ist — „Akku leer – bitte laden“, dauerhaft, nicht wegklickbar
 - **Content:** Manuelle Steuerung (Jog-Buttons/Slider), Start-/Endpunkt setzen, Auto-Fahrt auslösen — vertikal gestapelt
 - **Footer/Sheet (später):** Presets-Liste (PROJ-4), Zeitraffer-Einstellungen (PROJ-5)
 
@@ -27,6 +28,7 @@ Kein Navigationsmenü — die App ist eine einzelne Bildschirmseite. Presets (PR
 - **Leerzustand:** "Kein Gerät verbunden" mit Scan-/Verbinden-Button
 - **Fehlerzustand:** Verbindungsabbruch zeigt Banner + automatischer Reconnect-Versuch
 - **Feedback:** Toast/Snackbar für erfolgreiche Aktionen (z. B. "Preset gespeichert")
+- **Sperrzustand (PROJ-6):** gesperrter Slider → Banner + alle Bewegungs-Bedienelemente über die bestehenden `disabled`-Props nicht bedienbar
 
 ## Auth-Status
 
@@ -37,7 +39,7 @@ Entfällt — keine Accounts, keine Anmeldung.
 | Komponente | Datei | Zweck |
 |-----------|------|---------|
 | ConnectionProvider | `src/connection/ConnectionProvider.tsx` | App-weiter Verbindungs-Zustand (Context + useReducer), von PROJ-1 |
-| ConnectionHeader | `src/components/ConnectionHeader.tsx` | Verbindungsstatus, Gerätename, "Erneut suchen"-Aktion — oben auf jeder Ansicht |
+| ConnectionHeader | `src/components/ConnectionHeader.tsx` | Verbindungsstatus, Gerätename, "Erneut suchen"-Aktion — oben auf jeder Ansicht; enthält ab PROJ-6 die Akkuanzeige |
 
 _Festgelegt von `/architecture` für PROJ-1, 2026-09-22._
 

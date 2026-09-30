@@ -3,7 +3,7 @@
 ## Dependencies
 - Erfordert: PROJ-1 (BLE-Verbindung & Pairing) — der Messwert kommt über die bestehende Verbindung, die Anzeige sitzt im Verbindungs-Header
 - Betrifft: PROJ-2 (Jog), PROJ-3 (Auto-Fahrt), PROJ-5 (Zeitraffer) — der Schutz-Stopp hält jede Bewegungsart an und sperrt neue; die Warnung vor dem Start gilt für Auto-Fahrt und Zeitraffer
-- Hardware-Voraussetzung: Spannungsteiler vom Akku-Plus auf einen ADC1-Pin des ESP32 (vorgeschlagen GPIO 34, z. B. 100 kΩ / 22 kΩ, 100 nF gegen GND, gemeinsame Masse) — noch nicht verbaut
+- Hardware-Voraussetzung: Spannungsteiler vom Akku-Plus auf GPIO 34 (82 kΩ + 22 kΩ oben, 22 kΩ unten, 100 nF gegen GND, gemeinsame Masse) — verbaut am 2026-09-30
 
 ## User Stories
 - Als Slider-Besitzer möchte ich den Ladezustand des Akkus jederzeit in der App sehen, damit ich weiß, ob er für die geplante Aufnahme reicht
@@ -51,8 +51,10 @@
 
 ## Open Questions
 - [ ] Kalibrierung: Der genaue Umrechnungsfaktor des Spannungsteilers wird nach dem Einbau einmal mit einem Multimeter bestimmt — wie und wo er hinterlegt wird, entscheidet `/architecture`
-- [ ] Welcher ADC1-Pin wird tatsächlich verwendet (Vorschlag GPIO 34) — erst nach dem Hardware-Einbau endgültig
+- [x] Welcher ADC1-Pin wird tatsächlich verwendet → GPIO 34, Teiler 104 kΩ / 22 kΩ, vom Nutzer verbaut (2026-09-30)
 - [ ] Läuft der Motor im stromlosen Zustand frei, sodass der Schlitten nach einem Schutz-Stopp von Hand geschoben werden kann? (TMC2209 im stromlosen Zustand — am Gerät zu prüfen)
+
+- [ ] Wird der ESP32 aus dem Akku versorgt (dann hebt ein Akkuwechsel die Sperre automatisch auf, AC-8) oder separat? Falls separat, bleibt nur die Reset-Taste — am Aufbau zu prüfen (aus `/architecture`)
 
 ## Decision Log
 
