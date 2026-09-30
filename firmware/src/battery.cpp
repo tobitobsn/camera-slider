@@ -10,9 +10,11 @@ namespace {
 constexpr uint8_t kBatteryPin = 34;  // ADC1 — ADC2 is unusable while BLE runs
 // (82 kΩ + 22 kΩ + 22 kΩ) / 22 kΩ — pack voltage per pin voltage.
 constexpr float kDividerRatio = 126.0f / 22.0f;
-// Set once after comparing the serial output with a multimeter
-// (tasks.md T10/T11): multimeter reading ÷ firmware reading.
-constexpr float kCalibrationFactor = 1.000f;
+// Multimeter reading ÷ firmware reading (tasks.md T10/T11), measured
+// 2026-09-30 on battery: 12 200 mV (multimeter) ÷ 12 280 mV (firmware, read
+// over BLE) = 0.993. The pin itself read 2.12 V → actual divider 5.755 vs
+// nominal 5.727; the rest is the ADC reading about 1 % high.
+constexpr float kCalibrationFactor = 0.993f;
 
 // --- Timing
 constexpr unsigned long kSampleIntervalMs = 200;

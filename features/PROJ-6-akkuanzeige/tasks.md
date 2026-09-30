@@ -23,8 +23,10 @@
 
 ## Ebene 3 — Kalibrierung
 
-- [ ] T10 [user]  Kalibrierung messen: Firmware aus Ebene 2 geflasht, Akkuspannung mit dem Multimeter messen, gleichzeitig den Wert `battery: … mV` im Serial-Monitor ablesen, Verhältnis Multimeter ÷ Firmware an `/build` durchgeben  · where: Multimeter an Akku-Plus/GND; Serial-Monitor 115200 Baud (`pio device monitor`)  · → AC-1, AC-7
-- [ ] T11  Kalibrierfaktor setzen und neu flashen  · files: firmware/src/battery.cpp  · → AC-1, AC-7
+- [x] T10 [user]  Kalibrierung messen: Firmware aus Ebene 2 geflasht, Akkuspannung mit dem Multimeter messen, gleichzeitig den Wert `battery: … mV` im Serial-Monitor ablesen, Verhältnis Multimeter ÷ Firmware an `/build` durchgeben  · where: Multimeter an Akku-Plus/GND; Serial-Monitor 115200 Baud (`pio device monitor`)  · → AC-1, AC-7
+- [x] T11  Kalibrierfaktor setzen und neu flashen  · files: firmware/src/battery.cpp  · → AC-1, AC-7
+
+> T10 erledigt 2026-09-30: Nutzer hat im Akkubetrieb 12,2 V am Akku und 2,12 V an GPIO 34 gemessen; der Firmware-Wert (12 280 mV) wurde per BLE vom Mac gelesen, weil USB und Akku nicht gleichzeitig angeschlossen werden können. Faktor 0,993 (T11).
 
 ## Parallelisierung
 

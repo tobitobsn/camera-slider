@@ -161,3 +161,10 @@ Keine neuen Pakete — App: bestehende React-Native-Mittel (`Alert` für die Nac
 
 - [ ] Hängt der ESP32 am Akku (dann ist Akkuwechsel = Neustart, wie angenommen) oder separat versorgt? Falls separat: Aufhebung der Sperre nur über die Reset-Taste — am Aufbau zu prüfen
 - [ ] Reicht der 16-fache Mittelwert gegen Störungen des Schrittmotortreibers, oder braucht es mehr Filterung? Erst am Gerät messbar
+
+## Umsetzungshinweise (`/build`, 2026-09-30)
+
+- **Abweichung:** `TimelapseControls` hat keine `disabled`-Prop. Die Sperre des Zeitraffer-Starts bei `batteryLocked` sitzt deshalb in dessen eigener Startbedingung (`startEnabled`), nicht in `RootScreen` — gleiche Wirkung (AC-9).
+- **Nachfrage-Dialog:** eine gemeinsame Funktion `confirmIfBatteryCritical()` in `src/components/battery.ts`, genutzt von `AutoDriveControls` und `TimelapseControls` (zwei Aufrufer).
+- **„Orange" bei < 20 %** ist das Amber-Akzent-Token `colors.primary` — kein eigener Farbwert im Design-System.
+- **Kalibrierung:** Faktor 0,993 (Multimeter 12 200 mV ÷ Firmware 12 280 mV im Akkubetrieb). Da USB und Akku nicht gleichzeitig angeschlossen werden können, wurde der Firmware-Wert per BLE vom Mac gelesen (die Status-Characteristic ist ohne Pairing per Notify lesbar).
