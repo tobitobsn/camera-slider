@@ -8,6 +8,7 @@ import {
   openBluetoothSettings,
 } from '../permissions/requestBlePermissions';
 import { colors, minTouchTarget, radius, spacing, typography } from '../theme/colors';
+import { BatteryIndicator } from './BatteryIndicator';
 
 type ConnectionStatus = ConnectionState['status'];
 
@@ -91,6 +92,10 @@ export function ConnectionHeader() {
 
       {showSpinner ? (
         <ActivityIndicator color={colors.primary} />
+      ) : status === 'connected' ? (
+        // PROJ-6: battery reading on the right while connected (no button
+        // or spinner is shown in that state).
+        <BatteryIndicator />
       ) : buttonLabel && onPressButton ? (
         <Pressable
           onPress={onPressButton}

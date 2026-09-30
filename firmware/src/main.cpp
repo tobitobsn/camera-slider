@@ -1,5 +1,6 @@
 #include <Arduino.h>
 
+#include "battery.h"
 #include "ble.h"
 #include "motor.h"
 
@@ -40,6 +41,7 @@ void setup() {
   const bool resetBonds = waitForBootButtonHeld();
   bleSetup(resetBonds);
   motorSetup();
+  batterySetup();
 }
 
 void loop() {
@@ -53,5 +55,8 @@ void loop() {
   // (motorWatchdogCheck()'s early-return guard) and rejects every
   // subsequent motorAutoDrive() call until the next STOP.
   motorTimelapseMoveCheck();
+  // PROJ-6: measurement, protective stop and lockout race guard — before
+  // the notify so a fresh display value or lock goes out in the same pass.
+  batteryUpdate();
   bleNotifyStatusIfChanged();
 }

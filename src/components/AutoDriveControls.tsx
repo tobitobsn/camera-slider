@@ -21,6 +21,7 @@ import {
 } from '../ble/client';
 import { useConnection } from '../connection/ConnectionProvider';
 import { colors, minTouchTarget, radius, spacing, typography } from '../theme/colors';
+import { confirmIfBatteryCritical } from './battery';
 import { useSliderStatus } from './useSliderStatus';
 import { usePresets, type Preset } from './usePresets';
 
@@ -431,7 +432,10 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
     if (durationSeconds === null) {
       return;
     }
-    sendAutoDriveCommand(device, direction, durationSeconds).catch(() => {});
+    // PROJ-6 AC-6: ask first when the battery is below 10 %.
+    confirmIfBatteryCritical(status.batteryMillivolts, () => {
+      sendAutoDriveCommand(device, direction, durationSeconds).catch(() => {});
+    });
   };
 
   const handleStop = () => {

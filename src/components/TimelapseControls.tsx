@@ -4,6 +4,7 @@ import type { Device } from 'react-native-ble-plx';
 import { Camera, type CameraDevice, type usePhotoOutput } from 'react-native-vision-camera';
 
 import { colors, minTouchTarget, radius, spacing, typography } from '../theme/colors';
+import { confirmIfBatteryCritical } from './battery';
 import { useSliderStatus } from './useSliderStatus';
 import type { TimelapseSequenceApi } from './useTimelapseSequence';
 
@@ -148,6 +149,8 @@ export function TimelapseControls(props: TimelapseControlsProps): React.JSX.Elem
     rangeReady &&
     status.atStart &&
     !status.driving &&
+    // PROJ-6 AC-9: no new sequence after a low-battery protective stop.
+    !status.batteryLocked &&
     hasPermission &&
     shotCount !== null &&
     intervalSeconds !== null &&
@@ -165,7 +168,8 @@ export function TimelapseControls(props: TimelapseControlsProps): React.JSX.Elem
     if (shotCount === null || intervalSeconds === null) {
       return;
     }
-    start(shotCount, intervalSeconds);
+    // PROJ-6 AC-6: ask first when the battery is below 10 %.
+    confirmIfBatteryCritical(status.batteryMillivolts, () => start(shotCount, intervalSeconds));
   };
 
   const handleStop = (): void => {

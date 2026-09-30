@@ -39,8 +39,10 @@ uint32_t restSumMillivolts = 0;
 uint32_t restSampleCount = 0;
 unsigned long lastDisplayRefreshMillis = 0;
 bool hasDisplayValue = false;
-// Written and read in loop() only (batteryUpdate(), bleNotifyStatusIfChanged()).
-uint16_t displayMillivolts = 0;
+// Written in loop() (batteryUpdate()), read in loop() and from the NimBLE
+// host task (the status payload sent on subscribe) — volatile for
+// cross-task visibility like motor.cpp's shared flags.
+volatile uint16_t displayMillivolts = 0;
 
 uint32_t measurePackMillivolts() {
   uint32_t pinSum = 0;

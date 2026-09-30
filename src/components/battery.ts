@@ -1,7 +1,9 @@
 /**
- * PROJ-6 Akkuanzeige — pure battery logic: pack voltage → percent → level.
- * No I/O; the voltage comes from SliderStatus.batteryMillivolts.
+ * PROJ-6 Akkuanzeige — battery logic: pack voltage → percent → level, plus
+ * the one shared confirmation dialog before a long drive on a nearly empty
+ * battery. The voltage comes from SliderStatus.batteryMillivolts.
  */
+import { Alert } from 'react-native';
 
 /** Below this the firmware counts as "no battery detected" (USB-only, divider missing) — spec.md AC-11. */
 export const BATTERY_PRESENT_MILLIVOLTS = 5000;
@@ -67,4 +69,24 @@ export function batteryLevel(percent: number | null): BatteryLevel {
     return 'low';
   }
   return 'ok';
+}
+
+/**
+ * spec.md AC-6 / EC-6: before an auto-drive or a timelapse start, ask when
+ * the battery is below 10 %; otherwise (including "no battery detected")
+ * run the action straight away. Jog does not ask (spec.md Out of Scope).
+ * The confirmation does not disable the firmware's protective stop.
+ */
+export function confirmIfBatteryCritical(
+  packMillivolts: number | null,
+  action: () => void,
+): void {
+  if (batteryLevel(batteryPercent(packMillivolts)) !== 'critical') {
+    action();
+    return;
+  }
+  Alert.alert('Akku fast leer', 'Akku fast leer – Fahrt trotzdem starten?', [
+    { text: 'Abbrechen', style: 'cancel' },
+    { text: 'Trotzdem starten', onPress: action },
+  ]);
 }

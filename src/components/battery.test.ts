@@ -39,3 +39,38 @@ describe('batteryLevel', () => {
     expect(batteryLevel(0)).toBe('critical');
   });
 });
+
+describe('confirmIfBatteryCritical (AC-6)', () => {
+  const { Alert } = require('react-native');
+  const { confirmIfBatteryCritical } = require('./battery');
+  let alertSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+  });
+  afterEach(() => alertSpy.mockRestore());
+
+  it('runs the action directly at >= 10 % and without a battery', () => {
+    for (const mv of [11400, 10500, null, 40]) {
+      const action = jest.fn();
+      confirmIfBatteryCritical(mv, action);
+      expect(action).toHaveBeenCalledTimes(1);
+    }
+    expect(alertSpy).not.toHaveBeenCalled();
+  });
+
+  it('asks below 10 % and only runs the action on "Trotzdem starten"', () => {
+    const action = jest.fn();
+    confirmIfBatteryCritical(10200, action); // 5 %
+    expect(action).not.toHaveBeenCalled();
+    expect(alertSpy).toHaveBeenCalledTimes(1);
+    const [, message, buttons] = alertSpy.mock.calls[0];
+    expect(message).toBe('Akku fast leer – Fahrt trotzdem starten?');
+    const cancel = buttons.find((b: { text: string }) => b.text === 'Abbrechen');
+    const go = buttons.find((b: { text: string }) => b.text === 'Trotzdem starten');
+    cancel.onPress?.();
+    expect(action).not.toHaveBeenCalled();
+    go.onPress();
+    expect(action).toHaveBeenCalledTimes(1);
+  });
+});

@@ -5,6 +5,7 @@
 
 #include <cstring>
 
+#include "battery.h"
 #include "motor.h"
 
 namespace {
@@ -36,22 +37,23 @@ volatile bool gConnected = false;
 // gConnected above — file-scope state in this anonymous namespace.
 NimBLECharacteristic* gStatusChar = nullptr;
 
-// Last 6-byte Status-Characteristic payload actually sent (see
+// Last 8-byte Status-Characteristic payload actually sent (see
 // bleNotifyStatusIfChanged()), so repeated identical polls from loop()
 // don't spam notify(). Zero-initialized; the very first differing status
 // (including right after boot) will therefore always notify.
-uint8_t gLastStatusPayload[6] = {0, 0, 0, 0, 0, 0};
+uint8_t gLastStatusPayload[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 bool gHasSentStatus = false;
 
-// Packs a MotorStatus snapshot into the 6-byte wire payload design.md
+// Packs a MotorStatus snapshot into the 8-byte wire payload design.md
 // specifies: byte 0 is the flags bitfield (bit0 hasStart, bit1 hasEnd,
-// bit2 atStart, bit3 atEnd, bit4 driving, bit5 timelapseMoving), bytes 1-4
+// bit2 atStart, bit3 atEnd, bit4 driving, bit5 timelapseMoving, PROJ-6:
+// bit6 locked, bit7 moving), bytes 1-4
 // are distanceSteps as little-endian uint32, byte 5 is 0x00 when the end
 // point is at-or-after the start point (increasing step-count direction)
 // and 0x01 when it's before (decreasing direction) — only meaningful when
 // hasStart && hasEnd are both true (matches src/ble/client.ts's
 // parseStatusPayload()).
-void packStatusPayload(const MotorStatus& status, uint8_t out[6]) {
+void packStatusPayload(const MotorStatus& status, uint16_t batteryMillivolts, uint8_t out[8]) {
   uint8_t flags = 0;
   if (status.hasStart) flags |= 0x01;
   if (status.hasEnd) flags |= 0x02;
@@ -59,6 +61,8 @@ void packStatusPayload(const MotorStatus& status, uint8_t out[6]) {
   if (status.atEnd) flags |= 0x08;
   if (status.driving) flags |= 0x10;
   if (status.timelapseMoving) flags |= 0x20;
+  if (status.locked) flags |= 0x40;
+  if (status.moving) flags |= 0x80;
 
   out[0] = flags;
   out[1] = static_cast<uint8_t>(status.distanceSteps & 0xff);
@@ -66,6 +70,10 @@ void packStatusPayload(const MotorStatus& status, uint8_t out[6]) {
   out[3] = static_cast<uint8_t>((status.distanceSteps >> 16) & 0xff);
   out[4] = static_cast<uint8_t>((status.distanceSteps >> 24) & 0xff);
   out[5] = status.endIsAfterStart ? 0x00 : 0x01;
+  // PROJ-6 (design.md "Grenze zur Firmware"): battery display value in
+  // millivolts, uint16 little-endian, 0 = no value yet.
+  out[6] = static_cast<uint8_t>(batteryMillivolts & 0xff);
+  out[7] = static_cast<uint8_t>((batteryMillivolts >> 8) & 0xff);
 }
 
 class ServerCallbacks : public NimBLEServerCallbacks {
@@ -254,8 +262,8 @@ class StatusCharacteristicCallbacks : public NimBLECharacteristicCallbacks {
       return;  // unsubscribed, or an indicate-only subscribe — nothing to send
     }
     const MotorStatus status = motorGetStatus();
-    uint8_t payload[6];
-    packStatusPayload(status, payload);
+    uint8_t payload[8];
+    packStatusPayload(status, batteryDisplayMillivolts(), payload);
     pCharacteristic->setValue(payload, sizeof(payload));
     pCharacteristic->notify();
     memcpy(gLastStatusPayload, payload, sizeof(payload));
@@ -405,8 +413,8 @@ void bleNotifyStatusIfChanged() {
   }
 
   const MotorStatus status = motorGetStatus();
-  uint8_t payload[6];
-  packStatusPayload(status, payload);
+  uint8_t payload[8];
+  packStatusPayload(status, batteryDisplayMillivolts(), payload);
 
   if (gHasSentStatus && memcmp(payload, gLastStatusPayload, sizeof(payload)) == 0) {
     return;  // unchanged since the last notify — nothing to send

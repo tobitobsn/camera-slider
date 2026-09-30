@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { AutoDriveControls } from '../components/AutoDriveControls';
+import { BatteryLockBanner } from '../components/BatteryLockBanner';
 import { ConnectionHeader } from '../components/ConnectionHeader';
 import { BluetoothOffNotice } from '../components/BluetoothOffNotice';
 import { JogControls } from '../components/JogControls';
@@ -61,7 +62,7 @@ export function RootScreen() {
     <View style={styles.container}>
       <ConnectionHeader />
       <View style={styles.content}>
-        {renderContent(state.status, device, status.driving, timelapse, cameraCapture, jogging, setJogging)}
+        {renderContent(state.status, device, status.driving, status.batteryLocked, timelapse, cameraCapture, jogging, setJogging)}
       </View>
     </View>
   );
@@ -71,6 +72,7 @@ function renderContent(
   status: ReturnType<typeof useConnection>['state']['status'],
   device: ReturnType<typeof useConnection>['device'],
   driving: boolean,
+  batteryLocked: boolean,
   timelapse: TimelapseSequenceApi,
   cameraCapture: CameraCapture,
   jogging: boolean,
@@ -115,11 +117,16 @@ function renderContent(
           contentContainerStyle={styles.connectedStackContent}
           scrollEnabled={!jogging}
         >
+          {/* PROJ-6 AC-9: after a low-battery protective stop the firmware
+              rejects all motion until it reboots — say so, and lock the
+              controls. TimelapseControls locks its own start button (it
+              reads batteryLocked itself, like it reads `driving`). */}
+          {batteryLocked ? <BatteryLockBanner /> : null}
           <JogControls
-            disabled={driving || timelapse.isRunning}
+            disabled={driving || timelapse.isRunning || batteryLocked}
             onJoggingChange={setJogging}
           />
-          <AutoDriveControls disabled={timelapse.isRunning} />
+          <AutoDriveControls disabled={timelapse.isRunning || batteryLocked} />
           <TimelapseControls
             device={device}
             isRunning={timelapse.isRunning}

@@ -513,6 +513,15 @@ export function useTimelapseSequence(
     }
   }, [device, finishRun]);
 
+  // PROJ-6 AC-10: a low-battery protective stop halts the motor in the
+  // firmware and locks all motion — end a running sequence right away with
+  // its own message instead of letting the next step time out.
+  useEffect(() => {
+    if (status.batteryLocked && isRunningRef.current) {
+      finishRun(runIdRef.current, 'Akku leer – Bewegung gestoppt');
+    }
+  }, [status.batteryLocked, finishRun]);
+
   const start = useCallback(
     (shotCount: number, intervalSeconds: number): void => {
       const myRunId = ++runIdRef.current;
