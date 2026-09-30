@@ -43,7 +43,9 @@
 
 ## Ebene 6 — Hardware-Test der Erweiterung
 
-- [ ] T19 [user]  Mit Labornetzteil: (1) unter 9,3 V → Stopp, Banner mit Countdown, nach 60 s Verbindung weg, Slider reagiert bis Reset nicht; (2) im Akkubetrieb den Spannungsteiler abziehen → „Akkumessung gestört", Countdown, Abschaltung; (3) Start am USB → keine Sperre; (4) optional Stromaufnahme im Tiefschlaf messen  · where: Labornetzteil statt Akku, App verbunden  · → AC-12, AC-13, EC-7, EC-8
+- [x] T19 [user]  Mit Labornetzteil: (1) unter 9,3 V → Stopp, Banner mit Countdown, nach 60 s Verbindung weg, Slider reagiert bis Reset nicht; (2) im Akkubetrieb den Spannungsteiler abziehen → „Akkumessung gestört", Countdown, Abschaltung; (3) Start am USB → keine Sperre; (4) optional Stromaufnahme im Tiefschlaf messen  · where: Labornetzteil statt Akku, App verbunden  · → AC-12, AC-13, EC-7, EC-8
+
+> T19 erledigt 2026-09-30 (Nutzer, Labornetzteil): Stopp + Banner „Akku leer" mit Countdown + Abschaltung nach 60 s, Reaktion erst nach Reset; Spannungsteiler abgezogen → „Akkumessung gestört" + Abschaltung; USB-Start ohne Sperre — „alles ok". Der Schlitten lässt sich im Tiefschlaf nicht schieben, aber genauso wenig ohne jeden Strom → mechanisches Halten (Rastmoment/Antrieb), Treiber ist aus.
 
 ## Parallelisierung
 
