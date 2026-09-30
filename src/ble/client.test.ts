@@ -278,6 +278,44 @@ describe('parseStatusPayload', () => {
       distanceSteps: null,
       endIsAfterStart: null,
       timelapseMoving: false,
+      // 6-byte payload = firmware before PROJ-6: no battery data
+      batteryMillivolts: null,
+      batteryLocked: false,
+      moving: false,
+    });
+  });
+
+  describe('PROJ-6 battery fields (8-byte payload)', () => {
+    function payload8(flags: number, millivolts: number): string {
+      return fromByteArray(
+        new Uint8Array([flags, 0, 0, 0, 0, 0, millivolts & 0xff, (millivolts >>> 8) & 0xff]),
+      );
+    }
+
+    it('reads the battery voltage as uint16 little-endian', () => {
+      // 11 820 mV = 0x2E2C -> LE 0x2C 0x2E
+      expect(parseStatusPayload(payload8(0x00, 11820)).batteryMillivolts).toBe(11820);
+    });
+
+    it('reads bit 6 as batteryLocked and bit 7 as moving, independently', () => {
+      const locked = parseStatusPayload(payload8(0x40, 9200));
+      expect(locked.batteryLocked).toBe(true);
+      expect(locked.moving).toBe(false);
+      const moving = parseStatusPayload(payload8(0x80, 12000));
+      expect(moving.batteryLocked).toBe(false);
+      expect(moving.moving).toBe(true);
+      // the existing flags are unaffected by the new bits
+      expect(parseStatusPayload(payload8(0xff, 12000)).timelapseMoving).toBe(true);
+    });
+
+    it('treats 0 mV (no value yet) and implausible values (> 20000 mV) as null', () => {
+      expect(parseStatusPayload(payload8(0x00, 0)).batteryMillivolts).toBeNull();
+      expect(parseStatusPayload(payload8(0x00, 20001)).batteryMillivolts).toBeNull();
+      expect(parseStatusPayload(payload8(0x00, 20000)).batteryMillivolts).toBe(20000);
+    });
+
+    it('passes a low USB-only reading through (the "no battery" decision is battery.ts\'s)', () => {
+      expect(parseStatusPayload(payload8(0x00, 40)).batteryMillivolts).toBe(40);
     });
   });
 

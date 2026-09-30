@@ -20,6 +20,9 @@ const INITIAL_STATUS: SliderStatus = {
   endIsAfterStart: null,
   distanceSteps: null,
   timelapseMoving: false,
+  batteryMillivolts: null,
+  batteryLocked: false,
+  moving: false,
 };
 
 const OTHER_STATUS: SliderStatus = {
@@ -31,6 +34,9 @@ const OTHER_STATUS: SliderStatus = {
   endIsAfterStart: true,
   distanceSteps: 12345,
   timelapseMoving: false,
+  batteryMillivolts: null,
+  batteryLocked: false,
+  moving: false,
 };
 
 function fakeDevice(id: string): Device {

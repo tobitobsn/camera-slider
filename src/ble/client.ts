@@ -82,7 +82,21 @@ export type SliderStatus = {
    * distanceSteps/endIsAfterStart — it does not depend on hasStart/hasEnd.
    */
   timelapseMoving: boolean;
+  /**
+   * PROJ-6: pack voltage in millivolts, the firmware's standstill display
+   * value. Null when the payload has no battery bytes (older firmware), the
+   * firmware has no value yet (0) or the value is implausible (> 20000).
+   * Below 5000 mV means "no battery detected" — see battery.ts.
+   */
+  batteryMillivolts: number | null;
+  /** PROJ-6: motion is locked after a low-battery protective stop (until the ESP32 reboots). */
+  batteryLocked: boolean;
+  /** PROJ-6: the motor is moving right now (any motion, jog included). */
+  moving: boolean;
 };
+
+/** PROJ-6: millivolt readings above this are treated as implausible (null). */
+const MAX_PLAUSIBLE_BATTERY_MILLIVOLTS = 20000;
 
 const DEFAULT_SCAN_TIMEOUT_MS = 10000;
 
@@ -405,6 +419,10 @@ export async function sendTimelapseMoveCommand(
  *  - byte 5: 0x00 when the end point is at-or-after the start point
  *    (increasing step-count direction), 0x01 when it's before (decreasing
  *    direction) — only meaningful when hasStart && hasEnd are both true
+ *  - PROJ-6: flags bit 6 batteryLocked, bit 7 moving; bytes 6-7 battery
+ *    voltage in millivolts (uint16, little-endian), 0 = no value yet.
+ *    A 6-byte payload (older firmware) reads as no battery value, not
+ *    locked, not moving.
  */
 export function parseStatusPayload(base64Value: string): SliderStatus {
   const bytes = toByteArray(base64Value);
@@ -418,6 +436,14 @@ export function parseStatusPayload(base64Value: string): SliderStatus {
   // Valid regardless of hasStart/hasEnd — unlike distanceSteps/endIsAfterStart
   // below, which only make sense once both a start and an end point exist.
   const timelapseMoving = (flags & 0x20) !== 0;
+  const batteryLocked = (flags & 0x40) !== 0;
+  const moving = (flags & 0x80) !== 0;
+
+  let batteryMillivolts: number | null = null;
+  if (bytes.length >= 8) {
+    const raw = (bytes[6] ?? 0) | ((bytes[7] ?? 0) << 8);
+    batteryMillivolts = raw === 0 || raw > MAX_PLAUSIBLE_BATTERY_MILLIVOLTS ? null : raw;
+  }
 
   let distanceSteps: number | null = null;
   let endIsAfterStart: boolean | null = null;
@@ -441,6 +467,9 @@ export function parseStatusPayload(base64Value: string): SliderStatus {
     distanceSteps,
     endIsAfterStart,
     timelapseMoving,
+    batteryMillivolts,
+    batteryLocked,
+    moving,
   };
 }
 

@@ -46,6 +46,9 @@ function fullStatus(overrides: Partial<SliderStatus> = {}): SliderStatus {
     distanceSteps: 1000,
     endIsAfterStart: true,
     timelapseMoving: false,
+    batteryMillivolts: null,
+    batteryLocked: false,
+    moving: false,
     ...overrides,
   };
 }

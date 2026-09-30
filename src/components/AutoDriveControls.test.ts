@@ -20,6 +20,9 @@ const BASE_STATUS: SliderStatus = {
   endIsAfterStart: null,
   distanceSteps: null,
   timelapseMoving: false,
+  batteryMillivolts: null,
+  batteryLocked: false,
+  moving: false,
 };
 
 describe('parseDurationSeconds', () => {
