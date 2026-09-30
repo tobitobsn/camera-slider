@@ -607,4 +607,49 @@ describe('useTimelapseSequence', () => {
     expect(mockCapturePhoto.mock.calls.length).toBe(shotsBefore);
     expect(sendAutoDriveCommand).not.toHaveBeenCalled();
   });
+
+  it('PROJ-6 BUG-5 / AC-13: start() refuses while locked and names a measurement fault', async () => {
+    const device = fakeDevice('device-1');
+    let api: TimelapseSequenceApi | undefined;
+    await act(async () => {
+      ReactTestRenderer.create(renderProbe(device, a => (api = a)));
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => {
+      broadcastStatus(fullStatus({ batteryLocked: true, lockReason: 'measurementFault' }));
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => {
+      api!.start(3, 5);
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    expect(api!.isRunning).toBe(false);
+    expect(api!.error).toBe('Akkumessung gestört – Bewegung gestoppt');
+    expect(mockCapturePhoto).not.toHaveBeenCalled();
+    expect(sendTimelapseMoveCommand).not.toHaveBeenCalled();
+    expect(mockActivate).not.toHaveBeenCalled();
+  });
+
+  it('PROJ-6 AC-13: a measurement-fault lock during a sequence ends it with its own message', async () => {
+    const device = fakeDevice('device-1');
+    let api: TimelapseSequenceApi | undefined;
+    await act(async () => {
+      ReactTestRenderer.create(renderProbe(device, a => (api = a)));
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => {
+      broadcastStatus(fullStatus());
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => {
+      api!.start(3, 3600);
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => {
+      broadcastStatus(fullStatus({ batteryLocked: true, lockReason: 'measurementFault' }));
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    expect(api!.isRunning).toBe(false);
+    expect(api!.error).toBe('Akkumessung gestört – Bewegung gestoppt');
+  });
 });

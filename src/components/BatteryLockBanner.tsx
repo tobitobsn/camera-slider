@@ -1,19 +1,36 @@
 import { StyleSheet, Text, View } from 'react-native';
+import type { LockReason } from '../ble/client';
 import { colors, radius, spacing, typography } from '../theme/colors';
 
+type BatteryLockBannerProps = {
+  reason: LockReason;
+  /** Seconds until the slider switches itself off (1–60), null when not counting down. */
+  shutdownSeconds: number | null;
+};
+
 /**
- * PROJ-6 AC-9: shown for as long as the firmware keeps motion locked after a
- * low-battery protective stop (until the ESP32 reboots). Not dismissible —
- * the lock itself cannot be lifted from the app. Same shape as
- * ReconnectingBanner, but a full red border since this is a hard stop.
+ * PROJ-6 AC-9 / AC-12 / AC-13 / EC-8: shown for as long as the firmware keeps
+ * motion locked after a protective stop. Not dismissible — the lock cannot
+ * be lifted from the app. During the 60 s before the slider switches itself
+ * off, the remaining seconds count down (reported by the slider, so a late
+ * connection sees the right number); afterwards the connection drops and
+ * the usual lost-connection state takes over.
  */
-export function BatteryLockBanner() {
+export function BatteryLockBanner({ reason, shutdownSeconds }: BatteryLockBannerProps) {
+  const title =
+    reason === 'measurementFault'
+      ? 'Akkumessung gestört – bitte Verkabelung prüfen'
+      : 'Akku leer – bitte laden';
+
   return (
     <View style={styles.container} accessibilityRole="alert">
-      <Text style={styles.title}>Akku leer – bitte laden</Text>
+      <Text style={styles.title}>{title}</Text>
+      {shutdownSeconds !== null ? (
+        <Text style={styles.countdown}>Slider schaltet sich in {shutdownSeconds} s ab</Text>
+      ) : null}
       <Text style={styles.text}>
-        Der Slider hat alle Bewegungen gestoppt, um die Zellen zu schützen. Nach dem Laden bzw.
-        Akkuwechsel startet er neu und ist wieder bedienbar.
+        Alle Bewegungen sind gestoppt, um die Zellen zu schützen. Bitte schalte den Slider aus und
+        lade den Akku — auch abgeschaltet verbraucht die Elektronik noch etwas Strom.
       </Text>
     </View>
   );
@@ -34,6 +51,12 @@ const styles = StyleSheet.create({
     color: colors.destructive,
     fontSize: typography.size.lg,
     fontWeight: typography.weight.heading,
+  },
+  countdown: {
+    color: colors.foreground,
+    fontSize: typography.size.base,
+    fontWeight: typography.weight.heading,
+    marginTop: spacing.sm,
   },
   text: {
     color: colors.foreground,

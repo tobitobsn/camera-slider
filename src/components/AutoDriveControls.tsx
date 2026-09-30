@@ -233,6 +233,13 @@ type AutoDriveControlsProps = {
    * `status.driving` checks everywhere, not a replacement for them.
    */
   disabled?: boolean;
+  /**
+   * PROJ-6 AC-9: the slider is locked after a low-battery protective stop.
+   * Locks only what would move the carriage — the drive triggers, setting
+   * start/end and loading a preset (which sets the end point). Saving and
+   * deleting presets stay available (qa-report.md BUG-4).
+   */
+  batteryLocked?: boolean;
 };
 
 /**
@@ -247,7 +254,10 @@ type AutoDriveControlsProps = {
  * all of it comes straight from useSliderStatus(device), which the firmware
  * updates via Notify after every SET_START/SET_END/stop/arrival (design.md).
  */
-export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps = {}) {
+export function AutoDriveControls({
+  disabled = false,
+  batteryLocked = false,
+}: AutoDriveControlsProps = {}) {
   const { device } = useConnection();
   const status = useSliderStatus(device);
   const { presets, save: savePresetToStorage, remove: removePresetFromStorage } = usePresets();
@@ -352,6 +362,7 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
   const autoDriveBaseEnabled =
     !status.driving &&
     !disabled &&
+    !batteryLocked &&
     status.hasStart &&
     status.hasEnd &&
     status.distanceSteps !== null &&
@@ -377,6 +388,8 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
   // status.driving before — kept as one constant rather than repeating
   // `status.driving || disabled` at each call site.
   const lockedByOtherMode = status.driving || disabled;
+  // PROJ-6: motion-only lock — see the batteryLocked prop.
+  const motionLocked = lockedByOtherMode || batteryLocked;
 
   if (!device) {
     return null;
@@ -517,22 +530,22 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
       <View style={styles.buttonRow}>
         <Pressable
           onPress={handleSetStart}
-          disabled={lockedByOtherMode}
+          disabled={motionLocked}
           style={({ pressed }) => [
             styles.button,
             pressed && styles.buttonPressed,
-            lockedByOtherMode && styles.buttonDisabled,
+            motionLocked && styles.buttonDisabled,
           ]}
         >
           <Text style={styles.buttonLabel}>Als Start setzen</Text>
         </Pressable>
         <Pressable
           onPress={handleSetEnd}
-          disabled={lockedByOtherMode}
+          disabled={motionLocked}
           style={({ pressed }) => [
             styles.button,
             pressed && styles.buttonPressed,
-            lockedByOtherMode && styles.buttonDisabled,
+            motionLocked && styles.buttonDisabled,
           ]}
         >
           <Text style={styles.buttonLabel}>Als Ende setzen</Text>
@@ -649,11 +662,11 @@ export function AutoDriveControls({ disabled = false }: AutoDriveControlsProps =
             <View key={preset.id} style={styles.presetRow}>
               <Pressable
                 onPress={() => handleLoadPreset(preset)}
-                disabled={lockedByOtherMode}
+                disabled={motionLocked}
                 style={({ pressed }) => [
                   styles.presetInfo,
-                  pressed && !lockedByOtherMode && styles.presetInfoPressed,
-                  lockedByOtherMode && styles.buttonDisabled,
+                  pressed && !motionLocked && styles.presetInfoPressed,
+                  motionLocked && styles.buttonDisabled,
                 ]}
               >
                 <Text style={styles.presetName}>{preset.name}</Text>

@@ -36,10 +36,10 @@
 
 ## Ebene 5 — Verdrahten und Oberfläche der Erweiterung
 
-- [ ] T15  Firmware-Status auf 10 Byte: Byte 8 Sperrgrund aus `MotorStatus`, Byte 9 `batteryShutdownSeconds()`; Puffer 8 → 10; Firmware kompiliert  · files: firmware/src/ble.cpp  · → AC-12, AC-13, EC-8
-- [ ] T16 [P]  Banner nach Grund („Akku leer – bitte laden" / „Akkumessung gestört – bitte Verkabelung prüfen"), Zeile „Slider schaltet sich in N s ab" bei Restsekunden, Hinweis „Bitte schalte den Slider aus und lade den Akku"; Test; `RootScreen` reicht Grund + Sekunden ans Banner und die Akku-Sperre getrennt als `batteryLocked` an `AutoDriveControls` (statt über `disabled`)  · files: src/components/BatteryLockBanner.tsx, src/components/BatteryLockBanner.test.ts, src/screens/RootScreen.tsx  · → AC-9, AC-12, AC-13, EC-8
-- [ ] T17 [P]  BUG-4: neue Prop `batteryLocked` in `AutoDriveControls` sperrt nur Fahrt-Auslöser, Setzen und Preset laden; „Als Preset speichern" und „Löschen" bleiben bedienbar; `disabled` (Zeitraffer läuft) unverändert  · files: src/components/AutoDriveControls.tsx  · → AC-9
-- [ ] T18 [P]  BUG-5: `start()` prüft die Sperre selbst und startet nicht; Meldung nach Grund („Akku leer – Bewegung gestoppt" / „Akkumessung gestört – Bewegung gestoppt"), ebenso beim Beenden einer laufenden Sequenz; Tests  · files: src/components/useTimelapseSequence.ts, src/components/useTimelapseSequence.test.ts  · → AC-10, AC-13
+- [x] T15  Firmware-Status auf 10 Byte: Byte 8 Sperrgrund aus `MotorStatus`, Byte 9 `batteryShutdownSeconds()`; Puffer 8 → 10; Firmware kompiliert  · files: firmware/src/ble.cpp  · → AC-12, AC-13, EC-8
+- [x] T16 [P]  Banner nach Grund („Akku leer – bitte laden" / „Akkumessung gestört – bitte Verkabelung prüfen"), Zeile „Slider schaltet sich in N s ab" bei Restsekunden, Hinweis „Bitte schalte den Slider aus und lade den Akku"; Test; `RootScreen` reicht Grund + Sekunden ans Banner und die Akku-Sperre getrennt als `batteryLocked` an `AutoDriveControls` (statt über `disabled`)  · files: src/components/BatteryLockBanner.tsx, src/components/BatteryLockBanner.test.ts, src/screens/RootScreen.tsx  · → AC-9, AC-12, AC-13, EC-8
+- [x] T17 [P]  BUG-4: neue Prop `batteryLocked` in `AutoDriveControls` sperrt nur Fahrt-Auslöser, Setzen und Preset laden; „Als Preset speichern" und „Löschen" bleiben bedienbar; `disabled` (Zeitraffer läuft) unverändert  · files: src/components/AutoDriveControls.tsx  · → AC-9
+- [x] T18 [P]  BUG-5: `start()` prüft die Sperre selbst und startet nicht; Meldung nach Grund („Akku leer – Bewegung gestoppt" / „Akkumessung gestört – Bewegung gestoppt"), ebenso beim Beenden einer laufenden Sequenz; Tests  · files: src/components/useTimelapseSequence.ts, src/components/useTimelapseSequence.test.ts  · → AC-10, AC-13
 
 ## Ebene 6 — Hardware-Test der Erweiterung
 
