@@ -15,7 +15,7 @@
  * renders progress/inputs from the state this hook returns and calls
  * start()/stop() from button handlers.
  */
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Device } from 'react-native-ble-plx';
 
 import {
@@ -182,12 +182,34 @@ function waitForStatusCondition(
   });
 }
 
-/** Wraps capturePhoto() so a rejection carries a clear, prefixed message. */
+/**
+ * qa-report.md BUG-11: the upper bound for one photo capture + gallery save.
+ * A capture that never settles (seen on device 2026-09-30: CameraX called
+ * takePictureInternal and never returned) otherwise left the sequence
+ * hanging at the same shot forever, with the screen kept awake and no
+ * message. Generous on purpose — a normal capture + save takes well under
+ * a few seconds.
+ */
+const CAPTURE_TIMEOUT_MS = 15000;
+
+/**
+ * Wraps capturePhoto() so a rejection carries a clear, prefixed message and
+ * a capture that never settles fails after CAPTURE_TIMEOUT_MS (BUG-11).
+ */
 async function capturePhotoOrThrow(capturePhoto: () => Promise<void>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error('Kamera hat nicht geantwortet (Zeitüberschreitung)')),
+      CAPTURE_TIMEOUT_MS,
+    );
+  });
   try {
-    await capturePhoto();
+    await Promise.race([capturePhoto(), timeout]);
   } catch (err) {
     throw new Error(`Foto konnte nicht aufgenommen werden: ${describeError(err)}`);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -314,6 +336,11 @@ export function useTimelapseSequence(
       if (runIdRef.current !== myRunId) {
         return;
       }
+      // qa-report.md BUG-13: finishRun() can now also be called from outside
+      // the loop (the disconnect effect below) while the loop is parked in a
+      // long interval delay — invalidate it so it quietly returns afterwards
+      // instead of sending a move to a reconnected device.
+      runIdRef.current++;
       isRunningRef.current = false;
       setIsRunning(false);
       setCurrentShot(0);
@@ -432,6 +459,14 @@ export function useTimelapseSequence(
         setCurrentShot(i);
         setRemainingSeconds(Math.max(0, intervalSeconds * (shotCount - i)));
 
+        // qa-report.md BUG-12: after the last shot there is nothing left to
+        // wait for — the return drive follows immediately instead of one
+        // extra interval later (which kept the carriage parked at the end,
+        // the controls locked and the screen awake for up to an hour).
+        if (i === shotCount) {
+          break;
+        }
+
         const elapsedMs = Date.now() - stepStartedAt;
         const restMs = Math.max(0, intervalSeconds * 1000 - elapsedMs);
         await delay(restMs);
@@ -464,6 +499,19 @@ export function useTimelapseSequence(
     },
     [finishRun],
   );
+
+  // qa-report.md BUG-8/BUG-13: a disconnect used to surface only at the
+  // next step's device check — up to a full interval (max. 1 h) later, with
+  // the other controls locked and the screen awake meanwhile, and after a
+  // quick reconnect it ended with a misleading timeout message instead.
+  // End the sequence the moment the device goes away. The firmware stops
+  // the motor on its own (onDisconnect → motorStop()); no STOP is sent from
+  // here since there is no device to send it to.
+  useEffect(() => {
+    if (device === null && isRunningRef.current) {
+      finishRun(runIdRef.current, 'Verbindung zum Slider verloren');
+    }
+  }, [device, finishRun]);
 
   const start = useCallback(
     (shotCount: number, intervalSeconds: number): void => {

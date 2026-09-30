@@ -473,4 +473,91 @@ describe('useTimelapseSequence', () => {
     expect(sendAutoDriveCommand).not.toHaveBeenCalled();
     expect(mockDeactivate).toHaveBeenCalledTimes(1);
   });
+
+  describe('robustness fixes (qa-report.md BUG-8/11/12/13)', () => {
+    async function startedSequence(shots: number, interval: number) {
+      const device = fakeDevice('device-1');
+      let api: TimelapseSequenceApi | undefined;
+      let renderer: ReactTestRenderer.ReactTestRenderer;
+      await act(async () => {
+        renderer = ReactTestRenderer.create(renderProbe(device, a => (api = a)));
+        await jest.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        broadcastStatus(fullStatus());
+        await jest.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        api!.start(shots, interval);
+        await jest.advanceTimersByTimeAsync(0);
+      });
+      return { device, api: () => api!, renderer: () => renderer };
+    }
+
+    async function confirmStep(): Promise<void> {
+      await act(async () => {
+        broadcastStatus(fullStatus({ timelapseMoving: true }));
+        await jest.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        broadcastStatus(fullStatus({ timelapseMoving: false }));
+        await jest.advanceTimersByTimeAsync(500); // settle pause + photo
+      });
+    }
+
+    it('BUG-11: a photo capture that never settles fails the sequence after the timeout and sends STOP', async () => {
+      mockCapturePhoto.mockReset().mockImplementation(() => new Promise<void>(() => {}));
+      const seq = await startedSequence(3, 5);
+      expect(seq.api().isRunning).toBe(true);
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(14000);
+      });
+      expect(seq.api().isRunning).toBe(true); // still within the timeout
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(2000);
+      });
+      expect(seq.api().isRunning).toBe(false);
+      expect(seq.api().error).toMatch(/Kamera hat nicht geantwortet/);
+      expect(sendStopCommand).toHaveBeenCalledTimes(1);
+      expect(sendTimelapseMoveCommand).not.toHaveBeenCalled();
+      expect(mockDeactivate).toHaveBeenCalledTimes(1);
+    });
+
+    it('BUG-12: the return drive follows the last shot immediately, not one interval later', async () => {
+      const seq = await startedSequence(2, 3600);
+      await confirmStep();
+      expect(mockCapturePhoto).toHaveBeenCalledTimes(2);
+      expect(sendAutoDriveCommand).toHaveBeenCalledWith(seq.device, 'endToStart', expect.any(Number));
+      expect(seq.api().isRunning).toBe(false);
+      expect(mockDeactivate).toHaveBeenCalledTimes(1);
+    });
+
+    it('BUG-8/13: a disconnect during the interval ends the sequence at once; a reconnect sends nothing further', async () => {
+      const seq = await startedSequence(3, 3600);
+      await confirmStep(); // shot 2 taken, now waiting out the long interval
+      expect(seq.api().isRunning).toBe(true);
+      const movesBefore = (sendTimelapseMoveCommand as jest.Mock).mock.calls.length;
+
+      let api: TimelapseSequenceApi | undefined;
+      act(() => {
+        seq.renderer().update(renderProbe(null, a => (api = a)));
+      });
+      expect(api!.isRunning).toBe(false);
+      expect(api!.error).toMatch(/Verbindung/);
+      expect(mockDeactivate).toHaveBeenCalledTimes(1);
+
+      // reconnect with the same device, then let the old interval run out
+      act(() => {
+        seq.renderer().update(renderProbe(seq.device, a => (api = a)));
+      });
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(3600 * 1000);
+      });
+      expect((sendTimelapseMoveCommand as jest.Mock).mock.calls.length).toBe(movesBefore);
+      expect(sendAutoDriveCommand).not.toHaveBeenCalled();
+      expect(api!.isRunning).toBe(false);
+    });
+  });
 });
