@@ -329,3 +329,15 @@ BUG-5 wurde behoben (Commit `248cf19`, 1 Produktionsdatei → eine Lane mit alle
 - [!] Alle Laufzeit-/Hardware-Aussagen — no way to run and probe this project was recorded: BUG-5-Risikofall (2 Aufnahmen über ≥ 60 cm bei 8000 Steps/s), Stopp-Reaktionszeit, Galerie-Ablage, Clipping der SurfaceView-Vorschau beim Scrollen, Verhalten von VisionCamera bei ausgehängter Kamera/Hintergrund, Notify bei 0-Step-Schritten.
 
 **Production-Ready: NEIN (noch nicht).** Keine Critical/High-Bugs. Offen sind fünf Medium-Bugs (BUG-8, 9, 11, 12, 13) — kein Blocker laut Regel, aber BUG-11 (Sequenz hängt unbegrenzt) ist am Gerät bereits aufgetreten und BUG-12 macht jede Sequenz um ein Intervall zu lang. Die Laufzeit-ACs AC-4, AC-9, AC-10 und der BUG-5-Risikofall sind noch nicht protokolliert am Gerät bestätigt. Status: **In Review**.
+
+## Nachtrag 6: Fix BUG-8/11/12/13 und protokollierter Nutzer-Test am Gerät (2026-09-30)
+
+- **Fix `0e112bf`** (`useTimelapseSequence.ts`): Fotoaufnahme mit 15-s-Timeout (BUG-11); nach der letzten Aufnahme keine Intervall-Wartezeit, Rückfahrt sofort (BUG-12); Verbindungsabbruch beendet die Sequenz sofort, `finishRun()` macht die laufende Schleife ungültig (BUG-8/BUG-13). 213 Tests grün; drei neue Tests, Red-Check: ohne die Fixes alle drei rot. `design.md` um vier Einträge ergänzt.
+- **Protokollierter Nutzer-Test** — Checkliste an den Nutzer übergeben, Antwort je Punkt „ja". Gerät: Android EB2103 (Debug-Build über Metro), Firmware-Stand `a763cb3`, App-Stand `0e112bf`:
+  - [x] **AC-1 / AC-2 / BUG-12** — 3 Aufnahmen, 5 s Intervall: 3 Fotos, Fahrt dazwischen, Rückfahrt sofort nach der letzten Aufnahme — vom Nutzer am Gerät bestätigt, 2026-09-30
+  - [x] **AC-10** — Fotos in der Galerie — vom Nutzer am Gerät bestätigt, 2026-09-30
+  - [x] **AC-4** — Stopp während einer Fahrt hält sofort an — vom Nutzer am Gerät bestätigt, 2026-09-30
+  - [x] **AC-9** — Jog-Tasten und „Als Start setzen" reagieren während der Sequenz nicht — vom Nutzer am Gerät bestätigt, 2026-09-30
+  - [x] **BUG-5** — 2 Aufnahmen über ≥ 60 cm laufen ohne Fehlermeldung durch — vom Nutzer am Gerät bestätigt, 2026-09-30
+  - [x] **BUG-8 / BUG-13 / AC-7** — Bluetooth aus/an in der Pause: Sequenz endet sofort mit „Verbindung verloren", Jog und Auto-Fahrt nach dem Neuverbinden sofort bedienbar — vom Nutzer am Gerät bestätigt, 2026-09-30
+- Einschränkung: Anzahl der Durchläufe nicht protokolliert; BUG-11 (hängende Aufnahme) lässt sich am Gerät nicht gezielt auslösen — nur per Test belegt. Der Fix `0e112bf` ist noch nicht durch einen unabhängigen `qa-engineer`-Lauf geprüft.
