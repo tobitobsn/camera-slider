@@ -49,6 +49,8 @@ function fullStatus(overrides: Partial<SliderStatus> = {}): SliderStatus {
     batteryMillivolts: null,
     batteryLocked: false,
     moving: false,
+    lockReason: 'none',
+    shutdownSeconds: null,
     ...overrides,
   };
 }

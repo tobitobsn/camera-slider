@@ -1,5 +1,7 @@
 #include "motor.h"
 
+#include "driver/gpio.h"
+
 #include <Arduino.h>
 #include <FastAccelStepper.h>
 #include <TMCStepper.h>
@@ -170,6 +172,7 @@ volatile bool timelapseMoving = false;
 // task (every motion entry point) — volatile for the same cross-task
 // visibility reason as the flags above.
 volatile bool lockedOut = false;
+volatile LockReason lockReason = LockReason::kNone;
 
 // millis() timestamp of the motorTimelapseMoveTo() call that set
 // timelapseMoving=true. Same race and same fix as autoDriveStartMillis
@@ -617,6 +620,7 @@ MotorStatus motorGetStatus() {
   status.driving = snapAutoDriving;
   status.timelapseMoving = snapTimelapseMoving;
   status.locked = lockedOut;
+  status.lockReason = static_cast<uint8_t>(lockReason);
   status.moving = stepper != nullptr && stepper->isRunning();
 
   if (snapHasStart && snapHasEnd) {
@@ -647,13 +651,39 @@ MotorStatus motorGetStatus() {
 
 // --- PROJ-6: low-battery protective lockout ----------------------------------
 
-void motorLockout() {
+void motorLockout(LockReason reason) {
+  if (lockedOut) {
+    return;  // first reason wins, driver already down
+  }
   // Flag first, then stop: a motion request from the NimBLE task that
   // checks the flag after this line is rejected; one that slipped past the
   // check just before is stopped again by battery.cpp on the next loop()
   // iteration (design.md, race guarantee).
+  lockReason = reason;
   lockedOut = true;
   motorStop();
+
+  // Power the driver down (spec.md AC-12): stop auto-enable from switching
+  // it back on, drive EN HIGH (active-low enable → off) and turn the
+  // TMC2209's output stage off over UART (toff = 0) as a second guard.
+  if (stepper != nullptr) {
+    stepper->setAutoEnable(false);
+    stepper->disableOutputs();
+  }
+  pinMode(kEnablePin, OUTPUT);
+  digitalWrite(kEnablePin, HIGH);
+  driver.toff(0);
+}
+
+LockReason motorLockReason() {
+  return lockReason;
+}
+
+void motorPrepareDeepSleep() {
+  digitalWrite(kEnablePin, HIGH);
+  // GPIO 27 is RTC-capable: hold its level through deep sleep.
+  gpio_hold_en(static_cast<gpio_num_t>(kEnablePin));
+  gpio_deep_sleep_hold_en();
 }
 
 bool motorIsLocked() {

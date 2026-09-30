@@ -23,6 +23,8 @@ const INITIAL_STATUS: SliderStatus = {
   batteryMillivolts: null,
   batteryLocked: false,
   moving: false,
+  lockReason: 'none',
+  shutdownSeconds: null,
 };
 
 const OTHER_STATUS: SliderStatus = {
@@ -37,6 +39,8 @@ const OTHER_STATUS: SliderStatus = {
   batteryMillivolts: null,
   batteryLocked: false,
   moving: false,
+  lockReason: 'none',
+  shutdownSeconds: null,
 };
 
 function fakeDevice(id: string): Device {

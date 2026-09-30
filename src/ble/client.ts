@@ -93,10 +93,20 @@ export type SliderStatus = {
   batteryLocked: boolean;
   /** PROJ-6: the motor is moving right now (any motion, jog included). */
   moving: boolean;
+  /** PROJ-6 AC-13: why motion is locked; 'none' while not locked. */
+  lockReason: LockReason;
+  /** PROJ-6 AC-12: seconds until the slider switches itself off (1–60), null otherwise. */
+  shutdownSeconds: number | null;
 };
 
-/** PROJ-6: millivolt readings above this are treated as implausible (null). */
-const MAX_PLAUSIBLE_BATTERY_MILLIVOLTS = 20000;
+export type LockReason = 'none' | 'lowBattery' | 'measurementFault';
+
+/**
+ * PROJ-6: millivolt readings above this are treated as implausible (null).
+ * A 3S pack tops out at 12 600 mV; 13 500 leaves room for tolerance
+ * (qa-report.md BUG-7 — 20 000 let 12.6–20 V pass silently as 100 %).
+ */
+const MAX_PLAUSIBLE_BATTERY_MILLIVOLTS = 13500;
 
 const DEFAULT_SCAN_TIMEOUT_MS = 10000;
 
@@ -420,9 +430,12 @@ export async function sendTimelapseMoveCommand(
  *    (increasing step-count direction), 0x01 when it's before (decreasing
  *    direction) — only meaningful when hasStart && hasEnd are both true
  *  - PROJ-6: flags bit 6 batteryLocked, bit 7 moving; bytes 6-7 battery
- *    voltage in millivolts (uint16, little-endian), 0 = no value yet.
+ *    voltage in millivolts (uint16, little-endian), 0 = no value yet;
+ *    byte 8 lock reason (0 none, 1 low battery, 2 measurement fault);
+ *    byte 9 seconds until shutdown (0 = none).
  *    A 6-byte payload (older firmware) reads as no battery value, not
- *    locked, not moving.
+ *    locked, not moving; an 8-byte payload (PROJ-6 before the refine)
+ *    reads a set bit 6 as reason 'lowBattery', no countdown.
  */
 export function parseStatusPayload(base64Value: string): SliderStatus {
   const bytes = toByteArray(base64Value);
@@ -444,6 +457,13 @@ export function parseStatusPayload(base64Value: string): SliderStatus {
     const raw = (bytes[6] ?? 0) | ((bytes[7] ?? 0) << 8);
     batteryMillivolts = raw === 0 || raw > MAX_PLAUSIBLE_BATTERY_MILLIVOLTS ? null : raw;
   }
+
+  let lockReason: LockReason = 'none';
+  if (batteryLocked) {
+    lockReason = bytes.length >= 9 && bytes[8] === 2 ? 'measurementFault' : 'lowBattery';
+  }
+  const rawSeconds = bytes.length >= 10 ? bytes[9] ?? 0 : 0;
+  const shutdownSeconds = batteryLocked && rawSeconds > 0 && rawSeconds <= 60 ? rawSeconds : null;
 
   let distanceSteps: number | null = null;
   let endIsAfterStart: boolean | null = null;
@@ -470,6 +490,8 @@ export function parseStatusPayload(base64Value: string): SliderStatus {
     batteryMillivolts,
     batteryLocked,
     moving,
+    lockReason,
+    shutdownSeconds,
   };
 }
 

@@ -145,6 +145,8 @@ struct MotorStatus {
   // PROJ-6: movement is locked out after a low-battery protective stop
   // (motorLockout()) — only a reboot clears it.
   bool locked;
+  // PROJ-6 AC-13: why motion is locked (only meaningful while `locked`).
+  uint8_t lockReason;
   // PROJ-6: the stepper is currently moving (any kind of motion, jog
   // included) — lets the app dim the battery reading, which is only
   // refreshed in standstill.
@@ -201,12 +203,27 @@ void motorTimelapseMoveCheck();
 
 // --- PROJ-6: low-battery protective lockout ----------------------------------
 //
-// design.md "Schutz-Stopp-Logik": sets a RAM-only lock flag first, then
-// stops any motion (motorStop()). While locked, motorJog(), motorAutoDrive()
-// and motorTimelapseMoveTo() reject every request. Only a reboot of the
-// ESP32 clears the lock (spec.md AC-8, EC-3) — there is deliberately no
-// unlock function.
-void motorLockout();
+// design.md "Schutz-Stopp-Logik" / "Erweiterung nach QA": sets a RAM-only
+// lock flag and reason first, then stops any motion (motorStop()) and
+// powers the driver down (TMC2209 outputs off via UART, EN pin HIGH,
+// auto-enable off). While locked, motorJog(), motorAutoDrive() and
+// motorTimelapseMoveTo() reject every request. Only a reboot of the ESP32
+// clears the lock (spec.md AC-8, EC-3) — there is deliberately no unlock
+// function. A second call keeps the first reason.
+enum class LockReason : uint8_t {
+  kNone = 0,
+  kLowBattery = 1,         // spec.md AC-7
+  kMeasurementFault = 2,   // spec.md AC-13
+};
+void motorLockout(LockReason reason);
+
+LockReason motorLockReason();
+
+// Holds the driver's EN pin HIGH (driver off) through deep sleep — normal
+// outputs lose their level in deep sleep and a floating EN would switch
+// the driver back on (design.md "Ablauf nach der Sperre"). Call right
+// before esp_deep_sleep_start().
+void motorPrepareDeepSleep();
 
 // True once motorLockout() has been called since boot.
 bool motorIsLocked();

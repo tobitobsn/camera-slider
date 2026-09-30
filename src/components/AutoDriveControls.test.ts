@@ -23,6 +23,8 @@ const BASE_STATUS: SliderStatus = {
   batteryMillivolts: null,
   batteryLocked: false,
   moving: false,
+  lockReason: 'none',
+  shutdownSeconds: null,
 };
 
 describe('parseDurationSeconds', () => {

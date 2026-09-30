@@ -24,3 +24,6 @@ uint16_t batteryDisplayMillivolts();
 // True once the protective stop has fired since boot (same as
 // motorIsLocked(), exposed here for callers that only know the battery).
 bool batteryIsLocked();
+
+// spec.md AC-12: seconds until deep sleep while locked (60 … 1), 0 otherwise.
+uint8_t batteryShutdownSeconds();

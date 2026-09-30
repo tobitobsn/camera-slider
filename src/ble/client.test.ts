@@ -282,6 +282,8 @@ describe('parseStatusPayload', () => {
       batteryMillivolts: null,
       batteryLocked: false,
       moving: false,
+      lockReason: 'none',
+      shutdownSeconds: null,
     });
   });
 
@@ -308,10 +310,48 @@ describe('parseStatusPayload', () => {
       expect(parseStatusPayload(payload8(0xff, 12000)).timelapseMoving).toBe(true);
     });
 
-    it('treats 0 mV (no value yet) and implausible values (> 20000 mV) as null', () => {
+    it('treats 0 mV (no value yet) and implausible values (> 13500 mV, BUG-7) as null', () => {
       expect(parseStatusPayload(payload8(0x00, 0)).batteryMillivolts).toBeNull();
-      expect(parseStatusPayload(payload8(0x00, 20001)).batteryMillivolts).toBeNull();
-      expect(parseStatusPayload(payload8(0x00, 20000)).batteryMillivolts).toBe(20000);
+      expect(parseStatusPayload(payload8(0x00, 13501)).batteryMillivolts).toBeNull();
+      expect(parseStatusPayload(payload8(0x00, 13500)).batteryMillivolts).toBe(13500);
+    });
+
+    it('reads an 8-byte payload with bit 6 as reason lowBattery, no countdown', () => {
+      const s = parseStatusPayload(payload8(0x40, 9200));
+      expect(s.lockReason).toBe('lowBattery');
+      expect(s.shutdownSeconds).toBeNull();
+      expect(parseStatusPayload(payload8(0x00, 9200)).lockReason).toBe('none');
+    });
+  });
+
+  describe('PROJ-6 refine: lock reason + shutdown countdown (10-byte payload)', () => {
+    function payload8(flags: number, millivolts: number): string {
+      return fromByteArray(
+        new Uint8Array([flags, 0, 0, 0, 0, 0, millivolts & 0xff, (millivolts >>> 8) & 0xff]),
+      );
+    }
+
+    function payload10(flags: number, reason: number, seconds: number): string {
+      return fromByteArray(new Uint8Array([flags, 0, 0, 0, 0, 0, 0x2c, 0x2e, reason, seconds]));
+    }
+
+    it('reads byte 8 as the lock reason and byte 9 as seconds until shutdown', () => {
+      const low = parseStatusPayload(payload10(0x40, 1, 42));
+      expect(low.lockReason).toBe('lowBattery');
+      expect(low.shutdownSeconds).toBe(42);
+      const fault = parseStatusPayload(payload10(0x40, 2, 60));
+      expect(fault.lockReason).toBe('measurementFault');
+      expect(fault.shutdownSeconds).toBe(60);
+    });
+
+    it('ignores reason and seconds while not locked, and out-of-range seconds', () => {
+      const unlocked = parseStatusPayload(payload10(0x00, 2, 30));
+      expect(unlocked.lockReason).toBe('none');
+      expect(unlocked.shutdownSeconds).toBeNull();
+      expect(parseStatusPayload(payload10(0x40, 1, 0)).shutdownSeconds).toBeNull();
+      expect(parseStatusPayload(payload10(0x40, 1, 61)).shutdownSeconds).toBeNull();
+      // unknown reason byte while locked → treated as low battery
+      expect(parseStatusPayload(payload10(0x40, 7, 5)).lockReason).toBe('lowBattery');
     });
 
     it('passes a low USB-only reading through (the "no battery" decision is battery.ts\'s)', () => {
