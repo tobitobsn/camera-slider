@@ -334,3 +334,29 @@ Eine zweite, unabhängige `qa-engineer`-Re-Verifikation (Auftrag: Code- und Firm
   - [x] **AC-6** — App im Hintergrund/geschlossen beim Joggen → Stopp nach etwa 1 s — vom Nutzer am Gerät bestätigt, 2026-09-30
   - [x] **AC-7** — nicht verbunden → Jog-Tasten nicht bedienbar — vom Nutzer am Gerät bestätigt, 2026-09-30
 - Einschränkung: Anzahl der Durchläufe nicht protokolliert; EC-1 (Finger herausziehen), EC-5 (Reconnect) nicht separat abgefragt. Der Fix `a763cb3` ist noch nicht durch einen unabhängigen `qa-engineer`-Lauf geprüft.
+
+## Nachtrag 9: Unabhängige Re-Verifikation des Fixes `a763cb3` — Freigabe (2026-09-30)
+
+**Scope:** `git diff 4034f4a..HEAD -- firmware/src features/PROJ-2-manuelle-steuerung-jog/design.md docs/stacks/firmware-esp32-tmc2209.md` (Commits `a763cb3`, `8b33168`). Ein `qa-engineer`-Lauf, alle drei Scopes (2 → 3 → 4), eingegrenzt auf den Diff und BUG-20/22/23. Firmware-Build am HEAD: SUCCESS (RAM 12,4 %, Flash 49,1 %, ohne Upload); Disassembly von `motor.cpp.o`; Host-Simulation gegen die vendorte FastAccelStepper 0.31.8 mit zeitgenauer Queue (Engine-Task alle 4 ms), alte und neue `motorStop()`-Variante im Vergleich. App-Suite vom Diff nicht betroffen (zuletzt `suite9.log`, 210 grün). Laufzeit: `[!] NOT VERIFIED — no way to run and probe this project was recorded`; der protokollierte Nutzer-Test steht in Nachtrag 8.
+
+### Ergebnis
+- [x] **BUG-16 geschlossen** — Simulation: nach gesetztem Flag alt 0 + 0 Schritte (Dauerausfall), neu 0 + 210 (heilt sich beim nächsten Tipp), weil ein STOP im Stillstand das Flag nicht mehr setzt (`motor.cpp:330`).
+- [x] **BUG-20 geschlossen** für STOP im Stillstand — Simulation T1: Flag bleibt 0, 200-ms-Tipp fährt 210 Schritte; vom Nutzer am Gerät bestätigt (Nachtrag 8). Restfenster siehe BUG-24.
+- [x] **BUG-22 geschlossen** für alle aufgezählten Stellen — `design.md:81, 119, 123, 124, 125` und Stack-Pack `:79` stimmen mit dem Code überein. Rest siehe BUG-26.
+- [x] **BUG-23 geschlossen** — `lastJogMillis` steht nach dem frühen Return bei `autoDriving/timelapseMoving` (`motor.cpp:239-246`) und im Maschinencode vor `setSpeedInHz`/`runForward` (`motorJog+0x3b`); ein abgelehnter JOG hält keinen fremden Lauf am Leben.
+- [x] **Kein Stopp kann ausfallen** — `isRunning()` umfasst Rampe *und* Queue (`FastAccelStepper.cpp:897-899`); der Guard überspringt `forceStop()` nur, wenn physisch nichts läuft. STOP während Jog (T2) und während Auto-Fahrt (T5): 88 Restschritte, Stillstand nach 21 ms — identisch zur alten Variante. Watchdog ruft `motorStop()` nur bei `isRunning()`. Alle BLE-Pfade sind im NimBLE-Host-Task serialisiert.
+- [x] **AC-1..AC-6 (Firmware-Anteil), EC-2..EC-4** — Code + Simulation, siehe oben; AC-7, EC-1, EC-5 nur App-Dateien, nicht im Diff (unverändert seit Nachtrag 7).
+- [x] **Security:** keine neue Angriffsfläche; keine Secrets im Diff. Auth/Authorization/Brute Force/Credentials in URL nicht anwendbar, Rate Limiting not implemented (BUG-9).
+- [x] **Regression PROJ-1/3/4/5:** STOP während Auto-Fahrt und Zeitraffer wirksam, Flags immer zurückgesetzt (`motor.cpp:344, 349`); `moveTo()` löscht ein hängendes Flag (Folgefahrt 2000/2000 Schritte); Disconnect-Stopp unverändert.
+
+### Neue Befunde (alle Low)
+- [ ] **BUG-24 (Low) — Restfenster von BUG-20:** ein STOP in den letzten ~18–22 ms einer Bewegung (Rampe schon beendet, Queue läuft noch) oder ein zweiter STOP 3–20 ms nach dem ersten setzt das Flag weiterhin; der nächste Jog-Start wird dann einen Herzschlag (~300 ms) lang geschluckt, der Tipp danach fährt (heilt sich selbst). Ursache: `isRunning()` ist weiter als die Bedingung, unter der das Flag gelöscht wird (Rampe aktiv). Möglicher Ansatz: `isRampGeneratorActive()` als Bedingung. Repro am Gerät (ungeprüft): genau beim Ankommen einer Auto-Fahrt „Stopp" tippen oder „Stopp" doppelt tippen, dann kurz joggen.
+- [ ] **BUG-25 (Low, vorbestehend):** im Watchdog wird `millis()` vor `lastJogMillis` gelesen (Disassembly `motorWatchdogCheck` 0x2f–0x3b); ein genau dazwischen geschriebener Herzschlag lässt die Differenz überlaufen → unberechtigter, sicherer Stopp mitten im Jog, läuft beim nächsten Herzschlag wieder an.
+- [ ] **BUG-26 (Low, Doku-Rest):** `motor.cpp:282-294` beschreibt BUG-16 noch mit der alten Ursache (verworfener Rückgabewert), der Fehlerzweig `:301-307` bleibt toter Code; das Restfenster (BUG-24) ist in `motor.cpp:320-321` und `design.md` nicht erwähnt; der Stack-Pack warnt nicht vor der `forceStop()`-Falle.
+- Außerhalb Scope: `FastAccelStepper @ ^0.31.1` nicht fest gepinnt (Fix hängt an Bibliotheksinterna, vendort ist 0.31.8).
+
+### Offene Bugs gesamt
+- **Medium:** BUG-21 (deployte App v1.2.0 und aktuelle Firmware müssen gemeinsam ausgeliefert werden — für `/deploy`), BUG-12 (akzeptierte Grenze, Mehrgeräte), BUG-13 (Prozess-Empfehlung).
+- **Low:** BUG-5..9, BUG-14/15, BUG-19, BUG-24..26.
+
+**Production-Ready: JA.** Keine Critical/High-Bugs offen. BUG-16 und BUG-20 sind unabhängig verifiziert geschlossen; alle Laufzeit-ACs sind durch den protokollierten Nutzer-Test (Nachtrag 8) auf dem aktuellen Firmware-Stand ausgeführt. Nicht verifiziert bleiben: Hardware-Timing (die Simulation belegt die Rampenlogik), Schrittverluste/Wärme bei 8000 Steps/s, EC-1/EC-5 am Gerät. **BUG-21 ist beim Deploy zu beachten:** App und Firmware nur gemeinsam ausliefern. Status: **Approved**.
