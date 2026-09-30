@@ -73,7 +73,7 @@ motor.cpp (erweitert)
 
 ## Grenze zur Firmware (Erweiterung der Status-Characteristic)
 
-Die Status-Characteristic (`6e400003-…`, Notify) wächst von 6 auf **8 Byte**:
+Die Status-Characteristic (`6e400003-…`, Notify) wächst von 6 auf **10 Byte** (8 Byte ursprünglich, +2 durch den Refine vom 2026-09-30 — siehe „Erweiterung nach QA"):
 
 | Byte | Inhalt | Neu? |
 |---|---|---|
@@ -81,10 +81,13 @@ Die Status-Characteristic (`6e400003-…`, Notify) wächst von 6 auf **8 Byte**:
 | 1–4 | distanceSteps (uint32 LE) | unverändert |
 | 5 | Richtung (0x00 = Ende nach Start) | unverändert |
 | **6–7** | **Akkuspannung in Millivolt (uint16 LE)**, Anzeigewert; `0` = noch kein Wert | neu |
+| **8** | **Sperrgrund:** `0` = keine Sperre, `1` = Akku leer (AC-7), `2` = Akkumessung gestört (AC-13); andere Werte → wie `0` behandelt | neu (Refine) |
+| **9** | **Sekunden bis zur Abschaltung:** `0`–`60` während der Frist nach der Sperre (AC-12), sonst `0` | neu (Refine) |
 
 - `moving` (bit7) = der Stepper bewegt sich gerade (jede Bewegungsart, auch Jog). Die App nutzt es nur für das Abschwächen der Anzeige (AC-3).
 - Notify wie bisher nur bei Änderung. Die Spannung ändert sich höchstens alle 10 s und in 20-mV-Schritten; `moving` ändert sich bei jedem Start/Stopp einer Bewegung — ein zusätzliches Notify pro Bewegungswechsel, unkritisch.
-- **Rückwärtskompatibel in der App:** Ein 6-Byte-Payload (alte Firmware) wird als `batteryMillivolts = null`, `batteryLocked = false`, `moving = false` gelesen → Anzeige „🔋 –", alles andere wie bisher. Muster wie bei PROJ-4 (5 → 6 Byte).
+- **Rückwärtskompatibel in der App:** Ein 6-Byte-Payload (alte Firmware) wird als `batteryMillivolts = null`, `batteryLocked = false`, `moving = false` gelesen → Anzeige „🔋 –", alles andere wie bisher. Ein 8-Byte-Payload (PROJ-6 vor dem Refine) → Sperrgrund aus bit6 als „Akku leer" abgeleitet, keine Frist. Muster wie bei PROJ-4 (5 → 6 Byte).
+- **Alte App (v1.3.0) liest nur die ersten 6 Byte** — längere Payloads schaden ihr nicht (Regression-Lane geprüft).
 
 ## Datenmodell
 
@@ -123,13 +126,59 @@ Keine persistierte Entität — `docs/data-model.md` bleibt unverändert. Alle W
 
 ## Behaviors & Access
 
-Keine Accounts, kein Backend. Einziger „Zugriff" ist der bestehende verschlüsselte BLE-Link aus PROJ-1/2; das Feature fügt **keinen** schreibenden Befehl hinzu — der Akkuzustand ist nur lesbar (Notify, wie der übrige Status). Die Sperre kann von keiner Seite per BLE aufgehoben werden, nur durch Neustart.
+Keine Accounts, kein Backend. Das Feature fügt **keinen** schreibenden Befehl hinzu — der Akkuzustand ist nur lesbar. Schreiben erfordert weiter den verschlüsselten BLE-Link aus PROJ-1/2; der Status (inkl. Akkuwerte, Sperre, Fahrt) ist dagegen wie seit PROJ-3 ohne Pairing per Notify lesbar — keine persönlichen Daten. Die Sperre kann von keiner Seite per BLE aufgehoben werden, nur durch Neustart.
 
 **App-Verhalten:**
 - **Anzeige** (AC-1..5, AC-11, EC-4, EC-5): `BatteryIndicator` liest den Status über `useSliderStatus(device)` (bestehendes Muster, eigenes Abo neben den anderen). Abgeschwächt, solange `moving`.
 - **Nachfrage** (AC-6, EC-6): Vor dem Senden von AUTO_DRIVE bzw. dem Start des Zeitraffers prüft die jeweilige Komponente `batteryLevel === critical`. Wenn ja: Bestätigungsdialog „Akku fast leer – Fahrt trotzdem starten?" mit „Abbrechen" / „Trotzdem starten". Nur „Trotzdem starten" löst den Befehl aus. Kein Dialog bei `unknown`. Jog fragt nicht (Out of Scope).
 - **Sperre** (AC-9): Ist `batteryLocked`, zeigt `RootScreen` das `BatteryLockBanner` und sperrt Jog, Auto-Fahrt (inkl. Setzen und Presets laden) und Zeitraffer-Start über die bestehenden `disabled`-Props. Der Stopp-Button bleibt bedienbar (schadet nicht).
 - **Zeitraffer** (AC-10): `useTimelapseSequence` beobachtet `batteryLocked`. Wechselt es während einer laufenden Sequenz auf „ja", endet die Sequenz sofort über den bestehenden Fehlerpfad (`finishRun`) mit „Akku leer – Bewegung gestoppt" — keine weitere Aufnahme, keine Rückfahrt.
+
+## Erweiterung nach QA (Refine 2026-09-30: AC-12, AC-13, EC-7, EC-8 und Low-Bugs)
+
+### Ablauf nach der Sperre (AC-12, EC-8)
+
+```
+Sperre ausgelöst (Grund: Akku leer ODER Messung gestört)
+  1. Sperr-Flag setzen, Sperrgrund merken, Bewegung stoppen            (wie bisher, motorLockout)
+  2. Motortreiber stromlos:  TMC2209 per UART deaktivieren (Treiber-Ausgänge aus)
+                             UND EN-Pin (GPIO 27) auf HIGH = Treiber aus
+  3. Frist 60 s: BLE bleibt aktiv, Status meldet Sperrgrund + verbleibende Sekunden (1× pro Sekunde)
+  4. Nach 60 s: EN-Pin-Zustand für den Tiefschlaf festhalten, ESP32 in den Tiefschlaf ohne Weckquelle
+     → aus bis Reset oder Stromunterbrechung (Akkuwechsel)
+```
+
+- **Warum der EN-Pin festgehalten werden muss:** Im Tiefschlaf verlieren normale Ausgänge ihren Pegel; ein schwebender EN-Eingang des Treibers könnte ihn wieder einschalten. GPIO 27 ist RTC-fähig, sein HIGH-Pegel wird über die Halte-Funktion des ESP32 in den Tiefschlaf hinübergerettet. Zusätzlich ist der Treiber per UART deaktiviert (doppelte Absicherung, solange der Treiber Logik-Versorgung hat).
+- **Weckquelle:** keine. Der ESP32 wacht nur durch Reset oder Neustart der Versorgung auf — beides bedeutet, dass der Nutzer bewusst eingreift (Akkuwechsel, Laden).
+- **EC-8:** Die Frist sendet den Status weiter; eine Verbindung in dieser Zeit bekommt beim Abonnieren sofort Sperrgrund und Restsekunden (bestehender Mechanismus Notify-on-Subscribe).
+- **Restverbrauch** im Tiefschlaf: Step-down-Wandler (Leerlaufstrom je nach Modul 0,1–5 mA), Spannungsteiler (ca. 0,1 mA), Treiber-Versorgung (wenige mA) — bekannte Grenze laut spec.md Out of Scope.
+
+### Fehlererkennung der Messung (AC-13, EC-7)
+
+- `battery.cpp` merkt sich **„Akku seit Start erkannt"** (Ja/Nein, RAM, gesetzt beim ersten Messwert ≥ 5000 mV, nie zurückgesetzt).
+- Ist er gesetzt und liegt der Schutzwert **5 s ununterbrochen unter 5000 mV** → Sperre mit Grund „Messung gestört" (derselbe Ablauf wie oben).
+- Ist er nicht gesetzt (Start im USB-Betrieb, EC-7) → Werte < 5000 mV bedeuten weiter „kein Akku": keine Sperre, keine Abschaltung.
+- Beide Zähler (leer / gestört) sind getrennt; jede Messung außerhalb des jeweiligen Bereichs setzt ihren Zähler zurück.
+
+### App
+
+- **`SliderStatus`** zusätzlich: `lockReason` — eines von `none`, `lowBattery`, `measurementFault` (aus Byte 8; fehlt Byte 8, aber bit6 gesetzt → `lowBattery`), und `shutdownSeconds` — ganze Zahl 0–60 oder `null` (aus Byte 9; `null` ohne Byte 9 oder bei `0`).
+- **`BatteryLockBanner`** bekommt Grund und Restsekunden:
+  - `lowBattery`: Titel „Akku leer – bitte laden"
+  - `measurementFault`: Titel „Akkumessung gestört – bitte Verkabelung prüfen"
+  - mit Restsekunden: Zeile „Slider schaltet sich in N s ab" (N zählt live mit, 1× pro Sekunde vom Slider gemeldet); danach bricht die Verbindung ab und die App zeigt ihren normalen Zustand für eine verlorene Verbindung
+  - Text „Bitte schalte den Slider aus und lade den Akku" als Hinweis auf den Restverbrauch
+- Die Sperre in `RootScreen`/`TimelapseControls` hängt weiter an `batteryLocked` (bit6) — unabhängig vom Grund.
+
+### Low-Bugs aus der QA (ohne Spec-Änderung)
+
+| Bug | Lösung |
+|---|---|
+| BUG-3 — gemischter Anzeigewert beim Wechsel USB ↔ Akku | Der Ruhe-Mittelwert wird verworfen und neu begonnen, sobald eine Messung auf die andere Seite von 5000 mV wechselt; der erste Wert nach dem Wechsel wird sofort übernommen |
+| BUG-4 — Presets speichern/löschen bei Sperre gesperrt | `AutoDriveControls` bekommt eine eigene Angabe „Bewegung gesperrt" (Akku-Sperre), die nur Bewegungs-Auslöser, Setzen und Preset laden sperrt; „Als Preset speichern" und „Löschen" bleiben bedienbar. Die bestehende Sperre während eines Zeitraffers bleibt wie sie ist |
+| BUG-5 — Zeitraffer-Start über offenen Dialog trotz Sperre | `useTimelapseSequence.start()` prüft die Sperre selbst und startet nicht, sondern meldet sofort „Akku leer – Bewegung gestoppt" bzw. „Akkumessung gestört – …" |
+| BUG-6 — Rundung über die 5000-mV-Grenze | Die Anzeige-Rundung überschreitet die Grenze nie: ein ungerundeter Wert unter 5000 mV wird höchstens auf 4980 mV gerundet |
+| BUG-7 — Plausibilität / Doku | App-Grenze für plausible Werte von 20 000 auf 13 500 mV (3S max. 12 600 mV + Toleranz); darüber „🔋 –". Behaviors-&-Access-Satz zum „verschlüsselten Link" korrigiert: der Status (inkl. Akkuwerte) ist ohne Pairing per Notify lesbar — enthält keine persönlichen Daten |
 
 ## Dependencies
 
@@ -156,7 +205,10 @@ Keine neuen Pakete — App: bestehende React-Native-Mittel (`Alert` für die Nac
 | Teiler 104 kΩ / 22 kΩ (82 k + 22 k in Reihe oben) statt 82 k / 22 k | Mit 82 k / 22 k läge 12,6 V bei ca. 2,67 V am Pin, oberhalb des genauen ADC-Bereichs (bis ca. 2,45 V) — die Anzeige wäre ab ca. 65 % ungenauer; mit den vorhandenen Bauteilen lässt sich das ohne Kosten vermeiden | 82 kΩ / 22 kΩ | Ein Widerstand mehr auf der Platine | 2026-09-30 | 2026-09-30 |
 | Kalibrierfaktor als Firmware-Konstante (Neu-Flashen nötig) | Einmalige Kalibrierung, kein zusätzlicher Befehl und keine Einstellung in der App nötig | Kalibrierung per App-Befehl, im Flash gespeichert | Änderung nur per Flash — für einen Einzelaufbau vertretbar | 2026-09-30 |
 | Kennlinie als Stützpunkt-Tabelle mit linearer Interpolation, 0 % = Schutz-Schwelle | Einfach, testbar, ausreichend genau für eine Anzeige; 0 % entspricht dem Moment, in dem der Slider stoppt | Rein lineare Umrechnung 9,3–12,6 V | Näherung — tatsächliche Kapazität hängt von Zellen, Alter und Temperatur ab | 2026-09-30 |
-
+| Nach der Sperre: Treiber per UART deaktivieren + EN-Pin HIGH, 60 s Frist mit BLE, dann Tiefschlaf ohne Weckquelle (AC-12) | Senkt den Verbrauch von ca. 100 mA (ESP32 + BLE + Treiber) auf den Rest von Wandler, Teiler und Treiber-Versorgung; die Frist lässt die App den Grund zeigen | Light-Sleep mit periodischem Aufwachen; nur Sperre ohne Abschaltung | Nach dem Tiefschlaf ist der Slider „aus", bis der Nutzer eingreift — gewollt | 2026-09-30 |
+| EN-Pin (GPIO 27, RTC-fähig) im Tiefschlaf per Halte-Funktion auf HIGH | Ohne Halten würde der Pin schweben und könnte den Treiber wieder einschalten (Motor bestromt, Verbrauch steigt) | Nur UART-Deaktivierung | Keine | 2026-09-30 |
+| Sperrgrund und Restsekunden als Bytes 8 und 9 im Status (10 Byte) | Die App braucht den Grund (AC-13-Meldung) und einen verlässlichen Countdown auch bei später Verbindung (EC-8); ein App-seitiger Countdown wäre nach einer Neuverbindung falsch | Countdown in der App ab Erkennen der Sperre | 1 Notify pro Sekunde während der 60 s | 2026-09-30 |
+| „Akku seit Start erkannt" als Kriterium für einen Messfehler (AC-13) | USB und Akku gehen nicht gleichzeitig — ein Abfall unter 5 V ohne Neustart kann nur ein Fehler sein; USB-Start (EC-7) bleibt unberührt | Pull-down-/Leerlauf-Erkennung am Pin in Hardware | Ein echter Akku-Ausfall bei weiterlaufendem ESP32 ist physikalisch nicht möglich, daher kein Fehlalarm-Risiko aus dieser Richtung | 2026-09-30 |
 ## Open Questions
 
 - [ ] Hängt der ESP32 am Akku (dann ist Akkuwechsel = Neustart, wie angenommen) oder separat versorgt? Falls separat: Aufhebung der Sperre nur über die Reset-Taste — am Aufbau zu prüfen
