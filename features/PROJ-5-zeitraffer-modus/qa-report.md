@@ -341,3 +341,26 @@ BUG-5 wurde behoben (Commit `248cf19`, 1 Produktionsdatei → eine Lane mit alle
   - [x] **BUG-5** — 2 Aufnahmen über ≥ 60 cm laufen ohne Fehlermeldung durch — vom Nutzer am Gerät bestätigt, 2026-09-30
   - [x] **BUG-8 / BUG-13 / AC-7** — Bluetooth aus/an in der Pause: Sequenz endet sofort mit „Verbindung verloren", Jog und Auto-Fahrt nach dem Neuverbinden sofort bedienbar — vom Nutzer am Gerät bestätigt, 2026-09-30
 - Einschränkung: Anzahl der Durchläufe nicht protokolliert; BUG-11 (hängende Aufnahme) lässt sich am Gerät nicht gezielt auslösen — nur per Test belegt. Der Fix `0e112bf` ist noch nicht durch einen unabhängigen `qa-engineer`-Lauf geprüft.
+
+## Nachtrag 7: Unabhängige Re-Verifikation des Fixes `0e112bf` — Freigabe (2026-09-30)
+
+**Scope:** `git diff 1bf68d8..HEAD -- src features/PROJ-5-zeitraffer-modus/design.md` — Produktivcode nur `useTimelapseSequence.ts`. Ein `qa-engineer`-Lauf, alle drei Scopes (2 → 3 → 4). `npm test`: 13 Suites, 213 Tests, 0 Fehler, keine unhandled rejections; `npx tsc --noEmit` exit 0; `npx eslint` 0 Fehler (die `no-void`-Warnung besteht schon vor dem Fix). 15 eigene Hook-Proben (P1–P12). Laufzeit: `[!] NOT VERIFIED — no way to run and probe this project was recorded`; der protokollierte Nutzer-Test steht in Nachtrag 6.
+
+### Ergebnis
+- [x] **BUG-11 geschlossen** — `useTimelapseSequence.ts:193, 199-214`: hängende Aufnahme → bei 14 999 ms läuft die Sequenz noch, bei 15 001 ms Abbruch mit „Kamera hat nicht geantwortet", 1× STOP, Wakelock frei, keine Timer übrig (P1); späte Auflösung oder Ablehnung nach dem Timeout ändert nichts, 0 unhandled rejections (P1, P2); 14-s-Aufnahme läuft durch (P10); Erfolgspfad lässt keinen Timer liegen (P3). Am Gerät nicht gezielt auslösbar.
+- [x] **BUG-12 geschlossen** — `:466-468`: nach Aufnahme 2 von 2 (Intervall 3600 s) ist die Rückfahrt sofort gesendet; danach `run=false`, Wakelock frei, nach 2 h keine weiteren Befehle (P3). Die Firmware nimmt die sofortige Rückfahrt an (`motor.cpp:411-431, 583-585`). Vom Nutzer am Gerät bestätigt.
+- [x] **BUG-8 geschlossen** — Effekt `:510-514` beendet die Sequenz sofort bei `device → null` (P4–P7, P11); kein STOP aus der App, weil die Firmware bei verschlüsseltem Disconnect selbst stoppt (`ble.cpp:122-127`). Vom Nutzer am Gerät bestätigt.
+- [x] **BUG-13 geschlossen** — `finishRun()` macht die alte Schleife ungültig (`:343`); Reconnect + Neustart: die alte Schleife sendet nichts mehr, ein alter Aufnahme-Timeout stört den neuen Lauf nicht (P5b, P6). Vom Nutzer am Gerät bestätigt.
+- [x] **Kein doppeltes STOP / keine doppelte Wakelock-Freigabe** bei Abbruch + `stop()` in beliebiger Reihenfolge (P7a, P7b); Start ohne Gerät wird abgelehnt (P12).
+- [x] **Security:** keine neue Eingabefläche, keine Secrets, Manifest unverändert. Auth/Brute Force/Credentials in URL nicht anwendbar, Rate Limiting not implemented.
+- [x] **Regression:** API von `useTimelapseSequence` unverändert, RootScreen/TimelapseControls nicht im Diff, PROJ-1 AC-3 nach Reconnect wieder erfüllt, PROJ-2/3/4 nicht betroffen.
+
+### Neue Befunde (Low)
+- [ ] **BUG-20 (Low):** der Timeout verwirft nur das Ergebnis; eine hängende Aufnahme, die später doch fertig wird, landet noch in der Galerie — nach einem Neustart eventuell zwischen den Bildern der neuen Serie. Ob CameraX eine zweite Aufnahme annimmt, solange die erste hängt: `[!]`.
+- [ ] **BUG-21 (Low, Doku):** Pseudocode `design.md:81-83` beschreibt noch die Wartezeit nach jedem Schritt und kennt weder Aufnahme-Timeout noch Disconnect-Effekt; die neuen Zeilen `design.md:122-125` nutzen nur 2 der 5 Tabellenspalten.
+
+### Offene Bugs gesamt
+- **Medium:** BUG-9 (kein Verweis auf die Systemeinstellungen bei abgelehnter Kamera-Berechtigung) — vom Nutzer auf nach dem Deploy verschoben.
+- **Low:** BUG-10, NEU-1..3, BUG-14..21.
+
+**Production-Ready: JA.** Keine Critical/High-Bugs offen; BUG-8/11/12/13 unabhängig verifiziert geschlossen; die Laufzeit-ACs AC-1, AC-2, AC-4, AC-7, AC-9, AC-10 und der BUG-5-Risikofall sind durch den protokollierten Nutzer-Test (Nachtrag 6) auf dem aktuellen Stand ausgeführt. Nicht verifiziert bleiben: ob 15 s für jede echte Aufnahme reichen, EC-3 (Bildschirmsperre) am Gerät, das Clipping der Vorschau beim Scrollen über längere Zeit. Status: **Approved**.
