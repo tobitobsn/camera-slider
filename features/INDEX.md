@@ -30,7 +30,7 @@
 | PROJ-3 | Start-/Endpunkt & Auto-Fahrt | Start- und Endpunkt setzen und automatische Fahrt dazwischen mit einstellbarer Geschwindigkeit/Dauer auslösen | Deployed | [features/PROJ-3-start-endpunkt-auto-fahrt/](PROJ-3-start-endpunkt-auto-fahrt/) | 2026-09-22 |
 | PROJ-4 | Presets verwalten | Mehrere benannte Fahrt-Profile lokal speichern, laden und löschen | Deployed | [features/PROJ-4-presets-verwalten/](PROJ-4-presets-verwalten/) | 2026-09-22 |
 | PROJ-5 | Zeitraffer-Modus | Schrittweise Fahrt mit automatischer Kameraauslösung für Zeitraffer-Aufnahmen | Deployed | [features/PROJ-5-zeitraffer-modus/](PROJ-5-zeitraffer-modus/) | 2026-09-22 |
-| PROJ-6 | Akkuanzeige | Ladezustand des 3S-Akkus (3× 18650) in der App anzeigen und bei niedrigem Stand warnen | In Review | [features/PROJ-6-akkuanzeige/](PROJ-6-akkuanzeige/) | 2026-09-30 |
+| PROJ-6 | Akkuanzeige | Ladezustand des 3S-Akkus (3× 18650) in der App anzeigen und bei niedrigem Stand warnen | Planned | [features/PROJ-6-akkuanzeige/](PROJ-6-akkuanzeige/) | 2026-09-30 |
 
 **Build order:** _P0 (MVP): PROJ-1 → PROJ-2 → PROJ-3 · P1: PROJ-4 (needs PROJ-3), PROJ-5 (needs PROJ-3), PROJ-6 (needs PROJ-1 + Spannungsteiler-Hardware)_
 

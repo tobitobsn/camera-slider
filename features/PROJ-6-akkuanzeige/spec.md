@@ -9,7 +9,8 @@
 - Als Slider-Besitzer möchte ich den Ladezustand des Akkus jederzeit in der App sehen, damit ich weiß, ob er für die geplante Aufnahme reicht
 - Als Slider-Besitzer möchte ich rechtzeitig gewarnt werden, wenn der Akku zur Neige geht, damit mir eine lange Aufnahme nicht mittendrin abbricht
 - Als Slider-Besitzer möchte ich vor dem Start eines Zeitraffers oder einer Auto-Fahrt bei fast leerem Akku nachgefragt werden, damit ich bewusst entscheide, ob ich trotzdem starte
-- Als Slider-Besitzer möchte ich, dass der Slider meine 18650-Zellen (ohne BMS) vor Tiefentladung schützt, auch wenn die App gerade nicht verbunden ist, damit die Zellen nicht beschädigt werden
+- Als Slider-Besitzer möchte ich, dass der Slider meine 18650-Zellen (ohne BMS) vor Tiefentladung schützt — auch nach dem Stopp, durch Abschalten der Elektronik, und auch wenn die App gerade nicht verbunden ist —, damit die Zellen nicht beschädigt werden
+- Als Slider-Besitzer möchte ich erfahren, wenn die Akkumessung selbst ausfällt, damit ein unbemerkt abgeschalteter Schutz meine Zellen nicht gefährdet
 - Als Slider-Besitzer möchte ich den Slider weiterhin per USB am Rechner betreiben und testen können, ohne dass eine fehlende Akkuspannung als „leer" gewertet wird
 
 ## Out of Scope
@@ -21,6 +22,7 @@
 - Jog bei gesperrtem Slider nach Schutz-Stopp (Schlitten muss dann von Hand bewegt werden)
 - Automatische Aufhebung der Sperre, wenn die Spannung sich erholt (nur durch Neustart des ESP32)
 - Warnung/Nachfrage vor einem Jog (Jog ist kurz und unter direkter Kontrolle)
+- Vollständige Abschaltung des Akkus (Nullverbrauch): Step-down-Wandler, Spannungsteiler und Treiber-Versorgung ziehen auch im Tiefschlaf weiter wenige mA — echter Schutz nur durch Hardware (Schalter oder Unterspannungs-Abschaltmodul); die App/Spec empfiehlt, den Slider nach einem Schutz-Stopp auszuschalten
 
 ## Acceptance Criteria
 - [ ] **AC-1** — Angenommen die App ist mit dem Slider verbunden und ein Akku ist erkannt, wenn der Nutzer den Hauptbildschirm sieht, dann zeigt der Verbindungs-Header den Ladezustand als Akku-Symbol mit Prozentwert (z. B. „🔋 78 %") an
@@ -34,6 +36,8 @@
 - [ ] **AC-9** — Angenommen der Slider ist gesperrt, wenn die App verbunden ist, dann zeigt sie dauerhaft „Akku leer – bitte laden", und alle Bewegungs-Bedienelemente (Jog, Auto-Fahrt, Zeitraffer-Start) sind nicht bedienbar
 - [ ] **AC-10** — Angenommen ein Zeitraffer läuft, wenn der Schutz-Stopp auslöst, dann beendet die App die Sequenz mit der Meldung „Akku leer – Bewegung gestoppt" (keine weitere Aufnahme, keine Rückfahrt)
 - [ ] **AC-11** — Angenommen die gemessene Spannung liegt unter 5 V (kein Akku erkannt, z. B. Betrieb nur über USB oder Spannungsteiler nicht verbaut), wenn die App verbunden ist, dann zeigt der Header „🔋 –" ohne Warnfarbe, es gibt keine Nachfrage vor dem Start, und der Schutz-Stopp ist nicht aktiv — alle Bewegungen funktionieren normal
+- [ ] **AC-12** — Angenommen der Schutz-Stopp hat ausgelöst (AC-7/AC-8), wenn die Sperre aktiv wird, dann schaltet die Firmware sofort den Motortreiber stromlos, bleibt noch 60 Sekunden per Bluetooth erreichbar (die App zeigt in dieser Zeit „Akku leer – Slider schaltet sich in 60 s ab") und versetzt den ESP32 danach in den Tiefschlaf — er ist dann bis zum Neustart (Akkuwechsel oder Reset) aus; die App zeigt anschließend ihren normalen Zustand für eine verlorene Verbindung
+- [ ] **AC-13** — Angenommen seit dem Start des ESP32 wurde ein Akku erkannt (Messwert ≥ 5 V), wenn der Messwert danach mindestens 5 Sekunden ununterbrochen unter 5 V liegt (Messung ausgefallen, z. B. Spannungsteiler gelöst), dann behandelt die Firmware das wie einen leeren Akku (Stopp, Sperre, Abschaltung nach AC-12), und die App zeigt „Akkumessung gestört – bitte Verkabelung prüfen" statt „Akku leer"
 
 ## Edge Cases
 - **EC-1** — Angenommen der Motor fährt mit hoher Geschwindigkeit an und die Spannung bricht dabei kurz unter 9,3 V ein, wenn sie sich innerhalb von 5 Sekunden wieder erholt, dann löst der Schutz-Stopp nicht aus und die Anzeige springt nicht
@@ -42,6 +46,8 @@
 - **EC-4** — Angenommen der Slider wird per USB betrieben und später zusätzlich ein Akku angeschlossen (oder umgekehrt), wenn sich der Messwert über bzw. unter 5 V bewegt, dann wechselt die Anzeige zwischen Prozentwert und „🔋 –", ohne Fehlermeldung
 - **EC-5** — Angenommen die Verbindung wird hergestellt, wenn noch kein Messwert vorliegt (direkt nach dem Start des ESP32), dann zeigt der Header „🔋 –" bis zum ersten gültigen Wert
 - **EC-6** — Angenommen der Nutzer bestätigt die Nachfrage bei unter 10 % und startet einen Zeitraffer, wenn der Akku während der Sequenz die Schutzschwelle erreicht, dann greift AC-10 — die Bestätigung setzt den Schutz-Stopp nicht außer Kraft
+- **EC-7** — Angenommen der ESP32 startet im USB-Betrieb und es wurde seit dem Start nie ein Akku erkannt (Messwert immer < 5 V), dann gilt weiter AC-11: „🔋 –", kein Schutz-Stopp, keine Sperre, keine Abschaltung
+- **EC-8** — Angenommen während der 60 Sekunden bis zur Abschaltung (AC-12) verbindet sich die App neu oder erst jetzt, dann sieht sie sofort den gesperrten Zustand und die Abschalt-Meldung
 
 ## Technical Requirements (optional)
 - Akku: 3× 18650 in Reihe (3S), ohne BMS; Spannungsbereich ca. 9,0 V (leer) bis 12,6 V (voll)
@@ -50,11 +56,11 @@
 - Der Schutz-Stopp muss in der Firmware liegen (wirkt ohne App), die Anzeige/Warnung in der App
 
 ## Open Questions
-- [ ] Kalibrierung: Der genaue Umrechnungsfaktor des Spannungsteilers wird nach dem Einbau einmal mit einem Multimeter bestimmt — wie und wo er hinterlegt wird, entscheidet `/architecture`
+- [x] Kalibrierung → Faktor 0,993, gemessen 2026-09-30 (design.md Umsetzungshinweise). Der genaue Umrechnungsfaktor des Spannungsteilers wird nach dem Einbau einmal mit einem Multimeter bestimmt — wie und wo er hinterlegt wird, entscheidet `/architecture`
 - [x] Welcher ADC1-Pin wird tatsächlich verwendet → GPIO 34, Teiler 104 kΩ / 22 kΩ, vom Nutzer verbaut (2026-09-30)
 - [ ] Läuft der Motor im stromlosen Zustand frei, sodass der Schlitten nach einem Schutz-Stopp von Hand geschoben werden kann? (TMC2209 im stromlosen Zustand — am Gerät zu prüfen)
 
-- [ ] Wird der ESP32 aus dem Akku versorgt (dann hebt ein Akkuwechsel die Sperre automatisch auf, AC-8) oder separat? Falls separat, bleibt nur die Reset-Taste — am Aufbau zu prüfen (aus `/architecture`)
+- [x] Wird der ESP32 aus dem Akku versorgt? → Ja, über einen Step-down-Wandler; Akkuwechsel = Neustart, USB und Akku nicht gleichzeitig (Nutzer, 2026-09-30)
 
 ## Decision Log
 
@@ -67,3 +73,6 @@
 | Sperre nach Schutz-Stopp bleibt bis zum Neustart des ESP32, auch für Jog | Verhindert Pendeln zwischen Anlaufen und Stoppen, wenn sich die Spannung im Ruhezustand erholt; einfachste sichere Lösung | 2026-09-30 |
 | Messwert nur im Stillstand aktualisieren, während Bewegung letzten Wert ausgegraut zeigen | Spannung sinkt unter Last — sonst springende Anzeige; im Zeitraffer wird in jeder Pause gemessen | 2026-09-30 |
 | Messwert < 5 V = „kein Akku erkannt": keine Warnung, kein Schutz-Stopp | USB-Betrieb beim Flashen/Testen und Betrieb vor dem Hardware-Einbau müssen weiter funktionieren | 2026-09-30 |
+| Nach dem Schutz-Stopp Motortreiber stromlos, 60 s Frist, dann Tiefschlaf des ESP32 bis zum Neustart (AC-12) | QA-Befund BUG-1 (High): die Sperre allein ließ ESP32, Bluetooth und Treiber weiterlaufen und entlud die Zellen ohne BMS weiter; die 60 s geben der App Zeit, den Grund anzuzeigen | 2026-09-30 |
+| Ausfall der Messung nach erkanntem Akku = Fehler, behandelt wie leerer Akku, eigene Meldung (AC-13) | QA-Befund BUG-2 (Medium): ein gelöster Spannungsteiler schaltete den Schutz still ab; USB und Akku gehen nicht gleichzeitig, ein Abfall unter 5 V ohne Neustart kann daher nur ein Fehler sein | 2026-09-30 |
+| Restverbrauch im Tiefschlaf (Step-down, Teiler, Treiber-VM) bleibt als bekannte Grenze, Nullverbrauch nur per Hardware | Firmware kann den Wandler nicht abschalten; ehrlich dokumentiert statt versprochen | 2026-09-30 |
