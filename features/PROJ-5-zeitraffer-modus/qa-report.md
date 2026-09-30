@@ -289,3 +289,43 @@ BUG-5 wurde behoben (Commit `248cf19`, 1 Produktionsdatei → eine Lane mit alle
 - **Fund (Nutzer, am Gerät):** „Zeitraffer starten tut nix mehr". Gemessen: Sequenz startet („Aufnahme 1 von 10"), CameraX ruft `takePictureInternal` auf, liefert aber kein Ergebnis; Vorschau schwarz. Ursache: `implementationMode="compatible"` (TextureView) aus `dbf4001`.
 - **Fix `b7de19b`:** Einstellung entfernt, der Clipping-Wrapper aus `0cd291b` bleibt (behebt die Überlagerung allein). Screenshot nach dem Fix: Vorschau zeigt ein Bild, sauber im Rahmen.
 - [x] **Nutzer-Test am Gerät („alles ok", 2026-09-30):** Zeitraffer läuft wieder (Fotos, Fahrt zwischen den Aufnahmen). Severity des Funds: High (Kernfunktion ausgefallen), jetzt behoben. Unabhängige Verifikation in `/qa PROJ-5` steht aus.
+
+## Nachtrag 5: Unabhängige Re-Verifikation nach geteilten Änderungen (2026-09-30)
+
+**Scope:** `git diff bd97ce3..HEAD -- src firmware/src android` (letzter unabhängiger Lauf: BUG-5-Re-Verifikation). Geteilter Code geändert (`motor.cpp`: 8000 Steps/s, DIR-Umkehr, `motorStop()` nur bei `isRunning()`, `jogRunning`; `client.ts`; `RootScreen.tsx`; `TimelapseControls.tsx` Kamera-Wrapper) → voller Fan-out mit drei `qa-engineer`-Lanes. `probe.kind: none` — Laufzeit/Hardware `[!] NOT VERIFIED — no way to run and probe this project was recorded`.
+
+**Test-Suite (einmalig, Owner):** `npm test` → 13 Suites, 210 Tests, 0 Fehler (`suite10.log`). Firmware kompiliert am HEAD (SUCCESS, RAM 12,4 %, Flash 49,1 %, ohne Upload). Layer `firmware`: `[!] NOT VERIFIED — no test command recorded for layer firmware`. Eigene Proben: 11 Hook-Proben gegen `useTimelapseSequence`, Render-Proben gegen `TimelapseControls` und `RootScreen`.
+
+### Acceptance Criteria
+- [x] **AC-1** — Start-Bedingungen (`TimelapseControls.tsx:143-154`, Probe: nur „alles erfüllt" aktiv); Zwischenziele direkt berechnet `round(D·(i−1)/(N−1))`, letzter Schritt exakt D (`useTimelapseSequence.ts:395-397`); Timeout pro Schritt = Fahrzeit + 5 s mit denselben Werten 8000/8000 wie die Firmware (Probe: 160000 Steps → kein Fehler bei 21 s, Timeout bei 26,1 s). Laufzeit `[!]`.
+- [ ] **AC-2 — FAIL (BUG-12, Medium):** Rückfahrt kommt erst nach einem zusätzlichen vollen Intervall nach der letzten Aufnahme (`useTimelapseSequence.ts:435-437` wartet auch bei i == N). Probe: 2 Aufnahmen, Intervall 3600 s → Schlitten steht 1 h am Ende, UI „Aufnahme 2 von 2 · Verbleibend: 0 s", Jog/Auto-Fahrt gesperrt, Wakelock an; angezeigte Gesamtdauer weicht um ein Intervall ab. BUG-10 (≤194 Steps still verworfen, App meldet Erfolg) bestätigt.
+- [x] **AC-3** — Fortschritt „Aufnahme 3 von 10 · Verbleibend: 2 Min 5 s" (Render-Probe); Low: kein Stundenformat („540 Min 0 s"), Restzeit springt nur pro Aufnahme.
+- [x] **AC-4** — Stopp in allen Phasen: während Fahrt, während Fotoaufnahme (laufende Aufnahme wird noch gespeichert, danach nichts mehr), während Pause — je STOP gesendet, keine Rückfahrt, Wakelock frei (Proben P1–P3). Firmware: `motorStop()` → `forceStop()` wirkt, weil `isRunning()` ab `moveTo()` synchron true ist (`RampGenerator.cpp:89`, `FastAccelStepper.cpp:897-899`); Flags immer zurückgesetzt (`motor.cpp:337-349`). Laufzeit `[!]`.
+- [x] **AC-5** — ohne Berechtigung Hinweis + „Kamera-Zugriff erlauben", Start gesperrt. BUG-9 (Medium, kein Verweis auf Systemeinstellungen) offen.
+- [ ] **AC-6 — FAIL (BUG-11 hochgestuft auf Medium):** eine *abgelehnte* Aufnahme beendet die Sequenz korrekt mit Meldung und STOP (Probe P10); eine *hängende* Aufnahme nie — `capturePhoto` hat keinen Timeout (`useCameraCapture.ts:58-66`). Probe P4: nach 24 h `run=true`, Aufnahme 1, keine Meldung, Wakelock an. Genau so am 2026-09-30 am Gerät aufgetreten (Auslöser TextureView behoben, die fehlende Absicherung nicht). Weitere Auslöser: Verbindungsabbruch während einer Aufnahme (`<Camera>` wird ausgehängt), Bildschirmsperre (EC-3). Workaround: Stopp von Hand.
+- [x] **AC-7** — Firmware stoppt bei Abbruch (`ble.cpp:126`). BUG-8 (Medium) offen: App merkt den Abbruch erst beim nächsten Schritt (Probe: 60 s nach Abbruch noch `run=true`).
+- [x] **AC-8** — Wakelock an beim Start, frei in `finishRun`/`stop` (`useTimelapseSequence.ts:323, 493, 526`); Einschränkungen durch BUG-8, BUG-11, BUG-12.
+- [x] **AC-9** — gegenseitige Sperre in App (`RootScreen.tsx:118-122`, `AutoDriveControls.tsx:351-378`, `TimelapseControls.tsx:150`) und Firmware (`motor.cpp:239, 411, 528-530`); Render-Proben: Jog, Setzen, Dauer, Presets während Sequenz gesperrt, Zeitraffer-Start während Auto-Fahrt gesperrt.
+- [x] **AC-10 (Code)** — `CameraRoll.save` mit derselben Foto-Ausgabe wie die Vorschau (`useCameraCapture.ts:59-65`, `RootScreen.tsx:46, 54, 135`). Galerie-Ablage vom Nutzer noch nicht ausdrücklich bestätigt. NEU-2 offen.
+
+### Edge Cases
+- [x] **EC-1** (Distanz 0 → Start gesperrt), **EC-2** (Grenzen 2–999 / 1–3600, Hinweise, „2.5"/„-3" abgelehnt — Render-Probe), **EC-4** (nach Reconnect verwirft die Firmware den nächsten Schritt, `ble.cpp:88`, `motor.cpp:528-530`; Low: Meldung „Befehl vermutlich verworfen" statt „Verbindung verloren")
+- [!] **EC-3** — Bildschirmsperre/Hintergrund: Laufzeit nicht prüfbar; hängt die Aufnahme dabei, greift BUG-11.
+
+### Security
+- [x] Keine Verschlechterung. `WRITE_ENC` unverändert, ein Bond-Slot; TIMELAPSE_MOVE Längen- und Distanzprüfung vor jedem Zugriff (`ble.cpp:213-215`, `motor.cpp:530`); App-Eingaben per Regex und Grenzen, keine Überläufe (max. 1,6e8 Steps, 3,6e6 ms); STOP hält jede Bewegung an; Berechtigungen minimal (CAMERA, WRITE_EXTERNAL_STORAGE ≤ SDK 28, kein Diff im Manifest); Fotos nur in die Galerie, kein Netzwerk-/Teilen-Pfad; keine Secrets.
+- **Zusammenfassung:** 9 Checks verifiziert, 5 NOT VERIFIED (Laufzeit; Brute Force/Credentials in URL nicht anwendbar; Rate Limiting not implemented; kein Release-Bundle gebaut).
+
+### Regression
+- [x] PROJ-1 (Status 6 Byte, Disconnect-Stopp, `reconnecting` blendet Steuerung aus), PROJ-2 (Jog-Sperre, Watchdog-Ausnahme deckt keinen Jog-Lauf, `scrollEnabled`), PROJ-3 (Auto-Fahrt-Sperre beidseitig, Rückfahrt), PROJ-4 (Presets während Sequenz gesperrt, Migration-Tests grün) — ohne Befund außer BUG-13.
+
+### Neue Bugs
+- [ ] **BUG-12 (Medium)** — Rückfahrt erst nach zusätzlichem Intervall (siehe AC-2).
+- [ ] **BUG-11 (jetzt Medium)** — hängende Aufnahme ohne Timeout (siehe AC-6).
+- [ ] **BUG-13 (Medium, Regression PROJ-1 AC-3):** Verbindungsabbruch mit Reconnect während der Pause einer Sequenz → Sequenz läuft in der App weiter, Jog/Auto-Fahrt/Presets bleiben bis zum Ende des Intervalls (bis 1 h) gesperrt, danach Timeout-Meldung statt „Verbindung verloren". Ursache: `useTimelapseSequence.ts` beobachtet `device → null` nicht (nur Prüfung zu Schrittbeginn, `:381-387`). Kein Sicherheitsproblem (Firmware verwirft den Befehl nach `motorClearPoints()`); Workaround: Zeitraffer-Stopp. Nahe verwandt mit BUG-8.
+- [ ] Low: **BUG-14** Schritte mit 0 Steps bei D < N−1 (widerspricht design.md, praktisch folgenlos); **BUG-15** keine Regressionstests für die Kamera-Fixes `0cd291b`/`b7de19b`; **BUG-16** Start möglich ohne Kameragerät (`cameraDevice === undefined`); **BUG-17** Kamera dauerhaft aktiv, solange der Bildschirm offen ist (Akku/Wärme, laut design.md gewollt); **BUG-18** temporäre Fotodateien bleiben im App-Cache; **BUG-19** TIMELAPSE_MOVE jetzt mit 8000 Steps/s (~50 mm/s) — höhere Aufprallenergie ohne Endanschläge; Test `useTimelapseSequence.test.ts:229-258` nutzt 200000 Steps (> 160000-Grenze).
+
+### Nicht verifiziert
+- [!] Alle Laufzeit-/Hardware-Aussagen — no way to run and probe this project was recorded: BUG-5-Risikofall (2 Aufnahmen über ≥ 60 cm bei 8000 Steps/s), Stopp-Reaktionszeit, Galerie-Ablage, Clipping der SurfaceView-Vorschau beim Scrollen, Verhalten von VisionCamera bei ausgehängter Kamera/Hintergrund, Notify bei 0-Step-Schritten.
+
+**Production-Ready: NEIN (noch nicht).** Keine Critical/High-Bugs. Offen sind fünf Medium-Bugs (BUG-8, 9, 11, 12, 13) — kein Blocker laut Regel, aber BUG-11 (Sequenz hängt unbegrenzt) ist am Gerät bereits aufgetreten und BUG-12 macht jede Sequenz um ein Intervall zu lang. Die Laufzeit-ACs AC-4, AC-9, AC-10 und der BUG-5-Risikofall sind noch nicht protokolliert am Gerät bestätigt. Status: **In Review**.
