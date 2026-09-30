@@ -28,9 +28,28 @@
 
 > T10 erledigt 2026-09-30: Nutzer hat im Akkubetrieb 12,2 V am Akku und 2,12 V an GPIO 34 gemessen; der Firmware-Wert (12 280 mV) wurde per BLE vom Mac gelesen, weil USB und Akku nicht gleichzeitig angeschlossen werden können. Faktor 0,993 (T11).
 
+## Ebene 4 — Grundlagen der Erweiterung (Refine 2026-09-30: AC-12, AC-13, EC-7, EC-8, BUG-3..7)
+
+- [ ] T12 [P]  Firmware-Akku-Modul erweitern: „Akku seit Start erkannt" (RAM, beim ersten Wert ≥ 5000 mV gesetzt, nie zurückgesetzt); ist er gesetzt und liegt der Schutzwert 5000 ms ununterbrochen < 5000 mV → `motorLockout(Grund „Messung gestört")`, getrennter Zähler vom Leer-Zähler (der ruft `motorLockout(Grund „Akku leer")`); nach der Sperre 60-s-Countdown (`batteryShutdownSeconds()`, 60 → 0, `0` ohne Sperre), danach `motorPrepareDeepSleep()` und Tiefschlaf ohne Weckquelle; BUG-3: Ruhe-Mittelwert neu beginnen, wenn eine Messung die 5000-mV-Grenze kreuzt, erster Wert danach sofort übernehmen; BUG-6: Anzeige-Rundung eines Werts < 5000 mV höchstens auf 4980 mV  · files: firmware/src/battery.h, firmware/src/battery.cpp  · → AC-12, AC-13, EC-4, EC-7
+- [ ] T13 [P]  Motor-Firmware: `motorLockout(Grund)` (Grund: Akku leer / Messung gestört), `motorLockReason()`; beim Sperren Treiber abschalten (TMC2209 per UART deaktivieren, EN-Pin GPIO 27 HIGH, Auto-Enable aus); `motorPrepareDeepSleep()` hält EN (RTC-fähiger Pin) im Tiefschlaf auf HIGH; `MotorStatus` um den Sperrgrund erweitert  · files: firmware/src/motor.h, firmware/src/motor.cpp  · → AC-12, AC-13
+- [ ] T14 [P]  App-Datenformat: Byte 8 → `lockReason` (`none`/`lowBattery`/`measurementFault`, unbekannt → `none`; ohne Byte 8 aber bit6 → `lowBattery`), Byte 9 → `shutdownSeconds` (1–60, sonst `null`); BUG-7: Plausibilitätsgrenze 13 500 mV; `SliderStatus` + Anfangszustand erweitert; Tests  · files: src/ble/client.ts, src/ble/client.test.ts, src/components/useSliderStatus.ts, src/components/useSliderStatus.test.ts  · → AC-12, AC-13, EC-8
+
+## Ebene 5 — Verdrahten und Oberfläche der Erweiterung
+
+- [ ] T15  Firmware-Status auf 10 Byte: Byte 8 Sperrgrund aus `MotorStatus`, Byte 9 `batteryShutdownSeconds()`; Puffer 8 → 10; Firmware kompiliert  · files: firmware/src/ble.cpp  · → AC-12, AC-13, EC-8
+- [ ] T16 [P]  Banner nach Grund („Akku leer – bitte laden" / „Akkumessung gestört – bitte Verkabelung prüfen"), Zeile „Slider schaltet sich in N s ab" bei Restsekunden, Hinweis „Bitte schalte den Slider aus und lade den Akku"; Test; `RootScreen` reicht Grund + Sekunden ans Banner und die Akku-Sperre getrennt als `batteryLocked` an `AutoDriveControls` (statt über `disabled`)  · files: src/components/BatteryLockBanner.tsx, src/components/BatteryLockBanner.test.ts, src/screens/RootScreen.tsx  · → AC-9, AC-12, AC-13, EC-8
+- [ ] T17 [P]  BUG-4: neue Prop `batteryLocked` in `AutoDriveControls` sperrt nur Fahrt-Auslöser, Setzen und Preset laden; „Als Preset speichern" und „Löschen" bleiben bedienbar; `disabled` (Zeitraffer läuft) unverändert  · files: src/components/AutoDriveControls.tsx  · → AC-9
+- [ ] T18 [P]  BUG-5: `start()` prüft die Sperre selbst und startet nicht; Meldung nach Grund („Akku leer – Bewegung gestoppt" / „Akkumessung gestört – Bewegung gestoppt"), ebenso beim Beenden einer laufenden Sequenz; Tests  · files: src/components/useTimelapseSequence.ts, src/components/useTimelapseSequence.test.ts  · → AC-10, AC-13
+
+## Ebene 6 — Hardware-Test der Erweiterung
+
+- [ ] T19 [user]  Mit Labornetzteil: (1) unter 9,3 V → Stopp, Banner mit Countdown, nach 60 s Verbindung weg, Slider reagiert bis Reset nicht; (2) im Akkubetrieb den Spannungsteiler abziehen → „Akkumessung gestört", Countdown, Abschaltung; (3) Start am USB → keine Sperre; (4) optional Stromaufnahme im Tiefschlaf messen  · where: Labornetzteil statt Akku, App verbunden  · → AC-12, AC-13, EC-7, EC-8
+
 ## Parallelisierung
 
 - **Ebenen sind Schranken.** Ebene 2 startet erst, wenn Ebene 1 integriert und verifiziert ist.
 - **`[P]` verlangt disjunkte Dateien** — in jeder Ebene geprüft: keine zwei `[P]`-Tasks teilen einen Pfad.
 - **T1 ↔ T2:** T1 ruft `motorLockout()` und prüft, ob der Stepper läuft; T2 deklariert `motorLockout()` und `motorIsLocked()` in `motor.h`. Namen sind hier festgelegt, damit beide parallel laufen können; T5 verbindet beide in Ebene 2.
+- **T12 ↔ T13:** Namen `motorLockout(Grund)`, `motorLockReason()`, `motorPrepareDeepSleep()` sind hier festgelegt; T15 verbindet beide.
+- **T16 ↔ T17:** T16 übergibt `batteryLocked` an `AutoDriveControls`, T17 nimmt die Prop an — Name hier festgelegt.
 - **T10 ist ein `[user]`-Task:** `/build` übergibt ihn nach Ebene 2 mit Anleitung; T11 wartet auf den Wert.
