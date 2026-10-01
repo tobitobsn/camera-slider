@@ -115,3 +115,129 @@ Android EB2103, Release-APK vom 2026-09-30 (App-Stand `c976fba`), Firmware `c976
 - **Regression:** keine an PROJ-1..5
 
 **Production-Ready: NEIN.** BUG-1 (High) ist offen — der Code erfüllt zwar jedes AC, aber die Spec schützt den Akku nicht vor dem Grundverbrauch nach dem Stopp. Das braucht `/refine PROJ-6`, dann `/build`. Status: **In Review**.
+
+---
+
+# Nachtrag 2 — Zweiter Lauf nach `/refine` (AC-12, AC-13, EC-7, EC-8) und `/build`, 2026-10-01
+
+**Breite:** volle Breite, keine Re-Verifikation. Der Vertrag hat sich geändert (`/refine` hat AC-12, AC-13, EC-7 und EC-8 ergänzt). Drei unabhängige `qa-engineer`-Lanes: Acceptance (Step 2), Security (Step 3) und Regression (Steps 4 und 5). Diff seit dem ersten QA-Commit: `git diff --stat d413fcd..HEAD` mit 18 Dateien (Firmware battery/ble/motor, App client.ts, AutoDriveControls, BatteryLockBanner, useSliderStatus, useTimelapseSequence, RootScreen, dazu die Tests).
+
+**Probe:** `probe.kind: none` (App und Layer firmware). Jede Laufzeitprüfung ist `[!] NOT VERIFIED — no way to run and probe this project was recorded`. Belege am Gerät stammen nur aus dem protokollierten Nutzertest T19.
+
+## Automatisierte Tests
+- [x] `npm test`: 16 Suites, 238 Tests bestanden, 0 fehlgeschlagen. Log `scratchpad/suite12.log`, Lauf durch den Owner vor dem Fan-out.
+- [x] Firmware-Build `pio run -e esp32dev`: `[SUCCESS]` (`scratchpad/fw12.log`). Damit ist nur belegt, dass der Code kompiliert, nicht dass er sich richtig verhält.
+- [!] Firmware-Tests: no test command recorded for layer firmware. Ersatz sind Node-Nachbauten von `battery.cpp` (`scratchpad/p6r2/fw.js`, `probe.js`, `probe0.js`; `scratchpad/p6sec/wackel.js`).
+- [x] Gegenproben mit einzelnen Dateien: `npx jest src/ble/client.test.ts` mit 36/36 grün; Render-Probe `p6r2/app.probe.test.tsx` mit 2/2 grün.
+
+## Protokollierter Nutzertest T19 (Gerät, Labornetzteil, 2026-09-30/10-01)
+1. Unterspannung: Bewegung stoppt, der Banner zeigt den Countdown, nach 60 s ist die Verbindung weg, der Slider reagiert erst nach einem Reset wieder.
+2. Spannungsteiler abgezogen: „Akkumessung gestört“, danach Abschaltung.
+3. Start über USB ohne Akku: keine Sperre.
+4. Ruhestrom im Tiefschlaf: optional, nicht gemessen.
+
+Der Nutzer hat „alles ok“ zurückgemeldet. Dass der Schlitten im Tiefschlaf hält, ist mechanisch bedingt, denn er hält ohne Strom genauso. Deshalb belegt T19 nicht, dass EN im Tiefschlaf HIGH bleibt. Das ist nur im Code belegt (`motor.cpp:682-687`).
+
+## Acceptance Criteria (dieser Lauf)
+- [x] AC-1 — `ConnectionHeader.tsx:94-98`, `BatteryIndicator.tsx:32`, `BatteryIndicator.test.ts:38` grün
+- [x] AC-2 — `battery.cpp:21-23, 152-181`; Simulation: Übernahme in Zeitraffer-Pausen innerhalb von 30 s
+- [x] AC-3 — `battery.cpp:153-156`, Bit 7 `moving` (`motor.cpp:624`, `ble.cpp:66`, `client.ts:453`), `BatteryIndicator.test.ts:49`
+- [x] AC-4 — `battery.ts:68`, `BatteryIndicator.tsx:13-14`, `battery.test.ts:32`
+- [x] AC-5 — `battery.ts:65`, `BatteryIndicator.tsx:11-12`
+- [x] AC-6 — `battery.ts:80-91`; Aufrufer `AutoDriveControls.tsx:449` und `TimelapseControls.tsx:172`; `battery.test.ts:53,62`
+- [ ] **AC-7 — FAIL → BUG-8.** Bei konstanter Unterspannung greift die Sperre (Simulation: 9200 mV → Sperre nach 5,2 s). Springt der Messwert dagegen zwischen 5000–9299 mV und < 5000 mV, liegt er „ununterbrochen unter 9,3 V“, und es wird trotzdem nie gesperrt.
+- [x] AC-8 — Guards `motor.cpp:249, 421, 538`; `lockedOut` hat keinen Weg zurück
+- [x] AC-9 — Render-Probe: Banner, Jog/Auto/Zeitraffer gesperrt (`RootScreen.tsx:124-139`, `AutoDriveControls.tsx:365,533,544,665`, `TimelapseControls.tsx:153`)
+- [x] AC-10 — `useTimelapseSequence.ts:527-531`, Tests `:569`, `:633` grün
+- [x] AC-11 — `battery.cpp:105-111`, `battery.ts:42`
+- [x] AC-12 — Treiber aus `motor.cpp:669-675`; Countdown `battery.cpp:132-150` (Simulation: 60 → 1, Tiefschlaf genau nach 60 000 ms, auch über den `millis()`-Überlauf); keine Weckquelle (`grep esp_sleep_enable` leer); am Gerät T19 (1). Wortlaut des Banners: siehe BUG-11.
+- [x] AC-13 — `battery.cpp:104-127`; Simulation: Übergang 11 000 → 0 mV ergibt Sperre mit Grund 2 nach 5 s; am Gerät T19 (2). Bei Wackelkontakt mit leerem Akku: BUG-8.
+
+## Edge Cases (dieser Lauf)
+- [x] EC-1 — Simulation: 4,8 s bei 9000 mV, dann 0,2 s bei 9400 mV, im Wechsel → keine Sperre
+- [x] EC-2 — `main.cpp:60`, Notify-on-Subscribe `ble.cpp:263-275`
+- [x] EC-3 — Simulation: 7 s Unterspannung, danach 12 V → bleibt gesperrt, Tiefschlaf nach 60 s
+- [ ] **EC-4 — Widerspruch in der Spec → BUG-12** (zu AC-13)
+- [x] EC-5 — `battery.cpp:65`, `client.ts:458`
+- [x] EC-6 — Die Firmware schützt unabhängig vom Dialog
+- [x] EC-7 — Simulation: USB mit 0 mV bzw. Rauschen von 0 bis 4999 mV über 200 s → keine Sperre; am Gerät T19 (3). Restrisiko: BUG-13
+- [x] EC-8 — im Code: Notify-on-Subscribe mit Byte 8 und 9 (`ble.cpp:269-273`); [!] am Gerät nicht verifiziert (T19 deckt spätes Verbinden nicht ab)
+
+## Security Audit (dieser Lauf)
+- [x] Abschaltung per BLE auslösen, verhindern oder verzögern: nicht möglich. `motorLockout()` wird nur aus `battery.cpp:122,126` aufgerufen. Es gibt keinen neuen Opcode, und Befehle sind weiterhin `WRITE_ENC` (`ble.cpp:391-392`). Es gibt kein `esp_restart`.
+- [x] Aufwachen aus dem Tiefschlaf: keine Weckquelle konfiguriert.
+- [x] Treiber bleibt aus: `setAutoEnable(false)` steht vor `disableOutputs()` (`FastAccelStepper.cpp:700`). Auto-Enable wird nur in `motorSetup` gesetzt.
+- [x] Bewegungsbefehle in der 60-s-Frist werden abgewiesen (`motor.cpp:249,421,538`). Den Rest-Race fängt der Guard in `battery.cpp:193-195` ab.
+- [ ] **Wackelkontakt am Teiler → BUG-8**
+- [x] Parser für Byte 8 und 9: unbekannte Gründe werden als `lowBattery` gelesen, der Countdown nur im Bereich 1..60 übernommen, Längen-Guards (`client.ts:456-466`), 36/36 Tests grün
+- [x] Secrets: `git diff main..HEAD` enthält keine Werte
+- [x] Status-Notify ohne Pairing lesbar: nur Sperrgrund und Countdown, keine PII (`design.md:129`)
+- [!] Auth, Autorisierung, Injection, Credentials in der URL, Brute Force — nicht anwendbar (kein Backend, kein Login)
+- [!] Rate Limiting — not implemented (optional for MVP); das Feature bringt keinen schreibenden Befehl mit
+- [!] Aushungern von `loop()` durch eine BLE-Flut eines gebondeten Geräts; ob `toff(0)` per UART tatsächlich ankommt; Hermes-Bundle auf Secrets — nur am Gerät bzw. nicht neu gebaut
+
+## Regression (dieser Lauf)
+- [x] PROJ-1: Die alte App v1.3.0 liest nur Byte 0..5 (`git show main:src/ble/client.ts`); die neue App kommt mit 6- und 8-Byte-Firmware zurecht (`client.test.ts:281, 290`)
+- [x] PROJ-2: Der Treiber wird nur in `motorLockout()` abgeschaltet; der Jog-Pfad bekommt nur zusätzlich `lockedOut`; geschätzte ADC-Last 1–2 ms alle 200 ms bei einem Watchdog von 1000 ms (nicht gemessen)
+- [x] PROJ-3: Der Stopp-Button hängt nur an `disabled` (`AutoDriveControls.tsx:627`)
+- [x] PROJ-4: Speichern und Löschen sind bei Akku-Sperre bedienbar (`AutoDriveControls.render.test.ts:270`)
+- [x] PROJ-5: Die gegenseitige Sperre ist unverändert; `start()`-Guard und Meldungen greifen nur bei Sperre
+- [!] Alles auf echter Hardware, darunter Jog nach dem Neustart aus dem Tiefschlaf — no way to run and probe this project was recorded
+
+## Status der Bugs aus dem ersten Lauf
+- BUG-1 (High) — **geschlossen** (AC-12, Code, Simulation, T19 (1)). Ruhestrom im Tiefschlaf nicht gemessen.
+- BUG-2 (Medium) — **geschlossen für einen dauerhaft gelösten Teiler** (AC-13, T19 (2)). Ein Wackelkontakt bei leerem Akku bleibt offen → BUG-8.
+- BUG-3, BUG-4, BUG-5, BUG-6, BUG-7 (Low) — **geschlossen** (`battery.cpp:160-167`; `AutoDriveControls.tsx:644,679` und Test; `useTimelapseSequence.ts:544-547` und Test `:611`; `battery.cpp:82-84` und Simulation; `client.ts:109`, `design.md:129`, `AutoDriveControls.tsx:628`)
+
+## Neue Bugs
+
+### BUG-8 — High — Wackelkontakt am Spannungsteiler hebelt den Tiefentladungsschutz aus (AC-7, AC-13)
+- **Ort:** `firmware/src/battery.cpp:90-127`. „Leer“ (5000–9299 mV) und „gestört“ (< 5000 mV nach erkanntem Akku) haben getrennte Zähler, und jede Messung im jeweils anderen Bereich setzt den Zähler zurück (so in `design.md:161` festgelegt).
+- **Folge:** Ein loser Abgriff liefert immer nur zu niedrige Werte. Bei leerem Pack liegt deshalb jede Messung unter 9,3 V, springt aber zwischen „leer“ und „< 5 V“. Keiner der beiden Zähler erreicht 5 s. Bewegung, Treiber und ESP32 laufen weiter, und die Zellen ohne BMS werden tiefentladen.
+- **Belege:** In beiden Simulationen (Security `p6sec/wackel.js`, Acceptance `p6r2/probe.js`) gab es keine Sperre:
+  - 9000 und 0 mV im 200-ms-Wechsel: keine Sperre in 600 s
+  - Wechsel im 1-s-Takt: keine Sperre in 300 s
+  - 4 s 9000 mV und eine Messung mit 0 mV, wiederholt: keine Sperre
+  - Zufallswerte 0..9000 mV: keine Sperre in 3600 s
+
+  Zum Vergleich mit gesundem Teiler: konstant 9000 mV sperrt nach 5,2 s, ein dauerhaft gelöster Teiler nach 5 s (Grund „gestört“).
+- **Severity:** Die Acceptance-Lane bewertet Medium, die Security-Lane High. Zusammengeführt: **High**. Die Messung liegt 5 s und länger ununterbrochen unter 9,3 V, das ist der Auslöser von AC-7, und trotzdem wird nicht gesperrt. Außerdem ist ein gelöster Teiler genau der Fall, für den AC-13 eingeführt wurde. Die Folge ist eine Tiefentladung von Zellen ohne BMS.
+- **Repro am Gerät:** Labornetzteil auf 9,0 V stellen, den Abgriff des Teilers im Takt von etwa 1–3 s an- und abklemmen. Ergebnis: keine Sperre, kein Countdown.
+- **Fix-Richtung (Design, kein `/refine` nötig):** ein gemeinsamer Zähler „unsicher“ (leer *oder* gestört nach erkanntem Akku). Der Sperrgrund ergibt sich aus der letzten Messung oder aus dem überwiegenden Bereich. Das ist AC-7-konform, `design.md:161` muss angepasst werden.
+
+### BUG-9 — Low — Halten des EN-Pins wird beim Booten nicht freigegeben
+`motorPrepareDeepSleep()` setzt `gpio_hold_en(GPIO27)` und `gpio_deep_sleep_hold_en()`. `gpio_hold_dis` kommt im Code nirgends vor. Heute ist das vermutlich folgenlos, denn es gibt keine Weckquelle, und ein Reset bzw. Stromwechsel löscht den Hold. Mit einer künftigen Weckquelle bliebe der Treiber nach dem Aufwachen aber aus. Prüfung am Gerät: Sperre auslösen, Tiefschlaf abwarten, Reset per EN-Taste, dann joggen. Fix: `gpio_hold_dis(GPIO27)` in `motorSetup()`.
+
+### BUG-10 — Low — Sperre bei genau `millis()==0` geht sofort in den Tiefschlaf
+`battery.cpp:137-140`: `lockedAtMillis = 1` und `elapsed = 0 − 1` ergeben einen Überlauf, also sofort `esp_deep_sleep_start()` ohne die 60-s-Frist. Beleg ist die Probe `p6r2/probe0.js`. Praktisch nur nach 49,7 Tagen Laufzeit auf die Millisekunde genau erreichbar.
+
+### BUG-11 — Low — Banner-Texte
+- AC-12 verlangt „Akku leer – Slider schaltet sich in 60 s ab“. Gerendert werden zwei Zeilen, „Akku leer – bitte laden“ und „Slider schaltet sich in 60 s ab“ (`BatteryLockBanner.tsx:20-30`). Inhaltlich ist das gleich, und so ist es in `design.md:166-169` entschieden.
+- Bei `measurementFault` steht im Hinweis weiterhin „… lade den Akku“ (`BatteryLockBanner.tsx:31-34`). Passend wäre ein Hinweis auf die Verkabelung.
+
+### BUG-12 — Low — Widerspruch in der Spec zwischen EC-4 und AC-13
+EC-4 verlangt bei „Akku erkannt, dann < 5 V ohne Neustart“ die Anzeige „🔋 –“ ohne Fehlermeldung. AC-13 verlangt in diesem Fall Sperre und Abschaltung. Der Code folgt AC-13. Laut Nutzer ist der Fall physisch nicht erreichbar, weil USB und Akku nie gleichzeitig angeschlossen sind; die Security-Lane nennt aber genau das als Bedien-Falle, etwa beim Flashen im Akkubetrieb. EC-4 per `/refine` angleichen.
+
+### BUG-13 — Low — Eine einzige Messung ≥ 5000 mV setzt „Akku erkannt“ dauerhaft
+`battery.cpp:106-108` hat keine Entprellung. Ohne verbauten Teiler schwebt GPIO 34; eine Störung, gefolgt von 5 s < 5 V, würde im USB-Betrieb sperren (Widerspruch zu AC-11 und EC-7). Mit dem verbauten 22-kΩ-Pull-down ist das unrealistisch.
+
+### Beobachtungen (kein Bug)
+- `motorSetStart`, `motorSetEnd` und `motorSetEndFromDistance` sind in der Firmware nicht an `lockedOut` gebunden; gesperrt wird nur in der App. Bewegt wird dabei nichts.
+- Die offene Frage in `spec.md`, ob der Motor stromlos frei läuft, ist durch T19 beantwortet (er hält mechanisch), aber noch nicht abgehakt. Das bei Gelegenheit per `/refine` nachziehen.
+
+## Nicht verifiziert in diesem Lauf
+- [!] Laufzeit aller AC und EC auf dem aktuellen Stand über T19 hinaus — no way to run and probe this project was recorded
+- [!] EC-8 am Gerät (Verbinden während der Frist)
+- [!] EN bleibt im Tiefschlaf HIGH — T19 kann das nicht unterscheiden (mechanisches Halten)
+- [!] Ruhestrom im Tiefschlaf — T19 (4) nicht gemessen
+- [!] Optik von Banner und Header — kein Viewport
+- [!] Firmware-Tests — no test command recorded for layer firmware
+
+## Zusammenfassung (zweiter Lauf)
+- **Acceptance Criteria:** 12 von 13 erfüllt; AC-7 FAIL (BUG-8)
+- **Edge Cases:** 7 von 8 erfüllt; EC-4 widerspricht AC-13 (BUG-12)
+- **Bugs:** 0 Critical, 1 High (BUG-8), 0 Medium, 5 Low (BUG-9 bis BUG-13); BUG-1 bis BUG-7 geschlossen (BUG-2 bis auf den Wackelkontakt)
+- **Security:** keine Umgehung der Sperre per BLE; der Schutz selbst hat die Lücke BUG-8
+- **Regression:** keine in PROJ-1 bis PROJ-5
+
+**Production-Ready: NEIN.** BUG-8 (High) ist offen. Der Fix bleibt im Design, kein Vertragswechsel: `/build PROJ-6` mit gemeinsamem Unsicher-Zähler, die Low-Bugs BUG-9 bis BUG-11 und BUG-13 gleich mit. BUG-12 braucht ein kurzes `/refine PROJ-6`. Danach Re-Verifikation per `/qa`. Status: **In Review**.
