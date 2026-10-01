@@ -9,6 +9,10 @@
          without this declaration Android silently denies the request with no
          dialog, permanently blocking the Zeitraffer start button. -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- PROJ-3 AC-20/AC-21: video with sound during an auto-drive. Same
+         reason as CAMERA above — without the declaration Android denies
+         useMicrophonePermission()'s request silently, with no dialog. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- qa-report.md "Auch bemerkt" (PROJ-5): @react-native-camera-roll/camera-roll's
          CameraRoll.save() needs this on Android 9 (API 28) and below — this
          project's minSdkVersion is 24 (android/build.gradle). Android 10+

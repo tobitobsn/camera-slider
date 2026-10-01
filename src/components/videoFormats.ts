@@ -1,0 +1,136 @@
+/**
+ * Pure helpers for PROJ-3's video recording during an auto-drive (design.md →
+ * "Angebotene Formate und Objektive"): which back lenses the app offers, which
+ * resolution + fps combinations a lens offers, whether it supports video
+ * stabilization, and which lens/format is actually used when a remembered one
+ * is not available on this device (AC-22, AC-23, AC-24, AC-26).
+ *
+ * No React, no persistence — `useVideoSettings` stores the user's choice,
+ * `useVideoCamera` feeds the camera with what these functions resolve.
+ */
+import type { CameraDevice } from 'react-native-vision-camera';
+
+export type LensType = 'wide' | 'ultraWide' | 'tele';
+export type VideoResolution = '720p' | '1080p' | '2160p';
+export type VideoFps = 24 | 25 | 30 | 50 | 60;
+
+export const LENS_TYPES: readonly LensType[] = ['wide', 'ultraWide', 'tele'];
+export const VIDEO_RESOLUTIONS: readonly VideoResolution[] = ['720p', '1080p', '2160p'];
+export const VIDEO_FPS: readonly VideoFps[] = [24, 25, 30, 50, 60];
+
+export const DEFAULT_LENS: LensType = 'wide';
+export const DEFAULT_RESOLUTION: VideoResolution = '1080p';
+export const DEFAULT_FPS: VideoFps = 30;
+
+/** Pixel size of each offered resolution (landscape). */
+export const RESOLUTION_SIZES: Record<VideoResolution, { width: number; height: number }> = {
+  '720p': { width: 1280, height: 720 },
+  '1080p': { width: 1920, height: 1080 },
+  '2160p': { width: 3840, height: 2160 },
+};
+
+const RESOLUTION_LABELS: Record<VideoResolution, string> = {
+  '720p': '720p',
+  '1080p': '1080p',
+  '2160p': '4K',
+};
+
+export const LENS_LABELS: Record<LensType, string> = {
+  wide: 'Weitwinkel',
+  ultraWide: 'Ultraweitwinkel',
+  tele: 'Tele',
+};
+
+const DEVICE_TYPE_TO_LENS: Partial<Record<CameraDevice['type'], LensType>> = {
+  'wide-angle': 'wide',
+  'ultra-wide-angle': 'ultraWide',
+  telephoto: 'tele',
+};
+
+export type VideoFormat = { resolution: VideoResolution; fps: VideoFps };
+
+export type Lens = { type: LensType; device: CameraDevice };
+
+/**
+ * AC-23: every back camera whose type is wide / ultra-wide / tele, the first
+ * one per type, in the order wide → ultra-wide → tele. A phone that only
+ * exposes one logical back camera yields at most one lens.
+ */
+export function availableLenses(devices: readonly CameraDevice[]): Lens[] {
+  const firstPerType = new Map<LensType, CameraDevice>();
+  for (const device of devices) {
+    if (device.position !== 'back') {
+      continue;
+    }
+    const lensType = DEVICE_TYPE_TO_LENS[device.type];
+    if (lensType !== undefined && !firstPerType.has(lensType)) {
+      firstPerType.set(lensType, device);
+    }
+  }
+  return LENS_TYPES.filter(type => firstPerType.has(type)).map(type => ({
+    type,
+    device: firstPerType.get(type) as CameraDevice,
+  }));
+}
+
+/**
+ * AC-26: the lens actually used — the remembered one if this device has it,
+ * otherwise wide, otherwise whatever lens exists. `undefined` only while the
+ * device list is still empty.
+ */
+export function effectiveLens(lenses: readonly Lens[], remembered: LensType): Lens | undefined {
+  return (
+    lenses.find(lens => lens.type === remembered) ??
+    lenses.find(lens => lens.type === DEFAULT_LENS) ??
+    lenses[0]
+  );
+}
+
+function supportsResolution(device: CameraDevice, resolution: VideoResolution): boolean {
+  const { width, height } = RESOLUTION_SIZES[resolution];
+  return device
+    .getSupportedResolutions('video')
+    .some(
+      size =>
+        (size.width === width && size.height === height) ||
+        (size.width === height && size.height === width),
+    );
+}
+
+/**
+ * AC-22: every combination of the three standard resolutions and the five
+ * standard frame rates that this lens reports, sorted by resolution, then fps.
+ */
+export function availableFormats(device: CameraDevice): VideoFormat[] {
+  const resolutions = VIDEO_RESOLUTIONS.filter(resolution => supportsResolution(device, resolution));
+  const fpsValues = VIDEO_FPS.filter(fps => device.supportsFPS(fps));
+  return resolutions.flatMap(resolution => fpsValues.map(fps => ({ resolution, fps })));
+}
+
+/**
+ * AC-22/AC-26: the format actually used — the remembered one if offered,
+ * otherwise 1080p/30 if offered, otherwise the first offered combination.
+ * `undefined` if the lens offers none of the standard combinations.
+ */
+export function effectiveFormat(
+  formats: readonly VideoFormat[],
+  remembered: VideoFormat,
+): VideoFormat | undefined {
+  const matches = (target: VideoFormat) => (format: VideoFormat) =>
+    format.resolution === target.resolution && format.fps === target.fps;
+  return (
+    formats.find(matches(remembered)) ??
+    formats.find(matches({ resolution: DEFAULT_RESOLUTION, fps: DEFAULT_FPS })) ??
+    formats[0]
+  );
+}
+
+/** AC-24: the stabilization switch is only shown when the lens supports it. */
+export function supportsStabilization(device: CameraDevice): boolean {
+  return device.supportsVideoStabilizationMode('auto');
+}
+
+/** Display label, e.g. "4K · 25 fps". */
+export function formatLabel(format: VideoFormat): string {
+  return `${RESOLUTION_LABELS[format.resolution]} · ${format.fps} fps`;
+}
