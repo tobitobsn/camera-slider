@@ -43,11 +43,12 @@
 - **EC-1** — Angenommen der Motor fährt mit hoher Geschwindigkeit an und die Spannung bricht dabei kurz unter 9,3 V ein, wenn sie sich innerhalb von 5 Sekunden wieder erholt, dann löst der Schutz-Stopp nicht aus und die Anzeige springt nicht
 - **EC-2** — Angenommen die App ist nicht verbunden (Absturz, Hintergrund, Bluetooth aus), wenn der Akku während einer Bewegung die Schutzschwelle unterschreitet, dann stoppt die Firmware trotzdem (siehe AC-7); beim nächsten Verbinden zeigt die App sofort den gesperrten Zustand (AC-9)
 - **EC-3** — Angenommen die Spannung erholt sich nach dem Schutz-Stopp im Ruhezustand wieder über 9,3 V, wenn eine neue Bewegung angefordert wird, dann bleibt der Slider trotzdem gesperrt (AC-8) — kein Wechsel zwischen Anlaufen und Stoppen
-- **EC-4** — Angenommen der Slider wird per USB betrieben und später zusätzlich ein Akku angeschlossen (oder umgekehrt), wenn sich der Messwert über bzw. unter 5 V bewegt, dann wechselt die Anzeige zwischen Prozentwert und „🔋 –", ohne Fehlermeldung
+- **EC-4** — Angenommen der Slider wurde per USB gestartet (kein Akku erkannt), wenn danach ein Akku angeschlossen wird und der Messwert über 5 V steigt, dann wechselt die Anzeige von „🔋 –" auf den Prozentwert, ohne Fehlermeldung. Die Gegenrichtung (Akku war erkannt, Messwert fällt ohne Neustart unter 5 V) ist kein Wechsel auf „🔋 –", sondern AC-13 — auch wenn dabei USB angesteckt ist (z. B. zum Flashen im Akkubetrieb, dann Akku abgezogen)
 - **EC-5** — Angenommen die Verbindung wird hergestellt, wenn noch kein Messwert vorliegt (direkt nach dem Start des ESP32), dann zeigt der Header „🔋 –" bis zum ersten gültigen Wert
 - **EC-6** — Angenommen der Nutzer bestätigt die Nachfrage bei unter 10 % und startet einen Zeitraffer, wenn der Akku während der Sequenz die Schutzschwelle erreicht, dann greift AC-10 — die Bestätigung setzt den Schutz-Stopp nicht außer Kraft
 - **EC-7** — Angenommen der ESP32 startet im USB-Betrieb und es wurde seit dem Start nie ein Akku erkannt (Messwert immer < 5 V), dann gilt weiter AC-11: „🔋 –", kein Schutz-Stopp, keine Sperre, keine Abschaltung
 - **EC-8** — Angenommen während der 60 Sekunden bis zur Abschaltung (AC-12) verbindet sich die App neu oder erst jetzt, dann sieht sie sofort den gesperrten Zustand und die Abschalt-Meldung
+- **EC-9** — Angenommen ein Akku ist erkannt und leer, wenn der Messwert durch einen Wackelkontakt am Spannungsteiler zwischen „leer" (5–9,3 V) und „unter 5 V" springt, dann zählen beide Bereiche gemeinsam: nach 5 Sekunden ununterbrochen unter 9,3 V sperrt die Firmware (AC-7) — mit der Meldung „Akkumessung gestört", weil die Strecke Werte unter 5 V enthielt
 
 ## Technical Requirements (optional)
 - Akku: 3× 18650 in Reihe (3S), ohne BMS; Spannungsbereich ca. 9,0 V (leer) bis 12,6 V (voll)
@@ -58,7 +59,7 @@
 ## Open Questions
 - [x] Kalibrierung → Faktor 0,993, gemessen 2026-09-30 (design.md Umsetzungshinweise). Der genaue Umrechnungsfaktor des Spannungsteilers wird nach dem Einbau einmal mit einem Multimeter bestimmt — wie und wo er hinterlegt wird, entscheidet `/architecture`
 - [x] Welcher ADC1-Pin wird tatsächlich verwendet → GPIO 34, Teiler 104 kΩ / 22 kΩ, vom Nutzer verbaut (2026-09-30)
-- [ ] Läuft der Motor im stromlosen Zustand frei, sodass der Schlitten nach einem Schutz-Stopp von Hand geschoben werden kann? (TMC2209 im stromlosen Zustand — am Gerät zu prüfen)
+- [x] Läuft der Motor im stromlosen Zustand frei, sodass der Schlitten nach einem Schutz-Stopp von Hand geschoben werden kann? → Nein — der Schlitten hält auch komplett ohne Strom, also mechanisch (Rastmoment/Antrieb), nicht durch den Treiber (Hardware-Test T19, 2026-10-01)
 
 - [x] Wird der ESP32 aus dem Akku versorgt? → Ja, über einen Step-down-Wandler; Akkuwechsel = Neustart, USB und Akku nicht gleichzeitig (Nutzer, 2026-09-30)
 
@@ -75,4 +76,6 @@
 | Messwert < 5 V = „kein Akku erkannt": keine Warnung, kein Schutz-Stopp | USB-Betrieb beim Flashen/Testen und Betrieb vor dem Hardware-Einbau müssen weiter funktionieren | 2026-09-30 |
 | Nach dem Schutz-Stopp Motortreiber stromlos, 60 s Frist, dann Tiefschlaf des ESP32 bis zum Neustart (AC-12) | QA-Befund BUG-1 (High): die Sperre allein ließ ESP32, Bluetooth und Treiber weiterlaufen und entlud die Zellen ohne BMS weiter; die 60 s geben der App Zeit, den Grund anzuzeigen | 2026-09-30 |
 | Ausfall der Messung nach erkanntem Akku = Fehler, behandelt wie leerer Akku, eigene Meldung (AC-13) | QA-Befund BUG-2 (Medium): ein gelöster Spannungsteiler schaltete den Schutz still ab; USB und Akku gehen nicht gleichzeitig, ein Abfall unter 5 V ohne Neustart kann daher nur ein Fehler sein | 2026-09-30 |
+| EC-4 gilt nur noch für „USB-Start, dann Akku"; „Akku erkannt, dann < 5 V" ist immer AC-13 (BUG-12) | QA-Befund: EC-4 und AC-13 widersprachen sich; der Schutz vor einem gelösten Teiler hat Vorrang. Akku-Abziehen bei angestecktem USB führt bewusst zur Sperre | 2026-10-01 |
+| Wackelkontakt zwischen „leer" und „< 5 V" zählt als eine Strecke, Meldung „gestört" (EC-9) | QA-Befund BUG-8 (High): getrennte Zähler setzten sich gegenseitig zurück, der Schutz griff nie | 2026-10-01 |
 | Restverbrauch im Tiefschlaf (Step-down, Teiler, Treiber-VM) bleibt als bekannte Grenze, Nullverbrauch nur per Hardware | Firmware kann den Wandler nicht abschalten; ehrlich dokumentiert statt versprochen | 2026-09-30 |
