@@ -1,5 +1,347 @@
 # QA Test Results
 
+**Tested:** 2026-10-02
+**App URL:** nicht ausführbar hier (`probe.kind: none`, App-Ebene und Layer `firmware`). Jedes Laufzeit-AC ist unten `[!] NOT VERIFIED`, bis ein Mensch es am Gerät testet.
+**Tester:** QA Engineer (AI). Drei unabhängige `qa-engineer`-Lanes (Akzeptanz, Security, Regression) ohne Build-Kontext, zusammengeführt vom Owner.
+**Scope:** `full`, erster `/qa`-Lauf nach `/refine` (Videoaufnahme, `35c737d`). Kein Re-Verifikationslauf, denn der Vertrag hat sich geändert. HEAD `701a737` auf `feat/PROJ-3-videoaufnahme`. Code-Umfang: `git diff --stat 35c737d..HEAD`. Neu sind `useVideoSettings.ts`, `videoFormats.ts`, `useVideoCamera.ts`, `useVideoDrive.ts` und `VideoPanel.tsx`. Geändert sind `AutoDriveControls.tsx`, `TimelapseControls.tsx`, `RootScreen.tsx` und `AndroidManifest.xml`. Firmware, `src/ble/` und `package.json` sind unverändert.
+
+> Legende: `[x]` = in diesem Lauf geprüft (mit Beleg) · `[ ] BUG` = als fehlerhaft festgestellt · `[!] NOT VERIFIED` = in diesem Lauf nicht prüfbar (mit Grund)
+>
+> **Wichtig:** Ein `[x]` heißt hier „im Code und in den Unit-Tests erfüllt“. Am echten Handy und Slider wurde in diesem Lauf nichts ausgeführt. Jedes Laufzeit-AC braucht zusätzlich den Gerätetest am Ende dieses Abschnitts.
+
+## Automatisierte Tests (Step 5)
+
+- [x] `npm test` (einmal vom Owner vor dem Fan-out): 21 Suites, **306 passed, 0 failed**. Alle Nachbar-Suites sind grün (PROJ-1: `client`, `connectionReducer`, `ConnectionProvider`, `App`; PROJ-2: `useJogState`; PROJ-4: `usePresets`; PROJ-5: `useCameraCapture`, `useTimelapseSequence`, `TimelapseControls`, `useKeepAwake`; PROJ-6: `battery`, `BatteryLockBanner`, `BatteryIndicator`).
+- [x] `npx tsc --noEmit`: keine Fehler.
+- [x] `npm run lint`: 0 Errors, 67 Warnings. Neu durch den Diff sind nur 2× `no-void` in `VideoPanel.tsx:69` und `:138`.
+- [!] Layer `firmware`: NOT VERIFIED, kein Testbefehl erfasst. Der Diff berührt `firmware/` nicht (`git diff --stat 35c737d..HEAD -- firmware` ist leer).
+- E2E-Suite: keine vorhanden, nicht ausgeführt.
+- **Vorsicht:** Ein bestehender Unit-Test ist **falsch grün**. „…saves the part recorded“ in `useVideoDrive.test.ts` nutzt einen Fake-Recorder, der nach einem Fehler trotzdem `onFinished` liefert (`useVideoDrive.test.ts:57-59`). VisionCamera tut das nicht (siehe BUG-44).
+
+## Acceptance Criteria Status
+
+### Videoaufnahme (AC-13 bis AC-29), erster Lauf
+
+#### AC-13: Schalter „Video aufnehmen“ zeigt Vorschau und Einstellungen
+- [x] Standard ist aus (`useVideoSettings.ts:39-46`). Das Panel erscheint nur bei eingeschaltetem Schalter (`AutoDriveControls.tsx:666-675`), es werden nur Rückkameras berücksichtigt (`videoFormats.ts:60`). Bei ausgeschaltetem Schalter gilt der alte Weg (`AutoDriveControls.tsx:486-491`). Belegt durch die Render-Tests „AC-13: the switch turns video on…“ und „with video off… drives as before“.
+- [!] NOT VERIFIED am Gerät: no way to run and probe this project was recorded.
+
+#### AC-14: Aufnahme → 2 s Vorlauf → Fahrt → 2 s Nachlauf → automatisch beendet
+- [x] `useVideoDrive.ts:261-266` (Vorlauf-Timer nach dem Aufnahmestart), `:223` (AUTO_DRIVE), `:304-307` (Ankunft, Nachlauf, Stopp). Die Firmware meldet `driving=false` und `atEnd` im selben Notify (`motor.cpp:526-540`). Test: „records, waits the pre-roll, drives, waits the post-roll…“.
+- [!] NOT VERIFIED am Gerät (tatsächliches Timing).
+
+#### AC-15: Video in der Galerie, Meldung „Video gespeichert“
+- [x] `CameraRoll.save('file://'+path, {type:'video'})` (`useVideoDrive.ts:198`). Ab Android 10 landet die Datei in MediaStore Movies (`CameraRollModule.java:181-201`). Der Toast steht in `AutoDriveControls.tsx:309-315`.
+- [ ] BUG-48 (Medium): Die Temp-Datei im App-Cache wird nie gelöscht.
+- [!] NOT VERIFIED am Gerät.
+
+#### AC-16: REC-Anzeige mit Dauer und Phase
+- [x] `VideoPanel.tsx:108-114` (Phasen-Labels `:25-32`). Die Uhr startet beim Start-Event (`useVideoDrive.ts:261-264`). Test: „shows REC with the recorded time and the phase“.
+- [!] NOT VERIFIED am Gerät (sichtbar in der ScrollView?).
+
+#### AC-17: Stopp in jeder Phase → Motor hält, Aufnahme endet, Teil-Take gespeichert
+- [x] Prüfung je Phase:
+  - Startet: `useVideoDrive.ts:165-168` und `:256-259`.
+  - Vorlauf und Nachlauf: `clearTimer`, `:162`.
+  - Fahrt: STOP plus Aufnahme-Stopp, `:282-285`.
+  - Tests decken Fahrt und Vorlauf ab. Startet und Nachlauf sind nur im Code geprüft.
+- [ ] BUG-43 (High): Löst der Aufnahmestart nie auf, endet Stopp in „Startet“ nie.
+- [!] NOT VERIFIED am Gerät.
+
+#### AC-18: Aufnahme startet nicht oder bricht ab → kein Losfahren bzw. sofortiger Halt, Fehlermeldung, Teil speichern
+- [x] Ein Startfehler führt zu einer Meldung, und die Fahrt startet nicht (`useVideoDrive.ts:268-271`, Test). Ein Fehler während der Fahrt sendet STOP und zeigt eine Meldung (`:176-189`). Der Wechsel in den Hintergrund wird über AppState erkannt (`:322-329`).
+- [ ] BUG-44 (Medium): Ein Teil-Take nach einem Aufnahmefehler wird nie gespeichert.
+- [ ] BUG-45 (Medium): Endet die Aufnahme unerwartet „regulär“ (`SOURCE_INACTIVE`), gilt der Lauf als Erfolg und der Motor fährt weiter.
+- [!] NOT VERIFIED am Gerät.
+
+#### AC-19: BLE-Abbruch während einer Fahrt mit Video
+- [x] Ist `device === null`, wird die Aufnahme beendet und gespeichert (`useVideoDrive.ts:315-319`, Test „a lost connection ends and saves…“). Die Firmware stoppt (`ble.cpp:138-140`).
+- [ ] BUG-52 (Low): Der Toast „Video gespeichert“ fehlt nach dem Remount.
+- [!] NOT VERIFIED am Gerät. Beim Wechsel auf `reconnecting` hängt RootScreen auch die `<Camera>` aus (`RootScreen.tsx:192-200`). Laut Bibliothek wird die Aufnahme trotzdem gespeichert, am Gerät ist das nicht belegt.
+
+#### AC-20: Fehlende Berechtigung → Hinweis, Anfrage bzw. Einstellungen, keine Fahrt mit Video
+- [x] Die Hinweise samt „Zugriff erlauben“, „Einstellungen öffnen“ und „oder Ton ausschalten“ sind vorhanden (`VideoPanel.tsx:64-71`, `:133-141`, Render-Tests im Block „permissions (AC-20)“).
+- [ ] **BUG-42 (High)**: Eine Fahrt mit Video startet trotz fehlender Berechtigung.
+
+#### AC-21: Ton an/aus
+- [x] `enableAudio: soundEnabled && micGranted` (`useVideoCamera.ts:105-108`). Der Video-Output wird bei einer Änderung neu erzeugt (VisionCamera `useVideoOutput`, deps). Test: „records audio only when sound is on and the microphone is granted“.
+- [ ] Zusammen mit BUG-42: Bei Ton an ohne Mikrofon wird still ohne Ton aufgenommen, statt zu sperren.
+- [!] NOT VERIFIED am Gerät.
+
+#### AC-22: Nur verfügbare Auflösung/Bildrate, Standard 1080p/30
+- [x] Standard 1080p/30 (`videoFormats.ts:21-23`), wirksames Format `:115-126`. Tests: `videoFormats.test.ts` (AC-22).
+- [ ] BUG-47 (Medium): Es werden Kombinationen angeboten, die das Gerät nicht kann, und die Bildrate wird still angepasst.
+- [!] NOT VERIFIED am Gerät (welche Formate das konkrete Handy meldet).
+
+#### AC-23: Objektivwahl
+- [x] `videoFormats.ts:60-74`. Die Auswahl erscheint nur bei mehr als einem Objektiv (`VideoPanel.tsx:165`). Tests: `availableLenses (AC-23)` und VideoPanel „hides the lens choice with a single lens…“.
+- [!] NOT VERIFIED am Gerät (ob der Hersteller UW/Tele einzeln freigibt).
+
+#### AC-24: Stabilisierung, Schalter nur bei Unterstützung
+- [ ] **BUG-46 (Medium)**: Der Schalter wird auf Android immer angezeigt, und „an“ hat keine garantierte Wirkung.
+
+#### AC-25: Tippen sperrt Fokus und Belichtung, „Auto“ hebt auf, Sperre hält während der Fahrt
+- [x] `focusTo(point, {adaptiveness:'locked', autoResetAfter:null})` (`useVideoCamera.ts:156-159`), „Auto“ ruft `resetFocus` auf. Tippen und „Auto“ sind während einer Aufnahme gesperrt (`VideoPanel.tsx:78`, `:118`). Bei einer Neukonfiguration wird die Sperre zurückgesetzt (`useVideoCamera.ts:124-126`). Tests: AC-25-Block in `useVideoCamera.test.ts` und `VideoPanel.render.test.ts`.
+- [ ] BUG-55 (Low, nicht am Gerät belegt): Nach Hintergrund und Rückkehr kann die native Sperre weg sein, die Markierung bleibt aber stehen.
+- [!] NOT VERIFIED am Gerät (ob CameraX AE/AWB auf dem Objektiv wirklich sperrt).
+
+#### AC-26: Einstellungen über einen Neustart gemerkt, Sperre nur pro Sitzung, Fallback bei nicht verfügbarem Wert
+- [x] Ein Datensatz unter `camera-slider.video-settings` mit feldweisem Fallback (`useVideoSettings.ts:61-82`). Objektiv- und Format-Fallback greifen, ohne den gemerkten Wert zu überschreiben (`videoFormats.ts:81-126`). Die Sperre ist nur Sitzungs-State (`useVideoCamera.ts:89`). Tests: `useVideoSettings.test.ts` (inkl. der neuen QA-Tests, siehe Step 6) und `videoFormats.test.ts`.
+- [!] NOT VERIFIED am Gerät (echter App-Neustart).
+
+#### AC-27: Bildschirm bleibt während der Fahrt mit Video an, Sperre wird danach freigegeben
+- [x] `activate()` beim Start (`useVideoDrive.ts:243`), `deactivate()` in `finish()` (`:136`) und beim Unmount (`:332-338`).
+- [ ] **BUG-43 (High)**: Die Freigabe ist nicht garantiert. Bleibt „Startet“ hängen, bleibt die Wach-Sperre dauerhaft an.
+
+#### AC-28: Während einer Fahrt mit Video ist nur Stopp bedienbar
+- [x] `lockedByOtherMode` enthält `videoBusy` (`AutoDriveControls.tsx:426`). Gesperrt sind damit Schalter (`:655`), Dauer (`:612`), Punkte, Presets und Panel (`busy`, `VideoPanel.tsx:78/118/148/159/172/183`), Jog über `RootScreen.tsx:157-162`. Das gilt in allen Phasen außer „bereit“, auch in „Startet“ und „Speichert“ (`useVideoDrive.ts:342`). Test: „AC-17/AC-28: during a take only Stopp is usable“.
+- [ ] BUG-51 (Low): Die Berechtigungs-Buttons im Panel bleiben bedienbar.
+
+#### AC-29: Erwartete Videolänge = Dauer + 4 s
+- [x] `AutoDriveControls.tsx:661-665` mit `VIDEO_EXTRA_SECONDS = (PREROLL_MS + POSTROLL_MS)/1000` (`:34`). Test: „AC-29: shows the expected video length“.
+
+### Bestand (AC-1 bis AC-12): Regression gegen die Video-Änderungen
+
+Firmware und BLE-Client sind unverändert. In `AutoDriveControls.tsx` kamen nur `videoBusy` in den Sperren und Verzweigungen in `handleDrive`/`handleStop` dazu. Die Gerätetests vom 2026-09-24 bis 2026-09-30 (siehe Archiv unten) gelten für die Fahrlogik weiter. Weil die Datei geändert wurde, ist hier unten nur der Code-Stand neu geprüft.
+
+- [x] AC-1/AC-2: `AutoDriveControls.tsx:457-478`, unverändert.
+- [x] AC-3/AC-4: ohne Video `:490` → `sendAutoDriveCommand`. Render-Test „with video off… drives as before“.
+- [x] AC-5: `:495-501` → STOP, Firmware `forceStop` (`motor.cpp:329-345`).
+- [x] AC-6: `:357-361` und `:617-622`. Tests in `AutoDriveControls.test.ts` grün.
+- [x] AC-11: `:386-391`. Render-Test „AC-11 still corrects on blur“.
+- [x] AC-12: `:372-384` und `:623-641`. Render-Tests im AC-12-Block.
+- [x] AC-7/AC-8: `:397-409`.
+- [x] AC-9: `motionLocked` `:428`, Jog-Sperre `RootScreen.tsx:157-162`.
+- [x] AC-10: `ble.cpp:138-140`, unverändert.
+- [!] Laufzeit für AC-1 bis AC-12 auf diesem Branch: NOT VERIFIED, no way to run and probe this project was recorded. Siehe Gerätetest-Liste.
+
+## Edge Cases Status
+
+- [x] **EC-1**: `AutoDriveControls.tsx:395` und `:642-644`, die Firmware prüft Distanz 0 (unverändert).
+- [x] **EC-2** (Timing-Garantie): `motor.cpp:428-431` lehnt AUTO_DRIVE während `autoDriving` ab (unverändert).
+- [x] **EC-3**: `ble.cpp:101` `motorClearPoints`, useSliderStatus setzt zurück, wenn `device` null ist. Bekannter Low-Restfall BUG-18 siehe Archiv.
+- [x] **EC-4**: Die Watchdog-Ausnahme `motor.cpp:373` ist unverändert. Der AppState-Listener des Video-Hooks greift in „bereit“ nicht (`useVideoDrive.ts:178`), eine Fahrt ohne Video läuft im Hintergrund also weiter.
+- [x] **EC-5** (Timing-Garantie): Die synchrone Ref-Prüfung `phaseRef.current !== 'ready'` (`useVideoDrive.ts:233-236`) und zusätzlich die Firmware-Sperre (`motor.cpp:428`) sorgen dafür, dass ein zweiter Start ignoriert wird. Test: „ignores a second start while a take is running“.
+- [x] **EC-6**: Der Schutz-Stopp läuft `motorLockout` → `motorStop` → `autoDriving=false` (`motor.cpp:668-674`, `:361`). Steht der Schlitten dabei nicht am Ziel, beendet die App die Aufnahme sofort (`useVideoDrive.ts:308-311`). Test: „a stop on the way…“.
+- [x] **EC-7**: Hintergrund im Vorlauf → `fail` → `clearTimer`, und AUTO_DRIVE wird nie gesendet (`useVideoDrive.ts:322-329`, `:162`). Test: „the app going to the background during the pre-roll“. Restrisiko siehe BUG-45: Kommt `onFinished` vor dem AppState-Event, fährt der Schlitten zwar ebenfalls nicht, eine Fehlermeldung bleibt aber aus.
+- [x] **EC-8**: `handleLoadPreset` setzt nur Preset und Dauer (`AutoDriveControls.tsx:506-512`). Test „EC-8: loading a preset leaves the video settings untouched“. Getrennte Speicher-Keys: `useVideoSettings.ts:27` und `usePresets.ts:25`.
+- [x] **EC-9**: Während eines Zeitraffers ist der Video-Schalter gesperrt (`AutoDriveControls.tsx:426`, `:655`). Bei eingeschaltetem Video ist der Zeitraffer-Start gesperrt (`RootScreen.tsx:188`, `TimelapseControls.tsx:90-91`, `:180`). Test „EC-9: the video switch is locked while a timelapse runs“.
+- [x] **EC-10**: Statt der Vorschau erscheint ein Hinweis, es wird keine Zeitraffer-`<Camera>` gerendert, und der Start ist gesperrt (`TimelapseControls.tsx:207-210`, `:180`). Test `timelapseCameraState (PROJ-3 EC-10)`. Bei ausgeschaltetem Video verhält sich der Zeitraffer unverändert (Test „behaves as before when "Video aufnehmen" is off“).
+- [!] Laufzeit für alle EC: NOT VERIFIED, no way to run and probe this project was recorded.
+
+## Security Audit Results
+
+_Stack: Android-App ohne Backend und ohne HTTP-API, Firmware per BLE. Die Web-Checks der Vorlage sind deshalb „nicht anwendbar“. Dafür kommen stack-spezifische Prüfungen dazu._
+
+- [!] Authentication (Login/HTTP): NOT VERIFIED, nicht anwendbar (kein Login, keine Routen). Das BLE-Gegenstück ist im Code geprüft: `WRITE_ENC` (`ble.cpp:391-392`), Just-Works-Bonding, ein Bond-Slot (`platformio.ini:32`). Das Restrisiko „erstes Gerät bei leerem Bond-Slot koppelt“ ist eine bewusste Entscheidung aus PROJ-1/PROJ-2 und nicht neu.
+- [!] Authorization (Nutzer X/Y): NOT VERIFIED, nicht anwendbar (Einzelnutzer, kein Backend).
+- [x] Eingabevalidierung App → Firmware (AUTO_DRIVE): Die Dauer wird gerundet und auf 0…65535 begrenzt (`client.ts:318-321`), die Richtung kommt aus einer festen Map (`client.ts:41-44`). Unverändert.
+- [x] Firmware-Parsing kaputter Writes: Leere Writes werden ignoriert (`ble.cpp:156-158`), jeder Opcode prüft seine exakte Länge (`ble.cpp:164-225`), `motorAutoDrive` prüft erneut (`motor.cpp:428-501`). Unverändert. Fuzzing am ESP32: NOT VERIFIED (layer firmware: nothing to probe).
+- [x] Status-Parsing in der App gegen kurze oder kaputte Notifies: `?? 0` plus Längen-Guards (`client.ts:440-479`). Unverändert.
+- [x] AsyncStorage gegen feindliches oder kaputtes JSON (`camera-slider.video-settings`): Whitelist-`pick` und `typeof boolean` pro Feld, try/catch (`useVideoSettings.ts:48-82`). Neue QA-Tests, rot-geprüft (siehe Step 6).
+- [!] Rate Limiting: NOT VERIFIED, nicht implementiert und nicht anwendbar (keine Endpoints). Eine Flut von BLE-Befehlen startet keine zweite Fahrt (`motor.cpp:428`).
+- [!] Brute Force: NOT VERIFIED, nicht anwendbar (PROJ-3 prüft keine Credentials). `tasks.md` hat keine `[user]`-Tasks (`tasks.md:76`).
+- [!] Account-Enumeration und Credentials in der URL: NOT VERIFIED, nicht anwendbar (keine Konten, keine Web-Formulare). Einzige URL-Aktion ist `Linking.openSettings()` ohne Parameter (`useVideoCamera.ts:181`).
+- [x] Keine Secrets im Code und im Bundle: `git grep` nach Key-, Token- und Passwort-Mustern in `src`, `firmware/src`, `android/app/src` und den Gradle-Dateien ohne Treffer. Das aktuelle Hermes-Release-Bundle (`android/app/build/generated/assets/react/release/index.android.bundle`) ist ebenfalls ohne Treffer. `.gitignore` deckt Keystores und `.env*` ab. `npm audit --omit=dev`: 0 Schwachstellen.
+- [x] Keine sensiblen Daten in Logs: kein `console.*` in den neuen Dateien.
+- [x] Manifest-Berechtigungen minimal: `RECORD_AUDIO` ist neu und begründet (AC-20/21, `AndroidManifest.xml:16-19`). `WRITE_EXTERNAL_STORAGE` hat `maxSdkVersion="28"`. Kein `READ_MEDIA_*` (Quell- und gemergtes Release-Manifest).
+- [x] Manifest-Härtung: `allowBackup="false"`, `usesCleartextTraffic="false"` im Release. Exportiert sind nur die Launcher-Activity und der AndroidX-`ProfileInstallReceiver` (mit `DUMP` geschützt).
+- [x] Mikrofon bei „Ton aus“ nie offen: `enableAudio` (`useVideoCamera.ts:107`). Nativ wird `withAudioEnabled()` erst beim Aufnahmestart aufgerufen (VisionCamera `HybridVideoOutput.kt:179-181`). Laufzeit: NOT VERIFIED.
+- [x] Aufnahme wird bei Hintergrund, Disconnect und Stopp beendet: `useVideoDrive.ts:322-329`, `:315-319`, `:276-286`.
+- [x] Keine neuen Abhängigkeiten: `package.json` und `package-lock.json` sind unverändert.
+- [ ] BUG-48 (Medium): Temp-Videos bleiben dauerhaft im App-Cache liegen.
+- [ ] BUG-49 (Low): Die Kamera-Vorschau bleibt im Hintergrund aktiv.
+
+**Security-Zusammenfassung:** 12 Prüfungen mit Beleg (10 PASS, 2 FAIL: BUG-48 Medium, BUG-49 Low), 6 NOT VERIFIED (Authentication, Authorization, Rate Limiting, Brute Force, Enumeration/URL als nicht anwendbar, Firmware-Fuzzing ohne Hardware).
+
+_Vorbestehend und nicht PROJ-3, nur zur Kenntnis:_
+- Der Release wird mit dem eingecheckten `debug.keystore` signiert (`android/app/build.gradle:88-104`).
+- `react-native-ble-plx` bringt Location-Berechtigungen ohne `maxSdkVersion` ins gemergte Manifest.
+- `INTERNET` ist deklariert, wird aber nicht genutzt.
+
+## Regression (Deployed-Features)
+
+- [x] **PROJ-1**: Die Nicht-`connected`-Zweige von `RootScreen` sind unverändert (`RootScreen.tsx:105-118`, `:192-200`). Die neuen Hooks werden ohne Bedingung vor dem switch aufgerufen (`:71-73`), die Rules of Hooks sind also eingehalten. `ConnectionProvider` ist unverändert.
+- [x] **PROJ-2**: `JogControls.tsx` ist unverändert. Die Sperre bekommt nur `|| video.drive.busy` dazu (`RootScreen.tsx:157-162`). `busy` ist nur außerhalb von „bereit“ wahr, ohne Video bleibt Jog also wie bisher bedienbar.
+- [x] **PROJ-4**: `usePresets.ts` ist unverändert, eigener Speicher-Key. Laden und Löschen sind auch während Vorlauf, Nachlauf und Speichern gesperrt (`AutoDriveControls.tsx:745`, `:759`), die Sperre ist also eher schärfer geworden.
+- [x] **PROJ-5**: Bei ausgeschaltetem Video ist `timelapseCameraState` gleich der alten Bedingung (`TimelapseControls.tsx:87-96`, Test grün). Video- und Zeitraffer-`<Camera>` hängen am selben State und sind nie gleichzeitig gemountet. `useTimelapseSequence` und `useCameraCapture` sind unverändert.
+- [x] **PROJ-6**: `confirmIfBatteryCritical` umschließt beide Fahrtwege (`AutoDriveControls.tsx:485`). Die Akku-Sperre bleibt in `autoDriveBaseEnabled`/`motionLocked` (`:428`). Ein Schutz-Stopp beendet die Aufnahme (EC-6).
+- [x] Native Abhängigkeiten: VisionCamera vorher und nachher 5.2.3. Das Manifest hat nur den `RECORD_AUDIO`-Hunk dazubekommen.
+- [ ] BUG-56 (Low): Getrennte `useCameraPermission()`-Instanzen in PROJ-5 und Video können einen veralteten Berechtigungshinweis zeigen.
+- [!] NOT VERIFIED am Gerät: native Kamera-Übergabe Zeitraffer ↔ Video (Sitzung wird freigegeben, `photoOutput` wird wieder angehängt). Gerätetest: Video an → aus → Zeitraffer mit 3 Bildern, und umgekehrt.
+
+## Step 6: Unit-Tests (Owner)
+
+- [x] `src/components/useVideoSettings.test.ts` um 3 Tests erweitert (AC-26, Robustheit des gespeicherten Datensatzes):
+  - gültiges JSON, das kein Objekt ist (`null`, Zahl, String, leer)
+  - Werte mit falschem Typ (`"true"`, `"60"`, `1`, `30.0001`)
+  - Array-Datensatz und `__proto__`-Schlüssel (sauberes Settings-Objekt)
+  
+  `npx jest src/components/useVideoSettings.test.ts` → 9/9 grün.
+- [x] Rot-Prüfung für diese Datei in zwei Runden, die Implementierung danach wiederhergestellt (`git diff` leer) und wieder 9/9 grün:
+  - Runde 1 (lockere Typprüfung in `pick`/`pickBoolean`): Der Typ-Test wurde rot.
+  - Runde 2 (Objekt/null-Prüfung entfernt, gespeicherter Datensatz ungefiltert durchgereicht): Der Nicht-Objekt-Test, der Array/`__proto__`-Test und zwei Bestandstests wurden rot.
+- Weitere reine Logik (`videoFormats`, `formatRecordingTime`, Dauerberechnung) ist durch Bestandstests abgedeckt. Den falsch-grünen Bestandstest zu AC-18 (BUG-44) korrigiert `/build` zusammen mit dem Fix.
+
+## E2E Tests
+
+- Status: **not run** (run `/e2e-tests` for critical flows)
+
+## Not Verified In This Run
+
+- [!] Alle Laufzeit-ACs und -ECs (AC-1 bis AC-29, EC-1 bis EC-10) am Gerät: no way to run and probe this project was recorded (`probe.kind: none`). Weg: der Gerätetest unten.
+- [!] Layer `firmware`: no test command recorded for layer firmware. Firmware ist in diesem Diff unverändert.
+- [!] Native Kamera-Übergabe Zeitraffer ↔ Video, die tatsächliche Wirkung der Fokus-/Belichtungssperre, die real angebotenen Formate und Objektive des Handys.
+- [!] Darstellung und Layout des Video-Panels in der ScrollView: kein Gerät, kein Viewport.
+- [!] Fuzzing der BLE-Characteristic am echten ESP32: keine Hardware.
+- [!] BUG-42, 43, 45, 46, 47 und 49 sind aus Code, Bibliotheksquellen (VisionCamera 5.2.3, camera-roll 7.10.2) und einer Gegenprobe im Scratchpad abgeleitet. Am Gerät reproduziert ist keiner.
+
+## Gerätetest (recorded human test, offen)
+
+Ein Schritt je Laufzeit-AC. Antworten werden hier als `[x] … verified by the user on <Gerät>, <Datum>` oder als Bug eingetragen.
+
+- AC-1/2: Zum Startpunkt jogen, „Als Start setzen“, zum Endpunkt jogen, „Als Ende setzen“. Steht „Bereit“ da? Lässt sich ein Punkt überschreiben?
+- AC-3/4: Am Start 10 s eingeben, „Start → Ende“. Kommt der Schlitten nach etwa 10 s am Ende an? Danach dasselbe mit „Ende → Start“.
+- AC-5: Während der Fahrt Stopp drücken. Hält der Motor sofort?
+- AC-6/11/12: Eine viel zu lange Dauer eingeben: erscheint eine Meldung, und der Wert bleibt stehen? Das Feld leer verlassen: wird die Mindestdauer eingetragen? Lange Strecke mit 10 s: erscheint der Hinweis mit „Minimum übernehmen“?
+- AC-7/8/9: Ohne Punkte bzw. neben dem Startpunkt: sind die Fahrt-Buttons grau? Während der Fahrt: reagieren nur noch Stopp, aber nicht Jog und Setzen?
+- AC-10/AC-19: Während einer Fahrt mit Video Bluetooth am Handy ausschalten. Stoppt der Slider? Liegt das Video in der Galerie?
+- EC-4: Eine Fahrt ohne Video starten und Home drücken. Fährt der Slider bis zum Ziel?
+- AC-13: „Video aufnehmen“ ein- und ausschalten. Erscheinen bzw. verschwinden Vorschau und Einstellungen?
+- AC-14/16/29: Fahrt mit Video bei 10 s Dauer. Steht vorher „Videolänge ca. 14.0 s“ da? Sind „● REC“, die Zeit und die Phasen sichtbar? Läuft die Aufnahme etwa 2 s vor und 2 s nach der Fahrt?
+- AC-15: Erscheint „Video gespeichert“? Ist das Video in der Galerie abspielbar?
+- AC-17: Je einmal Stopp im Vorlauf, in der Fahrt und im Nachlauf. Hält der Motor bzw. fährt er gar nicht erst los? Ist jedes Teil-Video in der Galerie?
+- AC-18/EC-7: Während einer Fahrt mit Video Home drücken, einmal im Vorlauf und einmal in der Fahrt. Hält der Schlitten bzw. fährt er nicht los? Kommt beim Zurückkehren eine Fehlermeldung? Liegt der Teil-Take in der Galerie?
+- AC-20: Mikrofon in den Android-Einstellungen verweigern, Ton an lassen, Fahrt auslösen. Startet sie (erwartet ist laut BUG-42: ja, ohne Ton)? Dann Kamera verweigern, Fahrt auslösen, Stopp. Bleibt die App in „Speichert“ hängen (BUG-43)?
+- AC-21: Je ein Take mit Ton an und mit Ton aus. Hat das Video Ton bzw. keinen?
+- AC-22: Jedes angebotene Format kurz aufnehmen. Stimmen Auflösung und fps in den Video-Details mit der Wahl überein?
+- AC-23: Andere Objektive wählen. Wechselt die Vorschau, und nutzt das Video dieses Objektiv?
+- AC-24: Ist der Stabilisierungs-Schalter sichtbar? Unterscheidet sich ein Take mit an und aus sichtbar im Bildausschnitt?
+- AC-25: In die Vorschau tippen. Erscheint das Schloss? Bleiben Fokus und Helligkeit konstant, wenn man während der Fahrt eine Lampe ins Bild hält? Hebt „Auto“ die Sperre auf?
+- AC-26: Alle Video-Einstellungen ändern und die App komplett neu starten. Ist alles wie eingestellt, die Fokus-Sperre aber weg?
+- AC-27: Bildschirm-Timeout auf 15 s stellen, Fahrt mit Video von 30 s. Bleibt der Bildschirm an und geht er danach wieder normal aus?
+- AC-28: Während der Fahrt mit Video Schalter, Ton, Format und Vorschau antippen. Reagiert nichts außer Stopp?
+- EC-5: „Start → Ende“ doppelt antippen. Gibt es genau eine Fahrt und ein Video?
+- EC-6: Am Labornetzteil die Spannung während einer Fahrt mit Video unter die Schutzschwelle senken. Endet die Aufnahme und wird das Video gespeichert?
+- EC-8: Mit eingeschaltetem Video ein Preset laden. Bleiben die Video-Einstellungen gleich?
+- EC-9/10: Mit eingeschaltetem Video: Steht im Zeitraffer der Hinweis und ist dessen Start grau? Während eines Zeitraffers: ist „Video aufnehmen“ grau? Danach Video aus und einen Zeitraffer mit 3 Bildern machen. Landen die Fotos in der Galerie?
+
+## Bugs Found
+
+#### BUG-42: Fahrt mit Video startet ohne Kamera- bzw. Mikrofon-Berechtigung (AC-20)
+- **Severity:** High
+- **Beleg:** Keine der drei Stellen prüft Berechtigungen: `autoDriveBaseEnabled` (`AutoDriveControls.tsx:397-409`), `handleDrive` (`:485-489`) und `useVideoDrive.start` (`useVideoDrive.ts:230-236`). Das Design verlangt die Prüfung im Übergang bereit → startet (`design.md`, Zustandstabelle, Zeile „bereit → startet“). Bei Ton an ohne Mikrofon ist `enableAudio` false (`useVideoCamera.ts:107`), die App nimmt also still ohne Ton auf.
+- **Steps to Reproduce:**
+  1. Mikrofon-Berechtigung der App in Android verweigern, „Video aufnehmen“ an, Ton an.
+  2. Am Startpunkt „Start → Ende“ drücken.
+  3. Erwartet: Hinweis, keine Fahrt.
+  4. Tatsächlich: Die Fahrt startet, das Video hat keinen Ton. Ohne Kamera-Berechtigung folgt BUG-43.
+- **Priority:** Fix before deployment
+
+#### BUG-43: Phase „Startet“ ohne Zeitlimit, App hängt dauerhaft, Wach-Sperre bleibt an (AC-27, AC-17)
+- **Severity:** High
+- **Beleg:** Löst `startRecording` nie auf (z. B. weil kein `<Camera>` gerendert ist, wenn die Kamera-Berechtigung fehlt, `VideoPanel.tsx:64-73`), bleibt die Phase „startet“. Stopp setzt nur `stopRequested` und „saving“ (`useVideoDrive.ts:164-168`). Der Finalize-Timer wird erst mit einem vorhandenen Recording scharf gestellt (`:142-146`). `deactivate()` läuft nur in `finish()`. Die Gegenprobe zeigt nach Stopp und 60 s: Phase `saving`, `busy: true`, 0 Aufrufe von `deactivate`.
+- **Steps to Reproduce:**
+  1. Kamera-Berechtigung verweigern, „Video aufnehmen“ an.
+  2. „Start → Ende“, dann Stopp.
+  3. Erwartet: Abbruch mit Meldung, Bedienung wieder frei, Bildschirm darf sich sperren.
+  4. Tatsächlich (aus Code und Probe): Die App steht für immer auf „Speichert“, alles bleibt gesperrt, der Bildschirm bleibt an. Nur ein Neustart der App hilft.
+- **Priority:** Fix before deployment
+
+#### BUG-44: Teil-Take nach einem Aufnahmefehler wird nie gespeichert (AC-18), Unit-Test falsch grün
+- **Severity:** Medium
+- **Beleg:** VisionCamera ruft bei einem Finalize-Fehler nur `onRecordingError` auf und setzt `recording=null` (`HybridVideoRecorder.kt:68`, `:97`). Ein folgendes `stop()` wirft (`:114`), `onFinished` kommt nie. Die App wartet 10 s in „Speichert“ (`useVideoDrive.ts:143-146`) und speichert nichts, obwohl die Datei im Cache liegt. Der Test-Fake ruft nach einem Fehler trotzdem `onFinished` auf (`useVideoDrive.test.ts:57-59`).
+- **Steps to Reproduce:** Speicher fast vollmachen, eine lange Fahrt mit Video starten. Erwartet: Teil-Take in der Galerie. Tatsächlich: Fehlermeldung, kein Video.
+- **Priority:** Fix before deployment
+
+#### BUG-45: Unerwartetes „reguläres“ Aufnahme-Ende gilt als Erfolg, Motor fährt weiter (AC-18)
+- **Severity:** Medium
+- **Beleg:** VisionCamera meldet `ERROR_SOURCE_INACTIVE` (Kamera-Quelle weg) als normales Ende über `onFinished` (`HybridVideoRecorder.kt:82`). `handleFinished` prüft die Phase nicht (`useVideoDrive.ts:193-203`). Ergebnis: Vorlauf oder Fahrt endet, das Video wird gespeichert, die Phase springt auf „bereit“, es geht kein STOP raus, und es erscheint keine Fehlermeldung. Gegenprobe: `phase ready, error null, STOP sent 0, saves 1`. Ein Auslöser kommt aus der App selbst: `onCameraError` wechselt das Format (`useVideoCamera.ts:130-140`) und erzwingt damit eine Neukonfiguration mitten in der Aufnahme.
+- **Steps to Reproduce:** Während einer Fahrt mit Video die Kamera durch ein anderes Ereignis verlieren (z. B. eine andere App greift auf die Kamera zu). Erwartet: Halt und Meldung. Tatsächlich: Die Aufnahme endet still, der Schlitten fährt weiter, die Bedienung ist wieder frei.
+- **Priority:** Fix before deployment
+
+#### BUG-46: Stabilisierungs-Schalter immer sichtbar und ohne garantierte Wirkung (AC-24)
+- **Severity:** Medium
+- **Beleg:** `supportsStabilization` prüft `supportsVideoStabilizationMode('auto')` (`videoFormats.ts:130-132`), und das ist auf Android immer `true` (`HybridCameraDevice.kt:223-226`). „An“ sendet `'auto'` (`useVideoCamera.ts:116`), was Android nicht festlegt („might be enabled, might be disabled“, `HybridVideoOutput.kt:120-121`). Die Unit-Tests mocken das Gerät und sehen das nicht.
+- **Steps to Reproduce:** Auf einem Gerät ohne Videostabilisierung erscheint der Schalter trotzdem. Auf einem Gerät mit Stabilisierung unterscheiden sich Takes mit „an“ und „aus“ nicht zuverlässig.
+- **Priority:** Fix before deployment
+
+#### BUG-47: Format-Liste bietet nicht unterstützte Auflösung/fps-Kombinationen an, fps wird still angepasst (AC-22)
+- **Severity:** Medium
+- **Beleg:** `availableFormats` bildet das Kreuzprodukt aus Auflösungen und fps (`videoFormats.ts:104-108`). `supportsFPS` gilt aber pro Gerät, nicht pro Auflösung (`HybridCameraDevice.kt:219-221`). VisionCamera löst den fps-Wert still auf den nächstliegenden Bereich auf (`ConstraintResolver.kt:112-131`), der Fallback mit Hinweis greift also nie. Nebenbei (Low): Ist 1080p/30 nicht verfügbar, nimmt der Code `formats[0]` (die niedrigste Kombination, `videoFormats.ts:125`) statt des Gerätestandards.
+- **Steps to Reproduce:** „4K · 60 fps“ wählen, auf einem Handy, das 4K nur mit 30 fps kann. Erwartet: Die Kombination wird nicht angeboten. Tatsächlich: Sie wird angeboten, und das Video hat 30 fps.
+- **Priority:** Fix before deployment
+
+#### BUG-48: Temp-Videodateien bleiben dauerhaft im App-Cache liegen (AC-15/AC-18)
+- **Severity:** Medium
+- **Beleg:** Aufgenommen wird nach `File.createTempFile("VisionCamera_", ".mp4")` im Cache (`HybridVideoOutput.kt:153`, `createRecorder({})` in `useVideoCamera.ts:172`). `CameraRoll.save` kopiert und lässt die Quelle liegen (`CameraRollModule.java:198-199`). Im Code gibt es kein Löschen. `design.md:269` spricht nur von „kurzzeitig“ doppeltem Speicher. Folge: Jeder Take bleibt als zweite Kopie liegen (bei 4K mehrere hundert MB), was auf Dauer zum „Speicher voll“-Abbruch führt. Eine private Kopie bleibt auch nach dem Löschen in der Galerie bestehen.
+- **Steps to Reproduce:** Drei Takes in 4K, dann `adb shell run-as com.camerasliderapp ls -la cache/`. Erwartet: leer. Tatsächlich: `VisionCamera_*.mp4`.
+- **Priority:** Fix before deployment
+
+#### BUG-49: Kamera-Vorschau bleibt im Hintergrund aktiv
+- **Severity:** Low
+- **Beleg:** `isActive` ist fest auf `true` gesetzt (`VideoPanel.tsx:88`), nicht an AppState gekoppelt (zum Vergleich PROJ-5: `TimelapseControls.tsx:221`). VisionCamera hält die Kamera bei `onHostPause` im Zustand STARTED (`CustomLifecycle.kt:66-83`).
+- **Steps to Reproduce:** „Video aufnehmen“ an, Home drücken. Der Kamera-Indikator in der Statusleiste bleibt sichtbar, Akkuverbrauch.
+- **Priority:** Fix in next sprint
+
+#### BUG-50: Jeder Kamerafehler wird als „Format nicht verfügbar“ gedeutet
+- **Severity:** Low
+- **Beleg:** `onCameraError` setzt bei jedem Fehler `formatRejected` und fällt auf 1080p/30 zurück (`useVideoCamera.ts:130-140`). Das passiert auch, wenn 1080p/30 schon gewählt war oder die Ursache eine belegte Kamera ist. Gleichzeitig ist das ein Auslöser für BUG-45.
+- **Priority:** Fix in next sprint (zusammen mit BUG-45)
+
+#### BUG-51: Berechtigungs-Buttons im Video-Panel während der Aufnahme bedienbar (AC-28)
+- **Severity:** Low
+- **Beleg:** Die Buttons in `VideoPanel.tsx:64-71` und `:133-141` haben kein `busy`. Ein Tipp öffnet einen Systemdialog, AppState wechselt auf `background`, und die Aufnahme bricht ab.
+- **Priority:** Fix in next sprint
+
+#### BUG-52: Kein „Video gespeichert“ nach einem Verbindungsabbruch (AC-19)
+- **Severity:** Low
+- **Beleg:** Beim Wechsel auf `reconnecting` wird `AutoDriveControls` ausgehängt, und `lastSavedCountRef` wird beim Remount neu initialisiert (`AutoDriveControls.tsx:309-315`). Das Video wird trotzdem gespeichert, nur die Bestätigung fehlt.
+- **Priority:** Nice to have
+
+#### BUG-53: Hintergrund während „Speichert“ meldet fälschlich „Aufnahme abgebrochen“
+- **Severity:** Low
+- **Beleg:** `fail()` prüft nur auf „bereit“ (`useVideoDrive.ts:178-183`). Ein regulär beendeter Take, der gerade gespeichert wird, bekommt deshalb eine Fehlermeldung.
+- **Priority:** Nice to have
+
+#### BUG-54: Finalize-Timeout verwirft eine später eintreffende Datei
+- **Severity:** Low
+- **Beleg:** Feuert der 10-s-Timer (`useVideoDrive.ts:143-146`) vor `onFinished`, erhöht `finish()` die runId. Die danach eintreffende Datei wird verworfen (`:195-197`) und bleibt im Cache liegen (siehe BUG-48).
+- **Priority:** Nice to have
+
+#### BUG-55: Fokus-Sperre nach einer Rückkehr aus dem Hintergrund evtl. weg, Markierung bleibt (AC-25)
+- **Severity:** Low (nicht am Gerät belegt)
+- **Beleg:** CameraX bindet nach der Rückkehr neu. Der State `focusLock` (`useVideoCamera.ts:89`) wird dabei nicht zurückgesetzt.
+- **Priority:** Nice to have, zuerst am Gerät prüfen
+
+#### BUG-56: Veralteter Berechtigungshinweis zwischen Zeitraffer und Video
+- **Severity:** Low (nicht am Gerät belegt)
+- **Beleg:** `useCameraCapture` (PROJ-5) und `useVideoCamera` haben je eine eigene `useCameraPermission()`-Instanz mit eigenem State. Wird die Berechtigung in der einen erteilt, kann die andere bis zum nächsten AppState-Wechsel noch „Kamera-Zugriff benötigt“ zeigen.
+- **Priority:** Nice to have
+
+#### BUG-57: Android 7–9: Speichern in die Galerie ohne Laufzeit-Anfrage von `WRITE_EXTERNAL_STORAGE`
+- **Severity:** Low (nur relevant, wenn das Handy älter als Android 10 ist)
+- **Beleg:** Die Berechtigung steht im Manifest (`maxSdkVersion="28"`), wird aber nie zur Laufzeit angefragt. `CameraRoll.save` schlägt auf diesen Versionen fehl.
+- **Priority:** Nice to have
+
+## Summary
+
+- **Acceptance Criteria:** 29 AC und 10 EC im Code geprüft. 0 davon am Gerät ausgeführt, alle Laufzeit-ACs sind NOT VERIFIED. Im Code fehlerhaft: AC-20 und AC-27 (High), AC-18, AC-22, AC-24 und AC-15 (BUG-48) (Medium), Teilbefunde Low bei AC-19, AC-25 und AC-28.
+- **Bugs Found:** 16 neu (0 Critical, 2 High, 5 Medium, 9 Low).
+- **Security:** 12/18 Prüfungen mit Beleg (2 davon FAIL), 6 NOT VERIFIED (Authentication, Authorization, Rate Limiting, Brute Force, Enumeration/URL als nicht anwendbar, Firmware-Fuzzing ohne Hardware).
+- **Production Ready:** **NO**
+- **Recommendation:** Erst BUG-42 und BUG-43 (High) fixen, sinnvollerweise zusammen mit BUG-44, 45, 46, 47 und 48 (Medium). Danach `/qa` als Re-Verifikation und anschließend den Gerätetest oben.
+
+> „Production Ready: YES“ hieße nur „keine Critical/High-Bugs“, nicht „alles geprüft“. Auch nach den Fixes bleibt jeder Laufzeit-Punkt offen, bis der Gerätetest erfasst ist.
+
+---
+
+# Archiv: frühere QA-Läufe (AC-1 bis AC-12, 2026-09-24 bis 2026-09-30)
+
+> Die folgenden Abschnitte stammen aus den Läufen vor dem `/refine` zur Videoaufnahme. Ihre BUG-Nummern (bis BUG-41) und Gerätetests bleiben als Historie stehen. Für den aktuellen Stand gilt der Bericht oben.
+
+## Lauf 2026-09-24 ff.
+
 **Tested:** 2026-09-24
 **App URL:** nicht ausführbar hier (`probe.kind: none`, App-Ebene und Layer `firmware`) — jedes Laufzeit-AC ist unten `[!] NOT VERIFIED`, bis ein Mensch es testet
 **Tester:** QA Engineer (AI) — drei unabhängige `qa-engineer`-Lanes (Akzeptanz, Security, Regression), zusammengeführt vom Owner
@@ -7,17 +349,17 @@
 
 > Legende: `[x]` in diesem Lauf verifiziert (Beleg nötig) · `[ ] BUG` als kaputt verifiziert · `[!] NOT VERIFIED` in diesem Lauf nicht prüfbar (Grund nötig)
 
-## Vorbemerkung zur Methode
+### Vorbemerkung zur Methode
 
 `probe.kind: none` gilt sowohl auf App-Ebene als auch im Layer `firmware` — es gab nichts zu starten und nichts live abzufragen. Alle Befunde stammen aus Quellcode-Inspektion (inkl. der vendorten Bibliotheken `firmware/.pio/libdeps/esp32dev/{FastAccelStepper,NimBLE-Arduino}`), aus dem einmaligen Suite-Lauf des Owners und aus einer Nachrechnung der Dauer-/Geschwindigkeitsformeln. Die App-Suite lief einmal vor dem Fan-out (6 Suites/92 Tests, siehe unten) und wurde vom Owner nach dem Hinzufügen eines neuen Testfiles ein zweites Mal komplett wiederholt (7 Suites/109 Tests) — beide Läufe sind unten zitiert. Die drei Lanes selbst haben keine Suite erneut ausgeführt, nur einzelne Dateien gelesen.
 
-## Automatisierte Tests (Step 5)
+### Automatisierte Tests (Step 5)
 
 - **App-Suite** (`npm test`) — PASS — erster Lauf vor dem Fan-out: 6 Suites, 92 Tests, 0 fehlgeschlagen (`ConnectionProvider.test.tsx`, `connectionReducer.test.ts`, `useJogState.test.ts`, `client.test.ts`, `useSliderStatus.test.ts`, `App.test.tsx`). Zweiter Lauf nach Ergänzung von `AutoDriveControls.test.ts` (Owner, Step 6): 7 Suites, **109 Tests, 0 fehlgeschlagen**.
 - **Firmware-Layer** — `[!] NOT VERIFIED — no test command recorded for layer firmware` (`commands.test: null` in `.ai-eng-kit`). Ersatzweise: `pio run -e esp32dev` → `[SUCCESS]` (RAM 12,6 %, Flash 48,9 %) — belegt nur, dass die Firmware baut, nicht ihr Verhalten.
 - **E2E-Suite** — nicht vorhanden, übersprungen (kein früherer `/e2e-tests`-Lauf).
 
-## Acceptance Criteria Status
+### Acceptance Criteria Status
 
 #### AC-1: Startpunkt setzen (überschreibt vorherigen)
 - [!] NOT VERIFIED — no way to run and probe this project was recorded. Code-Kette vollständig geprüft: `AutoDriveControls.tsx:123-125` → `client.ts:214-222` (Opcode `0x02`, Write mit Antwort, Test `client.test.ts:77`) → `ble.cpp:143-148` → `motor.cpp:226-235` (überschreibt `startPosition`).
@@ -72,7 +414,7 @@
 - [!] NOT VERIFIED (Normalfall, Hardware) — no way to run and probe this project was recorded.
 - Grundmechanismus PASS (Code): `onDisconnect` → `motorStop()` (`ble.cpp:107-113`), für jeden Fahrmodus.
 
-## Edge Cases Status
+### Edge Cases Status
 
 #### EC-1: Start = Ende (0 Steps) → Auslöser deaktiviert
 - [!] NOT VERIFIED — no way to run and probe this project was recorded. Logik PASS (Code): Hinweistext (`AutoDriveControls.tsx:106,187-189`), Auslöser gesperrt über `distanceSteps > 0` (`:113`), Firmware lehnt unabhängig ab (`motor.cpp:275-278`).
@@ -87,7 +429,7 @@
 #### EC-4: Auto-Fahrt läuft weiter, wenn App in den Hintergrund geht/abstürzt
 - [!] NOT VERIFIED — no way to run and probe this project was recorded. Garantie PASS (Code): Watchdog kehrt bei `autoDriving` sofort zurück (`motor.cpp:208-215`), App sendet beim Hintergrund-Wechsel nichts Eigenes (`ConnectionProvider.tsx:240-258` reagiert nur auf `active`). Beobachtung (kein Bug): ein echter App-Absturz schließt auf Android meist die GATT-Verbindung, dann greift eher AC-10 als EC-4.
 
-## Nicht dokumentierte Befunde
+### Nicht dokumentierte Befunde
 
 #### BUG-6 (Medium) — jeder BLE-Connect löscht Start/Ende, nicht nur der eigenen App
 `ble.cpp:74` ruft `motorClearPoints()` in `onConnect` für **jede** neue Verbindung auf, auch unverschlüsselt/ungebondet (`onConnect` feuert vor Pairing, vendort in `NimBLEServer.cpp:446-471`) und auch während die App bereits verbunden ist (Advertising läuft weiter, `ble.cpp:87`). Ein beliebiges fremdes Gerät in Reichweite kann so mitten in der Sitzung — auch während einer laufenden Fahrt — die gesetzten Punkte löschen. Die App sieht nur `hasStart=false` über das Notify, ohne Erklärung. Workaround: Punkte neu setzen.
@@ -116,7 +458,7 @@ Treffen STOP und ein neues AUTO_DRIVE genau zwischen dem Lesen von `autoDriving`
 #### BUG-14 (Low) — Rückgabewert von `moveTo()` ignoriert
 `motor.cpp:305`: scheitert der Aufruf, bleibt `autoDriving` nur bis zum Ende der 100-ms-Anlaufzeit `true`, dann setzt sich der Zustand von selbst zurück (`motor.cpp:315-321`). Harmlos (kein hängendes `driving`), aber keine Fehlerrückmeldung an den Nutzer.
 
-## Security Audit Results
+### Security Audit Results
 
 _BLE-Peripherie ohne HTTP-Oberfläche, kein Backend, keine Nutzerkonten — die Checkliste ist entsprechend übersetzt, siehe Vorbemerkung. Alles unten ist Code-Inspektion, `probe.kind: none`._
 
@@ -140,10 +482,10 @@ _BLE-Peripherie ohne HTTP-Oberfläche, kein Backend, keine Nutzerkonten — die 
 
 **Security-Zusammenfassung:** 6 Checks verifiziert (PASS), 4 NOT VERIFIED (3× not applicable, 1× not implemented/optional), 6 Bugs gefunden (0 Critical, 0 High — BUG-1 selbst ist als Acceptance-Bug unter AC-9 gezählt, nicht doppelt hier —, 3 Medium: BUG-5/6/7, 3 Low: BUG-8/9/12).
 
-## E2E Tests
+### E2E Tests
 - Status: **not run** (run `/e2e-tests` for critical flows)
 
-## Step 6 — Unit-Tests (Owner)
+### Step 6 — Unit-Tests (Owner)
 
 Neu geschrieben: `src/components/AutoDriveControls.test.ts` (17 Tests) für die drei reinen, bis dahin ungetesteten Hilfsfunktionen aus `AutoDriveControls.tsx` (`parseDurationSeconds`, `formatSeconds`, `statusLabelFor` — dafür `export` ergänzt, keine Verhaltensänderung). Abdeckung: Komma-/Punkt-Dezimaltrennzeichen, leere/nicht-numerische/negative/unendliche Eingabe, Rundung, alle drei Statuszeilen-Fälle.
 
@@ -151,7 +493,7 @@ Rot-Probe durchgeführt: alle drei Funktionen in der Quelldatei gezielt kaputt g
 
 Gesamte Suite nach der Ergänzung erneut komplett gelaufen (Owner, Step 5-Nachtrag): `npm test` → 7 Suites, 109 Tests, 0 fehlgeschlagen.
 
-## Not Verified In This Run
+### Not Verified In This Run
 
 - [!] Laufzeitverhalten der gesamten App und Firmware auf echter Hardware — AC-1, AC-2, AC-5, AC-7, AC-8, EC-1, EC-3, EC-4 vollständig; der physische/UI-Teil von AC-3, AC-4, AC-6, AC-9, AC-10 — Grund: `no way to run and probe this project was recorded` (`probe.kind: none`, App-Ebene und Layer `firmware`).
 - [!] Firmware-eigene Tests — kein `commands.test` für den Layer `firmware` hinterlegt (`null`); nur der Compile-Nachweis (`pio run` → SUCCESS) liegt vor.
@@ -161,7 +503,7 @@ Gesamte Suite nach der Ergänzung erneut komplett gelaufen (Owner, Step 5-Nachtr
 - [!] Verhalten von Android nach Verlust des Bonds (BUG-7) — ob automatisch neu gepaart wird — nur auf echter Hardware prüfbar.
 - [!] Cross-Browser/Responsive/DevTools — entfällt vollständig, mobile App ohne Browser-Oberfläche.
 
-## Bugs Found
+### Bugs Found
 
 ### Previously Fixed
 - **BUG-1** — JOG während laufender Auto-Fahrt hebelt Watchdog UND Auto-Fahrt-Ankunftserkennung aus — Severity: High
@@ -206,7 +548,7 @@ Details und Fix-Verlauf: siehe „Re-Verifikation" unten.
 - **Severity:** Low
 - **Priority:** Nice to have
 
-## Summary (Erstlauf, 2026-09-24 — inzwischen überholt, siehe Re-Verifikation unten)
+### Summary (Erstlauf, 2026-09-24 — inzwischen überholt, siehe Re-Verifikation unten)
 - **Acceptance Criteria:** 0/10 als voll bestätigt verifizierbar (kein Probe möglich), 4 AC mit einem im Code bestätigten Bug (AC-3, AC-4, AC-6, AC-9), 1 AC mit bedingtem Bug (AC-10), 5 AC mit intakter Code-Kette aber `NOT VERIFIED` (AC-1, AC-2, AC-5, AC-7, AC-8); EC-2 PASS (Garantie im Code bestätigt), EC-1/EC-3/EC-4 `NOT VERIFIED` mit intakter Code-Kette
 - **Bugs Found:** 14 total (0 Critical, 1 High, 5 Medium, 8 Low)
 - **Security:** 6/10 Checks verifiziert, 4 NOT VERIFIED (3× not applicable, 1× not implemented/optional) — siehe Security-Zusammenfassung oben
@@ -215,7 +557,7 @@ Details und Fix-Verlauf: siehe „Re-Verifikation" unten.
 
 ---
 
-## Re-Verifikation (2026-09-24, mehrere Runden)
+### Re-Verifikation (2026-09-24, mehrere Runden)
 
 **Auftrag:** High- und Medium-Bugs (BUG-1, 2, 3, 5, 6, 7) fixen. Die Low-Bugs (BUG-4, 8–14) bleiben bewusst offen.
 
@@ -247,13 +589,13 @@ Details und Fix-Verlauf: siehe „Re-Verifikation" unten.
 
 **Tests:** `npm test` — 7 Suites, 117 Tests, 0 fehlgeschlagen (inkl. 25 neuer Tests für `AutoDriveControls.tsx`, rot-geprüft). `pio run -e esp32dev` — SUCCESS nach jedem Commit dieser Reihe.
 
-## Summary (nach Re-Verifikation)
+### Summary (nach Re-Verifikation)
 - **High/Medium-Bugs:** 6/6 geschlossen (BUG-1, 2, 3, 5, 6, 7), jeweils unabhängig re-verifiziert
 - **Offen (bewusst, Low):** BUG-4, 8–14 sowie die drei oben genannten neuen Low-Restbefunde
 - **Production Ready (Stand vor dem Hardware-Test):** NOT READY — not verified (kein Critical/High-Bug mehr offen, aber `probe.kind: none` — kein einziges Laufzeit-AC wurde tatsächlich ausgeführt)
 - **Empfehlung (Stand vor dem Hardware-Test):** Human-Hardware-Test wie bei PROJ-1/PROJ-2 — insbesondere: normale Jog-/Auto-Fahrt-Regression, JOG während einer laufenden Auto-Fahrt (BUG-1), Trennen der App-Verbindung während einer Fahrt (BUG-5).
 
-## Aufgezeichneter Human-Hardware-Test (2026-09-24)
+### Aufgezeichneter Human-Hardware-Test (2026-09-24)
 
 Nach dem Re-Verifikations-Zyklus (Firmware neu geflasht ab Commit `f188420`) hat der Nutzer den geforderten fokussierten Test am echten Slider durchgeführt und bestätigt ("hardwaretest ok"):
 
@@ -264,7 +606,7 @@ Nach dem Re-Verifikations-Zyklus (Firmware neu geflasht ab Commit `f188420`) hat
 
 **Production Ready: JA** — kein Critical/High-Bug offen, die sicherheitskritischen Fixes (BUG-1, BUG-5) sind auf echter Hardware bestätigt.
 
-## Nachtrag: Re-Verifikation nach 8000 Steps/s, BUG-18-Fix, DIR-Umkehr (2026-09-29)
+### Nachtrag: Re-Verifikation nach 8000 Steps/s, BUG-18-Fix, DIR-Umkehr (2026-09-29)
 
 **Scope: voller Lauf, drei `qa-engineer`-Lanes (Acceptance, Security, Regression).** Kein reiner Diff-Lauf, weil der letzte Report (`dc9bffa`, 2026-09-24) älter ist als die Spec-Verfeinerung von AC-11 (2026-09-27) und die Änderungen an geteiltem Code (`kJogSpeedMaxHz`, DIR-Polarität) alle Nachbar-Features berühren. `probe.kind: none` (App und Layer `firmware`) — jede Laufzeit-/Hardware-Prüfung ist `[!] NOT VERIFIED — no way to run and probe this project was recorded`.
 
@@ -311,7 +653,7 @@ Nach dem Re-Verifikations-Zyklus (Firmware neu geflasht ab Commit `f188420`) hat
 
 **Production-Ready: NEIN.** BUG-15 ist High (Regression PROJ-4, gespeicherte Presets nach der DIR-Umkehr), dazu BUG-16 und BUG-19 (Medium) und Laufzeit nicht verifiziert. Status: **In Review**.
 
-## Nachtrag 2: Re-Verifikation der Fixes BUG-15/16/19 (2026-09-30)
+### Nachtrag 2: Re-Verifikation der Fixes BUG-15/16/19 (2026-09-30)
 
 **Scope (Re-Verifikation):** `git diff 442c552..HEAD -- src features/PROJ-3-start-endpunkt-auto-fahrt/spec.md` (Commits `a6b837d`, `c44e0e8`): `usePresets.ts`, `AutoDriveControls.tsx` (jeweils + Test), `spec.md` (neues AC-12). Ein `qa-engineer`-Lauf mit allen drei Scopes (2 → 3 → 4), eingegrenzt auf den Diff und die offenen Bugs. Alles andere aus dem Nachtrag vom 2026-09-29 gilt weiter — _unverändert seit 2026-09-29, in diesem Lauf nicht neu geprüft (Diff berührt AC-1, AC-2, AC-5, AC-7..AC-10, EC-1..EC-4 nicht)_. `probe.kind: none` — Laufzeit/Hardware ist `[!] NOT VERIFIED — no way to run and probe this project was recorded`.
 
@@ -339,7 +681,7 @@ Nach dem Re-Verifikations-Zyklus (Firmware neu geflasht ab Commit `f188420`) hat
 
 **Production-Ready: NEIN** — BUG-24 (High, Regression) ist offen; BUG-15/16/19 sind geschlossen. Status: **In Review**.
 
-## Nachtrag 3: Re-Verifikation des BUG-24-Fixes (2026-09-30)
+### Nachtrag 3: Re-Verifikation des BUG-24-Fixes (2026-09-30)
 
 **Scope (Re-Verifikation):** `git diff d105b00..HEAD -- src features/PROJ-3-start-endpunkt-auto-fahrt/spec.md` (Commit `fd34882`): `AutoDriveControls.tsx` (+Test), `spec.md` (AC-12 präzisiert). Ein `qa-engineer`-Lauf mit allen drei Scopes. Alles andere: _unverändert seit 2026-09-29/30, in diesem Lauf nicht neu geprüft (AC-1..5, AC-7..10, EC-1..4 — Diff berührt sie nicht)_. `probe.kind: none` — Laufzeit/Hardware `[!] NOT VERIFIED — no way to run and probe this project was recorded`.
 
@@ -364,7 +706,7 @@ Nach dem Re-Verifikations-Zyklus (Firmware neu geflasht ab Commit `f188420`) hat
 
 **Production-Ready: NEIN** — BUG-27 (High, Regression PROJ-4) ist offen, dazu BUG-28 (Medium) und BUG-25 (Medium, bedingt). Status: **In Review**.
 
-## Nachtrag 4: Fixes BUG-27/28, Nutzer-Test am Gerät (2026-09-30)
+### Nachtrag 4: Fixes BUG-27/28, Nutzer-Test am Gerät (2026-09-30)
 
 - **Fixes seit Nachtrag 3:** `b5c92da` (BUG-27/BUG-28: Auto-Korrektur bei jeder Änderung der bekannten Distanz, außer während ein Preset angewendet wird; `presetTargetDistanceRef`, `shouldAutoCorrectOnDistanceChange` mit drei Parametern), `3bccc04` (BUG-26: Design-Doku, PROJ-4 `dirVersion`, `docs/data-model.md`). 207 Tests grün, davon 7 neue Render-Tests in `AutoDriveControls.render.test.ts` (Preset-Ablauf komplett, Red-Check: ohne Guard 3 rot, ohne Änderungs-Regel 3 rot).
 - [x] **BUG-25 erledigt — vom Nutzer bestätigt (2026-09-30):** im Zeitfenster 2026-09-29 20:26 – 2026-09-30 00:18 wurde kein Preset gespeichert, es gibt keine Presets mit falsch gedrehter Richtung; auf dem Gerät existierte vor dem Update kein altes Preset.
@@ -372,7 +714,7 @@ Nach dem Re-Verifikations-Zyklus (Firmware neu geflasht ab Commit `f188420`) hat
 - [x] **Nutzer-Test am Gerät („alles ok", 2026-09-30, Android EB2103, Debug-Build über Metro):** geprüft wurden das Laden eines Presets mit anschließendem „Als Start setzen" (Dauer bleibt) und die automatische Korrektur der Dauer bei langen Strecken. Umfang und Anzahl der Durchläufe nicht protokolliert.
 - **Nicht durch einen unabhängigen `/qa`-Lauf verifiziert:** BUG-27 und BUG-28 (die Fixes `b5c92da`/`3bccc04` liegen nach dem letzten QA-Lauf). Status bleibt **In Review** bis zu einem weiteren `/qa PROJ-3` im Umfang dieser Commits.
 
-## Nachtrag 5: Re-Verifikation der Fixes BUG-27/28 (2026-09-30)
+### Nachtrag 5: Re-Verifikation der Fixes BUG-27/28 (2026-09-30)
 
 **Scope (Re-Verifikation):** `git diff a9a30a7..HEAD -- src features/PROJ-3-start-endpunkt-auto-fahrt/spec.md` (Commits `b5c92da`, `3bccc04`, `dbf4001`, `0cd291b`): `AutoDriveControls.tsx` (+ Test, neue `AutoDriveControls.render.test.ts`), `TimelapseControls.tsx` (Kamera-Wrapper, PROJ-5-Datei im selben Screen), `spec.md` (AC-12 neu gefasst). Ein `qa-engineer`-Lauf mit allen drei Scopes, 25 eigene Render-Proben. Alles andere: _unverändert seit 2026-09-29/30, in diesem Lauf nicht neu geprüft (AC-1, AC-2, AC-4, AC-5, AC-7..AC-10, EC-1..EC-4, PROJ-1, PROJ-2)_. `probe.kind: none` — Laufzeit/Hardware `[!] NOT VERIFIED — no way to run and probe this project was recorded`.
 
@@ -399,7 +741,7 @@ BUG-17, BUG-20..23 (Low). Beobachtung (Spec-konform): die App erhöht die Dauer 
 
 **Production-Ready: NEIN** — BUG-29 und BUG-30 (Medium) verletzen AC-12; kein Critical/High offen. Nach Behebung genügt eine Re-Verifikation im Umfang dieser Fixes. Status: **In Review**.
 
-## Nachtrag 6: Re-Verifikation der Fixes BUG-29..32 (2026-09-30)
+### Nachtrag 6: Re-Verifikation der Fixes BUG-29..32 (2026-09-30)
 
 **Scope (Re-Verifikation):** `git diff 76f0599..HEAD -- src features/PROJ-3-start-endpunkt-auto-fahrt/spec.md` (Commit `aa1ce58`): `AutoDriveControls.tsx`, `AutoDriveControls.render.test.ts`, `spec.md` (AC-12 ergänzt), eine Zeile `design.md`. Ein `qa-engineer`-Lauf mit allen drei Scopes, 45 eigene Render-Proben (`probe8/`). Alles andere: _unverändert seit 2026-09-30, in diesem Lauf nicht neu geprüft (AC-1, AC-2, AC-4, AC-5, AC-7..AC-10, EC-1..EC-4, PROJ-1, PROJ-2)_. `probe.kind: none` — Laufzeit/Hardware `[!] NOT VERIFIED — no way to run and probe this project was recorded`.
 
@@ -425,13 +767,13 @@ BUG-17, BUG-20..23 (Low). Beobachtung (Spec-konform): die App erhöht die Dauer 
 
 **Production-Ready: NEIN** — BUG-33 (High, Regression PROJ-4 AC-4). Status: **In Review**.
 
-## Nachtrag 7: AC-12 neu umgesetzt, Nutzer-Test am Gerät (2026-09-30)
+### Nachtrag 7: AC-12 neu umgesetzt, Nutzer-Test am Gerät (2026-09-30)
 
 - **Umbau `df41c8c`:** automatische Korrektur bei Distanzänderung samt Preset-Schutzphase und 3-s-Timer entfernt. Ist die Dauer zu kurz, leer oder unlesbar, zeigt die App „Zu kurz für diese Strecke — Minimum X s" bzw. „Keine gültige Dauer — Minimum X s" mit Button „Minimum übernehmen"; die Dauer wird außerhalb von AC-11 nie selbst geändert. AC-12 in `spec.md` neu gefasst, `design.md` ersetzt die drei früheren AC-12-Einträge. Damit entfallen die Mechanismen hinter BUG-33 bis BUG-37. 210 Tests grün; Red-Check der Render-Tests: ohne Hinweis 4 rot, mit der alten Auto-Korrektur 8 rot.
 - [x] **Nutzer-Test am Gerät („alles ok", 2026-09-30, Android EB2103, Debug-Build über Metro):** neue Dauer-Anzeige mit „Minimum übernehmen" und Preset-Ablauf (Dauer bleibt). Umfang und Anzahl der Durchläufe nicht protokolliert.
 - **Nicht durch einen unabhängigen `/qa`-Lauf verifiziert:** `df41c8c`. Status bleibt **In Review**.
 
-## Nachtrag 8: Re-Verifikation nach AC-12-Neufassung — voller Fan-out (2026-09-30)
+### Nachtrag 8: Re-Verifikation nach AC-12-Neufassung — voller Fan-out (2026-09-30)
 
 **Scope:** Vertragswechsel (AC-12 neu gefasst, `df41c8c`) → volle Breite mit drei `qa-engineer`-Lanes (Acceptance, Security, Regression). Diff seit dem letzten QA-Lauf: `git diff 69cd64f..HEAD -- src` → `AutoDriveControls.tsx` (+ Tests), `TimelapseControls.tsx` (PROJ-5, `b7de19b`). Firmware, `src/ble`, `src/connection`, `src/screens`, `usePresets.ts` unverändert (`git diff --quiet`, exit 0). `probe.kind: none` — Laufzeit/Hardware `[!] NOT VERIFIED — no way to run and probe this project was recorded`.
 
@@ -472,7 +814,7 @@ BUG-17, BUG-20..23 (Low). Beobachtung (Spec-konform): die App erhöht die Dauer 
 
 **Production-Ready: NOT READY — not verified.** Keine Critical/High/Medium-Bugs offen. Die Laufzeit-ACs sind in diesem Lauf nicht ausgeführt; der protokollierte Hardware-Test vom 2026-09-24 liegt vor der Firmware-Änderung (8000 Steps/s, DIR-Umkehr, BUG-16-Fix). Freigabe nur über einen neu protokollierten Nutzer-Test (Checkliste an den Nutzer übergeben). Status: **In Review**.
 
-## Nachtrag 9: Protokollierter Nutzer-Test am Gerät — Freigabe (2026-09-30)
+### Nachtrag 9: Protokollierter Nutzer-Test am Gerät — Freigabe (2026-09-30)
 
 Checkliste an den Nutzer übergeben, Antwort „alles ok" für alle Punkte. Gerät: Android EB2103 (Debug-Build über Metro), Firmware-Stand `5feb442` (8000 Steps/s, DIR-Umkehr, BUG-16-Fix), App-Stand `b7de19b`/`df41c8c`.
 

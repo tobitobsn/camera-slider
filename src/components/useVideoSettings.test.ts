@@ -71,6 +71,38 @@ describe('parseVideoSettings', () => {
       stabilizationEnabled: true,
     });
   });
+
+  // Added by /qa: stored records that are valid JSON but not a settings object,
+  // or that carry the right values in the wrong type.
+  it('uses the defaults for valid JSON that is not an object (null, number, string)', () => {
+    expect(parseVideoSettings('null')).toEqual(DEFAULT_VIDEO_SETTINGS);
+    expect(parseVideoSettings('42')).toEqual(DEFAULT_VIDEO_SETTINGS);
+    expect(parseVideoSettings('"1080p"')).toEqual(DEFAULT_VIDEO_SETTINGS);
+    expect(parseVideoSettings('')).toEqual(DEFAULT_VIDEO_SETTINGS);
+  });
+
+  it('does not accept look-alike values of the wrong type ("true", "30", 1, 30.0001)', () => {
+    const raw = JSON.stringify({
+      videoEnabled: 'true',
+      soundEnabled: 0,
+      resolution: 1080,
+      fps: '60',
+      lens: ['tele'],
+      stabilizationEnabled: 1,
+    });
+
+    expect(parseVideoSettings(raw)).toEqual(DEFAULT_VIDEO_SETTINGS);
+    expect(parseVideoSettings(JSON.stringify({ fps: 30.0001 })).fps).toBe(30);
+    expect(parseVideoSettings(JSON.stringify({ fps: 60 })).fps).toBe(60);
+  });
+
+  it('ignores an array record and inherited keys, keeping a clean settings object', () => {
+    expect(parseVideoSettings('[true, false]')).toEqual(DEFAULT_VIDEO_SETTINGS);
+
+    const parsed = parseVideoSettings('{"__proto__": {"videoEnabled": true}, "lens": "tele"}');
+    expect(parsed).toEqual({ ...DEFAULT_VIDEO_SETTINGS, lens: 'tele' });
+    expect(Object.keys(parsed).sort()).toEqual(Object.keys(DEFAULT_VIDEO_SETTINGS).sort());
+  });
 });
 
 describe('useVideoSettings (AC-26)', () => {
