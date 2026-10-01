@@ -266,3 +266,26 @@ describe('preset flow keeps its duration (BUG-24/27/33)', () => {
     jest.useRealTimers();
   });
 });
+
+describe('PROJ-6 battery lock (BUG-4: motion only)', () => {
+  it('locks set points, preset loading and drive triggers, but keeps save and delete usable', async () => {
+    await seed([SCHNELL]);
+    let r!: ReactTestRenderer.ReactTestRenderer;
+    await act(async () => {
+      r = ReactTestRenderer.create(
+        React.createElement(
+          AutoDriveControls as React.ComponentType<{ batteryLocked?: boolean }>,
+          { batteryLocked: true },
+        ),
+      );
+      await flush();
+    });
+    await notify(both(20000));
+    expect(pressable(r, 'Als Start setzen').props.disabled).toBe(true);
+    expect(pressable(r, 'Als Ende setzen').props.disabled).toBe(true);
+    expect(pressable(r, 'Start → Ende').props.disabled).toBe(true);
+    expect(pressable(r, 'Schnell').props.disabled).toBe(true);
+    expect(pressable(r, 'Als Preset speichern').props.disabled).toBe(false);
+    expect(pressable(r, 'Löschen').props.disabled).toBe(false);
+  });
+});

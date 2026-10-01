@@ -23,6 +23,7 @@ import {
   sendStopCommand,
   sendTimelapseMoveCommand,
   subscribeToStatus,
+  type LockReason,
   type SliderStatus,
 } from '../ble/client';
 import { minAutoDriveDurationSeconds } from './AutoDriveControls';
@@ -191,6 +192,13 @@ function waitForStatusCondition(
  * a few seconds.
  */
 const CAPTURE_TIMEOUT_MS = 15000;
+
+/** PROJ-6 AC-10 / AC-13: why a sequence was stopped or refused by the battery lock. */
+function lockMessage(reason: LockReason): string {
+  return reason === 'measurementFault'
+    ? 'Akkumessung gestört – Bewegung gestoppt'
+    : 'Akku leer – Bewegung gestoppt';
+}
 
 /**
  * Wraps capturePhoto() so a rejection carries a clear, prefixed message and
@@ -513,6 +521,15 @@ export function useTimelapseSequence(
     }
   }, [device, finishRun]);
 
+  // PROJ-6 AC-10: a low-battery protective stop halts the motor in the
+  // firmware and locks all motion — end a running sequence right away with
+  // its own message instead of letting the next step time out.
+  useEffect(() => {
+    if (status.batteryLocked && isRunningRef.current) {
+      finishRun(runIdRef.current, lockMessage(status.lockReason));
+    }
+  }, [status.batteryLocked, status.lockReason, finishRun]);
+
   const start = useCallback(
     (shotCount: number, intervalSeconds: number): void => {
       const myRunId = ++runIdRef.current;
@@ -520,6 +537,15 @@ export function useTimelapseSequence(
       // Frozen once, here, per design.md — not re-read at every step, so a
       // status change mid-sequence for an unrelated reason can't shift the
       // target computation partway through.
+      // qa-report.md (PROJ-6) BUG-5: a start confirmed in the low-battery
+      // dialog after the slider had meanwhile locked must not run — the
+      // effect above only reacts to the lock changing, not to it already
+      // being set.
+      if (statusRef.current.batteryLocked) {
+        setError(lockMessage(statusRef.current.lockReason));
+        return;
+      }
+
       const frozenDistanceSteps = statusRef.current.distanceSteps;
       const frozenEndIsAfterStart = statusRef.current.endIsAfterStart;
 

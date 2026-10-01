@@ -1,5 +1,7 @@
 #include "motor.h"
 
+#include "driver/gpio.h"
+
 #include <Arduino.h>
 #include <FastAccelStepper.h>
 #include <TMCStepper.h>
@@ -164,6 +166,14 @@ constexpr unsigned long kAutoDriveStartGraceMs = 100;
 // "Warum eine neue Bewegungsart in der Firmware nötig ist").
 volatile bool timelapseMoving = false;
 
+// PROJ-6: set by motorLockout() after a low-battery protective stop, never
+// cleared at runtime — only a reboot resets it (spec.md AC-8, EC-3).
+// Written from the loop() task (battery.cpp), read from the NimBLE host
+// task (every motion entry point) — volatile for the same cross-task
+// visibility reason as the flags above.
+volatile bool lockedOut = false;
+volatile LockReason lockReason = LockReason::kNone;
+
 // millis() timestamp of the motorTimelapseMoveTo() call that set
 // timelapseMoving=true. Same race and same fix as autoDriveStartMillis
 // above (PROJ-3 bug hunt, see the comment there): timelapseMoving is set
@@ -192,6 +202,13 @@ uint32_t speedPercentToStepsPerSecond(uint8_t speedPercent) {
 }  // namespace
 
 void motorSetup() {
+  // BUG-9 / NEU-C: release the EN hold motorPrepareDeepSleep() set, in case
+  // this boot is a wake-up that didn't reset the RTC domain — drive EN high
+  // (driver off) first, so the pin is never undefined in between.
+  pinMode(kEnablePin, OUTPUT);
+  digitalWrite(kEnablePin, HIGH);
+  gpio_hold_dis(static_cast<gpio_num_t>(kEnablePin));
+  gpio_deep_sleep_hold_dis();
   // EN pin high (driver off) is FastAccelStepper's default before any run
   // is started (setAutoEnable below) — a de-energized motor is the safe
   // default at boot, per the stack pack's "Sicherheit" section.
@@ -236,7 +253,7 @@ void motorJog(JogDirection direction, uint8_t speedPercent) {
   // the app's confirmation-timeout window, BUG-5/BUG-6) turned it into an
   // unbounded continuous run the same way, with the same silent-watchdog
   // consequence.
-  if (stepper == nullptr || autoDriving || timelapseMoving) {
+  if (stepper == nullptr || lockedOut || autoDriving || timelapseMoving) {
     return;
   }
 
@@ -408,7 +425,7 @@ void motorClearPoints() {
 }
 
 void motorAutoDrive(JogDirection direction, uint16_t durationDeciseconds) {
-  if (stepper == nullptr || autoDriving || timelapseMoving || !hasStart ||
+  if (stepper == nullptr || lockedOut || autoDriving || timelapseMoving || !hasStart ||
       !hasEnd || stepper->isRunning() || durationDeciseconds == 0) {
     // autoDriving true covers EC-2 (no overlapping auto-drive requests).
     // timelapseMoving true is the PROJ-5 mutual exclusion (design.md
@@ -525,7 +542,7 @@ void motorAutoDriveCheck() {
 // --- PROJ-5: Zeitraffer intermediate-step movement -------------------------
 
 void motorTimelapseMoveTo(bool endIsAfterStart, uint32_t distanceSteps) {
-  if (stepper == nullptr || stepper->isRunning() || autoDriving ||
+  if (stepper == nullptr || lockedOut || stepper->isRunning() || autoDriving ||
       timelapseMoving || !hasStart ||
       distanceSteps > kMaxPlausibleDistanceSteps) {
     // autoDriving true is the PROJ-5 mutual exclusion (design.md
@@ -609,6 +626,9 @@ MotorStatus motorGetStatus() {
   status.hasEnd = snapHasEnd;
   status.driving = snapAutoDriving;
   status.timelapseMoving = snapTimelapseMoving;
+  status.locked = lockedOut;
+  status.lockReason = static_cast<uint8_t>(lockReason);
+  status.moving = stepper != nullptr && stepper->isRunning();
 
   if (snapHasStart && snapHasEnd) {
     const int32_t signedDistance = snapEndPosition - snapStartPosition;
@@ -634,4 +654,49 @@ MotorStatus motorGetStatus() {
   }
 
   return status;
+}
+
+// --- PROJ-6: low-battery protective lockout ----------------------------------
+
+void motorLockout(LockReason reason) {
+  if (lockedOut) {
+    return;  // first reason wins, driver already down
+  }
+  // Flag first, then stop: a motion request from the NimBLE task that
+  // checks the flag after this line is rejected; one that slipped past the
+  // check just before is stopped again by battery.cpp on the next loop()
+  // iteration (design.md, race guarantee).
+  lockReason = reason;
+  lockedOut = true;
+  motorStop();
+
+  // Power the driver down (spec.md AC-12): stop auto-enable from switching
+  // it back on, drive EN HIGH (active-low enable → off) and turn the
+  // TMC2209's output stage off over UART (toff = 0) as a second guard.
+  if (stepper != nullptr) {
+    stepper->setAutoEnable(false);
+    stepper->disableOutputs();
+  }
+  pinMode(kEnablePin, OUTPUT);
+  digitalWrite(kEnablePin, HIGH);
+  driver.toff(0);
+}
+
+LockReason motorLockReason() {
+  return lockReason;
+}
+
+void motorPrepareDeepSleep() {
+  digitalWrite(kEnablePin, HIGH);
+  // GPIO 27 is RTC-capable: hold its level through deep sleep.
+  gpio_hold_en(static_cast<gpio_num_t>(kEnablePin));
+  gpio_deep_sleep_hold_en();
+}
+
+bool motorIsLocked() {
+  return lockedOut;
+}
+
+bool motorIsRunning() {
+  return stepper != nullptr && stepper->isRunning();
 }

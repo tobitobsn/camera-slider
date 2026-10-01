@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { AutoDriveControls } from '../components/AutoDriveControls';
+import { BatteryLockBanner } from '../components/BatteryLockBanner';
 import { ConnectionHeader } from '../components/ConnectionHeader';
 import { BluetoothOffNotice } from '../components/BluetoothOffNotice';
 import { JogControls } from '../components/JogControls';
@@ -14,6 +15,7 @@ import { TimelapseControls } from '../components/TimelapseControls';
 import { useCameraCapture } from '../components/useCameraCapture';
 import { useConnection } from '../connection/ConnectionProvider';
 import { useSliderStatus } from '../components/useSliderStatus';
+import type { SliderStatus } from '../ble/client';
 import { useTimelapseSequence, type TimelapseSequenceApi } from '../components/useTimelapseSequence';
 import { colors, spacing, typography } from '../theme/colors';
 
@@ -61,7 +63,7 @@ export function RootScreen() {
     <View style={styles.container}>
       <ConnectionHeader />
       <View style={styles.content}>
-        {renderContent(state.status, device, status.driving, timelapse, cameraCapture, jogging, setJogging)}
+        {renderContent(state.status, device, status, timelapse, cameraCapture, jogging, setJogging)}
       </View>
     </View>
   );
@@ -70,7 +72,7 @@ export function RootScreen() {
 function renderContent(
   status: ReturnType<typeof useConnection>['state']['status'],
   device: ReturnType<typeof useConnection>['device'],
-  driving: boolean,
+  sliderStatus: SliderStatus,
   timelapse: TimelapseSequenceApi,
   cameraCapture: CameraCapture,
   jogging: boolean,
@@ -115,11 +117,27 @@ function renderContent(
           contentContainerStyle={styles.connectedStackContent}
           scrollEnabled={!jogging}
         >
+          {/* PROJ-6 AC-9: after a low-battery protective stop the firmware
+              rejects all motion until it reboots — say so, and lock the
+              controls. TimelapseControls locks its own start button (it
+              reads batteryLocked itself, like it reads `driving`). */}
+          {sliderStatus.batteryLocked ? (
+            <BatteryLockBanner
+              reason={sliderStatus.lockReason}
+              shutdownSeconds={sliderStatus.shutdownSeconds}
+            />
+          ) : null}
           <JogControls
-            disabled={driving || timelapse.isRunning}
+            disabled={sliderStatus.driving || timelapse.isRunning || sliderStatus.batteryLocked}
             onJoggingChange={setJogging}
           />
-          <AutoDriveControls disabled={timelapse.isRunning} />
+          {/* qa-report.md BUG-4: the battery lock is passed separately so it
+              only locks motion (drive triggers, set points, load preset) —
+              saving and deleting presets stay available. */}
+          <AutoDriveControls
+            disabled={timelapse.isRunning}
+            batteryLocked={sliderStatus.batteryLocked}
+          />
           <TimelapseControls
             device={device}
             isRunning={timelapse.isRunning}
