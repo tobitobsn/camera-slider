@@ -78,6 +78,26 @@ export function formatDurationSeconds(totalSeconds: number): string {
   return `${minutes} Min ${seconds} s`;
 }
 
+/**
+ * PROJ-3 EC-10: only one camera session can be active. While "Video
+ * aufnehmen" is on, the camera belongs to the auto-drive section — this
+ * section then shows a hint instead of its preview and cannot start.
+ */
+export function timelapseCameraState(
+  hasPermission: boolean,
+  cameraInUseByVideo: boolean,
+): { view: 'videoHint' | 'preview' | 'permissionHint'; cameraUsable: boolean } {
+  if (cameraInUseByVideo) {
+    return { view: 'videoHint', cameraUsable: false };
+  }
+  return hasPermission
+    ? { view: 'preview', cameraUsable: true }
+    : { view: 'permissionHint', cameraUsable: false };
+}
+
+export const CAMERA_IN_USE_BY_VIDEO_TEXT =
+  'Kamera wird für Video genutzt — „Video aufnehmen" ausschalten, um den Zeitraffer zu nutzen.';
+
 export type TimelapseControlsProps = TimelapseSequenceApi & {
   device: Device | null;
   // qa-report.md BUG-2: these come from RootScreen's single useCameraCapture()
@@ -88,6 +108,8 @@ export type TimelapseControlsProps = TimelapseSequenceApi & {
   requestPermission: () => Promise<boolean>;
   cameraDevice: CameraDevice | undefined;
   photoOutput: ReturnType<typeof usePhotoOutput>;
+  /** PROJ-3 EC-10: "Video aufnehmen" is on — the auto-drive section owns the camera. */
+  cameraInUseByVideo?: boolean;
 };
 
 /**
@@ -119,7 +141,9 @@ export function TimelapseControls(props: TimelapseControlsProps): React.JSX.Elem
     requestPermission,
     cameraDevice,
     photoOutput,
+    cameraInUseByVideo = false,
   } = props;
+  const cameraState = timelapseCameraState(hasPermission, cameraInUseByVideo);
 
   const status = useSliderStatus(device);
 
@@ -151,7 +175,7 @@ export function TimelapseControls(props: TimelapseControlsProps): React.JSX.Elem
     !status.driving &&
     // PROJ-6 AC-9: no new sequence after a low-battery protective stop.
     !status.batteryLocked &&
-    hasPermission &&
+    cameraState.cameraUsable &&
     shotCount !== null &&
     intervalSeconds !== null &&
     !isRunning;
@@ -180,7 +204,11 @@ export function TimelapseControls(props: TimelapseControlsProps): React.JSX.Elem
     <View style={styles.container}>
       <Text style={styles.sectionTitle}>Zeitraffer</Text>
 
-      {hasPermission && cameraDevice ? (
+      {cameraState.view === 'videoHint' ? (
+        <View style={styles.permissionHint}>
+          <Text style={styles.permissionText}>{CAMERA_IN_USE_BY_VIDEO_TEXT}</Text>
+        </View>
+      ) : cameraState.view === 'preview' && cameraDevice ? (
         // The preview is scaled to fill (cover) and, on Android, its content
         // draws past the native view's bounds — the `overflow: 'hidden'` on
         // the Camera's own style does not clip it (measured on device: view
@@ -195,7 +223,7 @@ export function TimelapseControls(props: TimelapseControlsProps): React.JSX.Elem
           />
         </View>
       ) : (
-        !hasPermission && (
+        cameraState.view === 'permissionHint' && (
           <View style={styles.permissionHint}>
             <Text style={styles.permissionText}>
               Für den Zeitraffer-Modus wird Kamera-Zugriff benötigt.

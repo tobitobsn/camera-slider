@@ -55,8 +55,8 @@
 
 <!-- Neue Datei VideoPanel und bestehende TimelapseControls — disjunkt → beide [P]. -->
 
-- [ ] T15 [P]  App: `VideoPanel` (neue Datei) — Berechtigungs-Hinweis (erlauben / Einstellungen öffnen / „oder Ton ausschalten"), Vorschau mit Tippen-zum-Sperren, Schloss-Markierung am Tipp-Punkt und Button „Auto", REC-Anzeige (mm:ss + Phase Vorlauf/Fahrt/Nachlauf), Einstellungen Ton · Format · Objektiv (nur bei >1) · Stabilisierung (nur wenn unterstützt); alles gesperrt, solange beschäftigt + Render-Tests  · files: src/components/VideoPanel.tsx, src/components/VideoPanel.render.test.ts  · → AC-13, AC-16, AC-20, AC-21, AC-22, AC-23, AC-24, AC-25, AC-28
-- [ ] T16 [P]  App: `TimelapseControls` — neue Prop „Kamera wird für Video genutzt": keine Kamera-Vorschau, Hinweis „Kamera wird für Video genutzt — „Video aufnehmen" ausschalten, um den Zeitraffer zu nutzen", Start gesperrt; ohne die Prop unverändert + Tests  · files: src/components/TimelapseControls.tsx, src/components/TimelapseControls.test.ts  · → EC-10
+- [x] T15 [P]  App: `VideoPanel` (neue Datei) — Berechtigungs-Hinweis (erlauben / Einstellungen öffnen / „oder Ton ausschalten"), Vorschau mit Tippen-zum-Sperren, Schloss-Markierung am Tipp-Punkt und Button „Auto", REC-Anzeige (mm:ss + Phase Vorlauf/Fahrt/Nachlauf), Einstellungen Ton · Format · Objektiv (nur bei >1) · Stabilisierung (nur wenn unterstützt); alles gesperrt, solange beschäftigt + Render-Tests  · files: src/components/VideoPanel.tsx, src/components/VideoPanel.render.test.ts  · → AC-13, AC-16, AC-20, AC-21, AC-22, AC-23, AC-24, AC-25, AC-28
+- [x] T16 [P]  App: `TimelapseControls` — neue Prop „Kamera wird für Video genutzt": keine Kamera-Vorschau, Hinweis „Kamera wird für Video genutzt — „Video aufnehmen" ausschalten, um den Zeitraffer zu nutzen", Start gesperrt; ohne die Prop unverändert + Tests  · files: src/components/TimelapseControls.tsx, src/components/TimelapseControls.test.ts  · → EC-10
 
 ## Level 9 — Videoaufnahme: Auto-Fahrt-Anbindung
 

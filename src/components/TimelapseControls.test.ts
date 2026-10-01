@@ -23,6 +23,7 @@ jest.mock('@react-native-camera-roll/camera-roll', () => ({
 }));
 
 import {
+  timelapseCameraState,
   computeTotalDurationSeconds,
   formatDurationSeconds,
   parseIntervalSecondsText,
@@ -162,5 +163,17 @@ describe('formatDurationSeconds', () => {
 
   it('formats a long multi-hour duration', () => {
     expect(formatDurationSeconds(998 * 3600)).toBe(`${998 * 60} Min 0 s`);
+  });
+});
+
+describe('timelapseCameraState (PROJ-3 EC-10)', () => {
+  it('shows the video hint and blocks the camera while "Video aufnehmen" is on, whatever the permission', () => {
+    expect(timelapseCameraState(true, true)).toEqual({ view: 'videoHint', cameraUsable: false });
+    expect(timelapseCameraState(false, true)).toEqual({ view: 'videoHint', cameraUsable: false });
+  });
+
+  it('behaves as before when "Video aufnehmen" is off', () => {
+    expect(timelapseCameraState(true, false)).toEqual({ view: 'preview', cameraUsable: true });
+    expect(timelapseCameraState(false, false)).toEqual({ view: 'permissionHint', cameraUsable: false });
   });
 });
