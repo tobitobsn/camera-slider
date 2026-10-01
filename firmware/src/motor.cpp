@@ -202,6 +202,10 @@ uint32_t speedPercentToStepsPerSecond(uint8_t speedPercent) {
 }  // namespace
 
 void motorSetup() {
+  // BUG-9: release the EN hold motorPrepareDeepSleep() set, in case this
+  // boot is a wake-up that didn't reset the RTC domain.
+  gpio_hold_dis(static_cast<gpio_num_t>(kEnablePin));
+  gpio_deep_sleep_hold_dis();
   // EN pin high (driver off) is FastAccelStepper's default before any run
   // is started (setAutoEnable below) — a de-energized motor is the safe
   // default at boot, per the stack pack's "Sicherheit" section.

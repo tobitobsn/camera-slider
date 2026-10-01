@@ -30,4 +30,11 @@ describe('BatteryLockBanner', () => {
   it('asks to switch the slider off (remaining standby draw)', () => {
     expect(texts('lowBattery', null).some(t => t.includes('schalte den Slider aus'))).toBe(true);
   });
+
+  it('points to the wiring, not charging, on a measurement fault (BUG-11)', () => {
+    const fault = texts('measurementFault', null);
+    expect(fault.some(t => t.includes('Verkabelung des Spannungsteilers'))).toBe(true);
+    expect(fault.some(t => t.includes('lade den Akku'))).toBe(false);
+    expect(texts('lowBattery', null).some(t => t.includes('lade den Akku'))).toBe(true);
+  });
 });

@@ -27,6 +27,9 @@ constexpr unsigned long kSerialLogIntervalMs = 2000;
 constexpr uint32_t kBatteryPresentMillivolts = 5000;
 constexpr uint32_t kProtectMillivolts = 9300;
 constexpr unsigned long kProtectFilterMs = 5000;
+// BUG-13: "battery seen" needs this long >= 5000 mV, so a single spike on a
+// floating pin can't arm the measurement-fault check during a USB start.
+constexpr unsigned long kBatterySeenFilterMs = 1000;
 
 constexpr uint16_t kDisplayRoundingMillivolts = 20;
 
@@ -36,18 +39,23 @@ constexpr unsigned long kShutdownDelayMs = 60000;
 unsigned long lastSampleMillis = 0;
 unsigned long lastSerialLogMillis = 0;
 
-// Protective filters: millis() when the pack first read low (AC-7) / when
-// the reading first dropped below "present" after a battery had been seen
-// (AC-13) in the current unbroken stretch; 0 = not in such a stretch.
-unsigned long lowSinceMillis = 0;
-unsigned long faultSinceMillis = 0;
+// Protective filter (BUG-8): millis() when the current unbroken stretch of
+// unsafe readings began — low (AC-7) or, after a battery was seen, below
+// "present" (AC-13); 0 = not in such a stretch. One shared counter, so a
+// loose divider contact flipping between the two can't keep resetting it.
+unsigned long unsafeSinceMillis = 0;
+// Whether the current stretch contained a reading below "present" — then
+// the wiring is the more likely cause and the lock reports a fault.
+bool stretchHadFault = false;
+unsigned long presentSinceMillis = 0;
 
 // spec.md AC-13 / EC-7: set by the first reading >= 5000 mV, never cleared.
 // USB and battery can't be connected at the same time, so a drop below
 // 5000 mV without a reboot can only be a measurement fault.
 bool batterySeenSinceBoot = false;
 
-// millis() when the lock was first noticed here; 0 = not locked yet.
+// millis() when the lock was first noticed here (valid once lockNoticed).
+bool lockNoticed = false;
 unsigned long lockedAtMillis = 0;
 volatile uint8_t shutdownSeconds = 0;
 
@@ -104,26 +112,39 @@ bool stretchReached(bool condition, unsigned long& sinceMillis, unsigned long no
 void updateProtection(uint32_t packMillivolts, unsigned long now) {
   const bool present = packMillivolts >= kBatteryPresentMillivolts;
   if (present) {
-    batterySeenSinceBoot = true;
+    if (presentSinceMillis == 0) {
+      presentSinceMillis = now == 0 ? 1 : now;
+    } else if (now - presentSinceMillis >= kBatterySeenFilterMs) {
+      batterySeenSinceBoot = true;
+    }
+  } else {
+    presentSinceMillis = 0;
   }
   const bool low = present && packMillivolts < kProtectMillivolts;
   // EC-7: a USB start that never saw a battery never counts as a fault.
   const bool fault = !present && batterySeenSinceBoot;
+  const bool unsafe = low || fault;
 
-  const bool lowReached = stretchReached(low, lowSinceMillis, now);
-  const bool faultReached = stretchReached(fault, faultSinceMillis, now);
-  if (motorIsLocked()) {
+  // Every reading of the stretch is below 9.3 V either way (AC-7) — a
+  // contact flipping between "low" and "fault" still adds up (BUG-8).
+  if (!unsafe) {
+    stretchHadFault = false;
+  } else if (fault) {
+    stretchHadFault = true;
+  }
+  const bool reached = stretchReached(unsafe, unsafeSinceMillis, now);
+  if (!reached || motorIsLocked()) {
     return;
   }
-  if (lowReached) {
+  if (stretchHadFault) {
+    Serial.printf("battery: reading %lu mV after a battery was seen — measurement fault, locked\n",
+                  static_cast<unsigned long>(packMillivolts));
+    motorLockout(LockReason::kMeasurementFault);
+  } else {
     Serial.printf("battery: %lu mV below %lu mV for 5 s — protective stop, locked until reboot\n",
                   static_cast<unsigned long>(packMillivolts),
                   static_cast<unsigned long>(kProtectMillivolts));
     motorLockout(LockReason::kLowBattery);
-  } else if (faultReached) {
-    Serial.printf("battery: reading %lu mV after a battery was seen — measurement fault, locked\n",
-                  static_cast<unsigned long>(packMillivolts));
-    motorLockout(LockReason::kMeasurementFault);
   }
 }
 
@@ -134,8 +155,11 @@ void updateShutdown(unsigned long now) {
     shutdownSeconds = 0;
     return;
   }
-  if (lockedAtMillis == 0) {
-    lockedAtMillis = now == 0 ? 1 : now;
+  if (!lockNoticed) {
+    // BUG-10: a flag, not a 0 sentinel — a lock at millis() == 0 still gets
+    // the full 60 s.
+    lockNoticed = true;
+    lockedAtMillis = now;
   }
   const unsigned long elapsed = now - lockedAtMillis;
   if (elapsed < kShutdownDelayMs) {

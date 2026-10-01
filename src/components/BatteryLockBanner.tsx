@@ -21,6 +21,11 @@ export function BatteryLockBanner({ reason, shutdownSeconds }: BatteryLockBanner
     reason === 'measurementFault'
       ? 'Akkumessung gestört – bitte Verkabelung prüfen'
       : 'Akku leer – bitte laden';
+  // BUG-11: a measurement fault is a wiring problem, not an empty pack.
+  const hint =
+    reason === 'measurementFault'
+      ? 'Alle Bewegungen sind gestoppt, weil die Akkuspannung nicht mehr sicher gemessen wird. Bitte schalte den Slider aus und prüfe die Verkabelung des Spannungsteilers.'
+      : 'Alle Bewegungen sind gestoppt, um die Zellen zu schützen. Bitte schalte den Slider aus und lade den Akku — auch abgeschaltet verbraucht die Elektronik noch etwas Strom.';
 
   return (
     <View style={styles.container} accessibilityRole="alert">
@@ -28,10 +33,7 @@ export function BatteryLockBanner({ reason, shutdownSeconds }: BatteryLockBanner
       {shutdownSeconds !== null ? (
         <Text style={styles.countdown}>Slider schaltet sich in {shutdownSeconds} s ab</Text>
       ) : null}
-      <Text style={styles.text}>
-        Alle Bewegungen sind gestoppt, um die Zellen zu schützen. Bitte schalte den Slider aus und
-        lade den Akku — auch abgeschaltet verbraucht die Elektronik noch etwas Strom.
-      </Text>
+      <Text style={styles.text}>{hint}</Text>
     </View>
   );
 }

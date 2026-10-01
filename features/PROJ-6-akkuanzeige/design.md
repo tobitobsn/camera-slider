@@ -155,10 +155,10 @@ Sperre ausgelöst (Grund: Akku leer ODER Messung gestört)
 
 ### Fehlererkennung der Messung (AC-13, EC-7)
 
-- `battery.cpp` merkt sich **„Akku seit Start erkannt"** (Ja/Nein, RAM, gesetzt beim ersten Messwert ≥ 5000 mV, nie zurückgesetzt).
+- `battery.cpp` merkt sich **„Akku seit Start erkannt"** (Ja/Nein, RAM, gesetzt nach 1 s ununterbrochen ≥ 5000 mV, nie zurückgesetzt — BUG-13: ein einzelner Störwert am offenen Pin reicht nicht).
 - Ist er gesetzt und liegt der Schutzwert **5 s ununterbrochen unter 5000 mV** → Sperre mit Grund „Messung gestört" (derselbe Ablauf wie oben).
 - Ist er nicht gesetzt (Start im USB-Betrieb, EC-7) → Werte < 5000 mV bedeuten weiter „kein Akku": keine Sperre, keine Abschaltung.
-- Beide Zähler (leer / gestört) sind getrennt; jede Messung außerhalb des jeweiligen Bereichs setzt ihren Zähler zurück.
+- **Ein gemeinsamer Zähler „unsicher"** (geändert nach QA BUG-8, 2026-10-01): Jede Messung, die „leer" (5,0–9,3 V) **oder** „gestört" (< 5 V nach erkanntem Akku) ist, zählt weiter; nur eine Messung ≥ 9,3 V (oder < 5 V ohne erkannten Akku) setzt ihn zurück. Nach 5 s → Sperre. Grund: „Messung gestört", wenn die Strecke mindestens einen Wert < 5 V enthielt, sonst „Akku leer". Vorher waren die Zähler getrennt — ein Wackelkontakt bei leerem Akku hat sie gegenseitig zurückgesetzt und den Schutz ausgehebelt.
 
 ### App
 
@@ -209,6 +209,7 @@ Keine neuen Pakete — App: bestehende React-Native-Mittel (`Alert` für die Nac
 | EN-Pin (GPIO 27, RTC-fähig) im Tiefschlaf per Halte-Funktion auf HIGH | Ohne Halten würde der Pin schweben und könnte den Treiber wieder einschalten (Motor bestromt, Verbrauch steigt) | Nur UART-Deaktivierung | Keine | 2026-09-30 |
 | Sperrgrund und Restsekunden als Bytes 8 und 9 im Status (10 Byte) | Die App braucht den Grund (AC-13-Meldung) und einen verlässlichen Countdown auch bei später Verbindung (EC-8); ein App-seitiger Countdown wäre nach einer Neuverbindung falsch | Countdown in der App ab Erkennen der Sperre | 1 Notify pro Sekunde während der 60 s | 2026-09-30 |
 | „Akku seit Start erkannt" als Kriterium für einen Messfehler (AC-13) | USB und Akku gehen nicht gleichzeitig — ein Abfall unter 5 V ohne Neustart kann nur ein Fehler sein; USB-Start (EC-7) bleibt unberührt | Pull-down-/Leerlauf-Erkennung am Pin in Hardware | Ein echter Akku-Ausfall bei weiterlaufendem ESP32 ist physikalisch nicht möglich, daher kein Fehlalarm-Risiko aus dieser Richtung | 2026-09-30 |
+| Ein gemeinsamer Zähler „unsicher" (leer oder gestört) statt zwei getrennter (BUG-8) | Alle Werte der Strecke liegen unter 9,3 V — das ist der Auslöser von AC-7; getrennte Zähler setzen sich bei Wackelkontakt gegenseitig zurück und schützen nie | Getrennte Zähler (bisher) | Bei gemischter Strecke sperrt es nach 5 s Gesamtdauer, also ggf. früher als „5 s < 5 V" — Richtung sicher | 2026-10-01 |
 ## Open Questions
 
 - [ ] Hängt der ESP32 am Akku (dann ist Akkuwechsel = Neustart, wie angenommen) oder separat versorgt? Falls separat: Aufhebung der Sperre nur über die Reset-Taste — am Aufbau zu prüfen
@@ -222,3 +223,4 @@ Keine neuen Pakete — App: bestehende React-Native-Mittel (`Alert` für die Nac
 - **Kalibrierung:** Faktor 0,993 (Multimeter 12 200 mV ÷ Firmware 12 280 mV im Akkubetrieb). Da USB und Akku nicht gleichzeitig angeschlossen werden können, wurde der Firmware-Wert per BLE vom Mac gelesen (die Status-Characteristic ist ohne Pairing per Notify lesbar).
 - **Refine-Build (2026-09-30):** Ebenen 4–5 umgesetzt (T12–T18). Der Treiber wird nach der Sperre über `setAutoEnable(false)` + `disableOutputs()` + EN-Pin HIGH + `toff(0)` abgeschaltet; im Tiefschlaf hält `gpio_hold_en` + `gpio_deep_sleep_hold_en` den EN-Pin auf HIGH. Hardware-Test T19: der Schlitten lässt sich nach der Abschaltung nicht schieben — identisch zum komplett stromlosen Slider, also mechanisch (Rastmoment/Antrieb), nicht elektrisch. Damit ist die offene Frage „läuft der Motor stromlos frei" für diesen Aufbau mit „nein, aus mechanischen Gründen" beantwortet (Spec-Pflege über `/refine` oder `/qa`).
 - **Build-Hinweis:** Gradle hat das JS-Bundle der Release-App nach Code-Änderungen nicht immer neu erzeugt; `./gradlew assembleRelease --rerun-tasks` erzwingt es. Vor der Installation prüfen, ob neue Bezeichner im Bundle stehen.
+- **Bugfix-Build nach zweitem QA-Lauf (2026-10-01):** BUG-8 gemeinsamer Unsicher-Zähler (`battery.cpp` `updateProtection`); BUG-9 `gpio_hold_dis` + `gpio_deep_sleep_hold_dis` am Anfang von `motorSetup()`; BUG-10 Countdown-Start über eigenes Flag statt 0-Sentinel; BUG-11 eigener Hinweistext bei Messfehler (Verkabelung prüfen) — die zweizeilige Darstellung „Akku leer – bitte laden" + „Slider schaltet sich in N s ab" bleibt wie entschieden; BUG-13 „Akku erkannt" erst nach 1 s ≥ 5000 mV. BUG-12 (EC-4 ↔ AC-13) ist eine Spec-Frage für `/refine`. Geprüft per Node-Nachbau (`scratchpad/sim8.js`): Wackelkontakt 9000/0 mV, Zufallswerte und „4 s leer + 1× 0" sperren jetzt nach 5 s mit Grund „gestört"; EC-1, EC-7 und der Einzelspike sperren nicht.
