@@ -17,6 +17,13 @@ jest.mock('@react-native-camera-roll/camera-roll', () => ({
   CameraRoll: { save: (...args: unknown[]) => mockSave(...args) },
 }));
 
+const mockDeleteCacheFile = jest.fn();
+const mockDeleteLeftoverVideos = jest.fn();
+jest.mock('./cacheFiles', () => ({
+  deleteCacheFile: (path: string) => mockDeleteCacheFile(path),
+  deleteLeftoverVideos: () => mockDeleteLeftoverVideos(),
+}));
+
 const mockActivate = jest.fn();
 const mockDeactivate = jest.fn();
 jest.mock('@sayem314/react-native-keep-awake', () => ({
@@ -27,8 +34,10 @@ jest.mock('@sayem314/react-native-keep-awake', () => ({
 import type { SliderStatus } from '../ble/client';
 import {
   DRIVE_START_TIMEOUT_MS,
+  FINALIZE_TIMEOUT_MS,
   POSTROLL_MS,
   PREROLL_MS,
+  START_TIMEOUT_MS,
   useVideoDrive,
   type VideoDriveApi,
   type VideoRecorderPort,
@@ -52,25 +61,57 @@ const IDLE_STATUS: SliderStatus = {
   shutdownSeconds: null,
 };
 
-/** A recorder whose stop() hands back a file, like VisionCamera's. */
-function fakeRecorder(options: { failStart?: boolean } = {}) {
-  let callbacks: { onFinished: (path: string) => void; onError: (e: Error) => void } | null = null;
+type Callbacks = Parameters<VideoRecorderPort['startRecording']>[0];
+
+/**
+ * A recorder that behaves like VisionCamera's: stop() hands back the file via
+ * onFinished; after an error the recording is over — onFinished never comes
+ * and stop() rejects ("Not currently recording!").
+ */
+function fakeRecorder(options: { failStart?: boolean; neverStarts?: boolean; blocked?: string } = {}) {
+  let callbacks: Callbacks | null = null;
+  let recording = false;
+  let resolveStart: ((value: { stop: () => Promise<void> }) => void) | null = null;
   const stopRecording = jest.fn(async () => {
+    if (!recording) {
+      throw new Error('Not currently recording!');
+    }
+    recording = false;
     callbacks?.onFinished('/tmp/take.mp4');
   });
   const port: VideoRecorderPort = {
-    startRecording: jest.fn(async cbs => {
+    prepare: jest.fn(() => options.blocked ?? null),
+    startRecording: jest.fn(cbs => {
       if (options.failStart) {
-        throw new Error('camera busy');
+        return Promise.reject(new Error('camera busy'));
       }
       callbacks = cbs;
-      return { stop: stopRecording };
+      if (options.neverStarts) {
+        return new Promise(resolve => {
+          resolveStart = resolve;
+        });
+      }
+      recording = true;
+      return Promise.resolve({ stop: stopRecording });
     }),
   };
   return {
     port,
     stopRecording,
-    emitError: (message: string) => callbacks?.onError(new Error(message)),
+    emitError: (message: string, filePath: string | null = '/tmp/take.mp4') => {
+      recording = false;
+      callbacks?.onError(new Error(message), filePath);
+    },
+    /** The recorder finishing on its own, without stop() (e.g. the camera was taken away). */
+    emitFinished: (filePath = '/tmp/take.mp4') => {
+      recording = false;
+      callbacks?.onFinished(filePath);
+    },
+    /** A start that arrives late (after the start timeout). */
+    resolveLateStart: () => {
+      recording = true;
+      resolveStart?.({ stop: stopRecording });
+    },
   };
 }
 
@@ -137,6 +178,8 @@ beforeEach(() => {
   mockSave.mockImplementation(() => Promise.resolve('content://video'));
   mockActivate.mockClear();
   mockDeactivate.mockClear();
+  mockDeleteCacheFile.mockClear();
+  mockDeleteLeftoverVideos.mockClear();
   appStateHandler = null;
   jest.spyOn(AppState, 'addEventListener').mockImplementation((_type, handler) => {
     appStateHandler = handler as (state: string) => void;
@@ -265,16 +308,63 @@ describe('useVideoDrive — failures (AC-18, AC-19, EC-6, EC-7)', () => {
     t.unmount();
   });
 
-  it('a recording error during the drive stops the motor, reports it and saves the part recorded', async () => {
+  it('a recording error during the drive stops the motor, reports it and saves the part recorded (BUG-44)', async () => {
     const rec = fakeRecorder();
     const t = setup(rec.port);
     await driveUntilMoving(t);
 
-    await t.run(() => rec.emitError('storage full'));
+    await t.run(() => rec.emitError('storage full', '/tmp/partial.mp4'));
+
+    // Saved right away — the recorder never hands the file over itself.
+    expect(mockSendStop).toHaveBeenCalledWith(DEVICE);
+    expect(mockSave).toHaveBeenCalledWith('file:///tmp/partial.mp4', { type: 'video' });
+    expect(t.api().error).toBe('Aufnahme abgebrochen: storage full');
+    expect(t.api().phase).toBe('ready');
+    expect(t.api().savedCount).toBe(1);
+    expect(mockDeleteCacheFile).toHaveBeenCalledWith('/tmp/partial.mp4');
+    expect(mockDeactivate).toHaveBeenCalled();
+    t.unmount();
+  });
+
+  it('a recording error without a file: reports it and is back to ready without waiting (BUG-44)', async () => {
+    const rec = fakeRecorder();
+    const t = setup(rec.port);
+    await driveUntilMoving(t);
+
+    await t.run(() => rec.emitError('encoder failed', null));
 
     expect(mockSendStop).toHaveBeenCalledWith(DEVICE);
-    expect(t.api().error).toContain('storage full');
-    expect(mockSave).toHaveBeenCalledTimes(1);
+    expect(mockSave).not.toHaveBeenCalled();
+    expect(t.api().error).toBe('Aufnahme abgebrochen: encoder failed');
+    expect(t.api().phase).toBe('ready');
+    t.unmount();
+  });
+
+  it('a recording that ends on its own during the drive is no success: STOP, error, saved (BUG-45)', async () => {
+    const rec = fakeRecorder();
+    const t = setup(rec.port);
+    await driveUntilMoving(t);
+
+    await t.run(() => rec.emitFinished('/tmp/cut.mp4'));
+
+    expect(mockSendStop).toHaveBeenCalledWith(DEVICE);
+    expect(t.api().error).toBe('Aufnahme wurde unerwartet beendet');
+    expect(mockSave).toHaveBeenCalledWith('file:///tmp/cut.mp4', { type: 'video' });
+    expect(t.api().phase).toBe('ready');
+    t.unmount();
+  });
+
+  it('a recording that ends on its own during the pre-roll: the carriage never starts (BUG-45, EC-7)', async () => {
+    const rec = fakeRecorder();
+    const t = setup(rec.port);
+    await t.run(() => t.api().start('startToEnd', 10));
+
+    await t.run(() => rec.emitFinished());
+    await t.advance(PREROLL_MS * 2);
+
+    expect(mockSendAutoDrive).not.toHaveBeenCalled();
+    expect(mockSendStop).not.toHaveBeenCalled();
+    expect(t.api().error).toBe('Aufnahme wurde unerwartet beendet');
     expect(t.api().phase).toBe('ready');
     t.unmount();
   });
@@ -341,6 +431,126 @@ describe('useVideoDrive — failures (AC-18, AC-19, EC-6, EC-7)', () => {
 
     expect(t.api().error).toContain('Video konnte nicht gespeichert werden');
     expect(t.api().savedCount).toBe(0);
+    t.unmount();
+  });
+
+  it('the app going to the background while the take is being saved is no error (BUG-53)', async () => {
+    let resolveSave: (value: string) => void = () => {};
+    mockSave.mockImplementation(() => new Promise(resolve => (resolveSave = resolve)));
+    const rec = fakeRecorder();
+    const t = setup(rec.port);
+    await driveUntilMoving(t);
+    await t.run(() => t.api().stop());
+    expect(t.api().phase).toBe('saving');
+
+    await t.run(() => appStateHandler?.('background'));
+    await t.run(() => resolveSave('content://video'));
+
+    expect(t.api().error).toBeNull();
+    expect(t.api().savedCount).toBe(1);
+    t.unmount();
+  });
+});
+
+describe('useVideoDrive — permissions (AC-20, BUG-42)', () => {
+  it('starts nothing while the camera says a take cannot start, and shows its hint', async () => {
+    const rec = fakeRecorder({ blocked: 'Für Ton wird Mikrofon-Zugriff benötigt' });
+    const t = setup(rec.port);
+
+    await t.run(() => t.api().start('startToEnd', 10));
+    await t.advance(PREROLL_MS * 2);
+
+    expect(rec.port.startRecording).not.toHaveBeenCalled();
+    expect(mockSendAutoDrive).not.toHaveBeenCalled();
+    expect(mockActivate).not.toHaveBeenCalled();
+    expect(t.api().phase).toBe('ready');
+    expect(t.api().busy).toBe(false);
+    expect(t.api().error).toBe('Für Ton wird Mikrofon-Zugriff benötigt');
+    t.unmount();
+  });
+});
+
+describe('useVideoDrive — a camera that never answers (AC-27, BUG-43)', () => {
+  it('ends the run after the start timeout: error, ready, screen lock released', async () => {
+    const rec = fakeRecorder({ neverStarts: true });
+    const t = setup(rec.port);
+    await t.run(() => t.api().start('startToEnd', 10));
+    expect(t.api().phase).toBe('starting');
+
+    await t.advance(START_TIMEOUT_MS - 1);
+    expect(t.api().phase).toBe('starting');
+    await t.advance(1);
+
+    expect(t.api().phase).toBe('ready');
+    expect(t.api().error).toContain('Aufnahme konnte nicht starten');
+    expect(mockDeactivate).toHaveBeenCalled();
+    expect(mockSendAutoDrive).not.toHaveBeenCalled();
+    t.unmount();
+  });
+
+  it('Stopp while starting does not hang in "saving"', async () => {
+    const rec = fakeRecorder({ neverStarts: true });
+    const t = setup(rec.port);
+    await t.run(() => t.api().start('startToEnd', 10));
+
+    await t.run(() => t.api().stop());
+    expect(t.api().phase).toBe('saving');
+    await t.advance(START_TIMEOUT_MS);
+
+    expect(t.api().phase).toBe('ready');
+    expect(t.api().busy).toBe(false);
+    expect(mockDeactivate).toHaveBeenCalled();
+    t.unmount();
+  });
+
+  it('a start that arrives after the timeout is stopped at once and its file removed', async () => {
+    const rec = fakeRecorder({ neverStarts: true });
+    const t = setup(rec.port);
+    await t.run(() => t.api().start('startToEnd', 10));
+    await t.advance(START_TIMEOUT_MS);
+
+    await t.run(() => rec.resolveLateStart());
+
+    expect(rec.stopRecording).toHaveBeenCalledTimes(1);
+    expect(mockSave).not.toHaveBeenCalled();
+    expect(mockDeleteCacheFile).toHaveBeenCalledWith('/tmp/take.mp4');
+    expect(mockSendAutoDrive).not.toHaveBeenCalled();
+    t.unmount();
+  });
+});
+
+describe('useVideoDrive — cache copies (BUG-48)', () => {
+  it('removes the cache copy once the take is in the gallery', async () => {
+    const rec = fakeRecorder();
+    const t = setup(rec.port);
+    await driveUntilMoving(t);
+
+    await t.run(() => t.api().stop());
+
+    expect(mockSave).toHaveBeenCalledTimes(1);
+    expect(mockDeleteCacheFile).toHaveBeenCalledWith('/tmp/take.mp4');
+    t.unmount();
+  });
+
+  it('removes a file that arrives after the finalize timeout', async () => {
+    const rec = fakeRecorder();
+    rec.stopRecording.mockImplementation(async () => {});
+    const t = setup(rec.port);
+    await driveUntilMoving(t);
+    await t.run(() => t.api().stop());
+
+    await t.advance(FINALIZE_TIMEOUT_MS);
+    expect(t.api().phase).toBe('ready');
+    await t.run(() => rec.emitFinished('/tmp/late.mp4'));
+
+    expect(mockSave).not.toHaveBeenCalled();
+    expect(mockDeleteCacheFile).toHaveBeenCalledWith('/tmp/late.mp4');
+    t.unmount();
+  });
+
+  it('clears recordings left by an earlier run once, at start-up', () => {
+    const t = setup(fakeRecorder().port);
+    expect(mockDeleteLeftoverVideos).toHaveBeenCalledTimes(1);
     t.unmount();
   });
 });

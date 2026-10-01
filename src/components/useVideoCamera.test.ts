@@ -10,6 +10,8 @@ type FakeDeviceOptions = {
   fps?: number[];
   stabilization?: boolean;
   focusMetering?: boolean;
+  /** The frame rate the session really delivers at a video width — defaults to the one asked for. */
+  delivers?: (width: number, fps: number) => number;
 };
 function fakeDevice(o: FakeDeviceOptions) {
   return {
@@ -19,7 +21,11 @@ function fakeDevice(o: FakeDeviceOptions) {
     supportsFocusMetering: o.focusMetering ?? true,
     getSupportedResolutions: () => o.resolutions ?? [{ width: 1920, height: 1080 }, { width: 3840, height: 2160 }],
     supportsFPS: (fps: number) => (o.fps ?? [30, 60]).includes(fps),
-    supportsVideoStabilizationMode: () => o.stabilization ?? true,
+    // Like VisionCamera on Android: 'auto' is always "supported", only
+    // 'standard' tells the truth.
+    supportsVideoStabilizationMode: (mode: string) =>
+      mode === 'auto' || mode === 'off' || (mode === 'standard' && (o.stabilization ?? true)),
+    delivers: o.delivers ?? ((_width: number, fps: number) => fps),
   };
 }
 
@@ -32,23 +38,52 @@ const mockStartRecording = jest.fn((_onFinished: (path: string) => void, _onErro
   Promise.resolve(),
 );
 const mockCreateRecorder = jest.fn(() =>
-  Promise.resolve({ startRecording: mockStartRecording, stopRecording: mockStopRecording }),
+  Promise.resolve({
+    filePath: '/cache/VisionCamera_1.mp4',
+    startRecording: mockStartRecording,
+    stopRecording: mockStopRecording,
+  }),
 );
 const mockVideoOutput = { createRecorder: mockCreateRecorder };
 
-function mockPermission(status: string) {
+const mockRequestCamera = jest.fn(() => Promise.resolve(true));
+const mockRequestMicrophone = jest.fn(() => Promise.resolve(true));
+function mockPermission(status: string, request: () => Promise<boolean>) {
   return {
     status,
     hasPermission: status === 'authorized',
     canRequestPermission: status === 'not-determined',
-    requestPermission: jest.fn(() => Promise.resolve(true)),
+    requestPermission: request,
   };
 }
 
+// The imperative API the format probe uses: the session answers with the
+// frame rate the fake device delivers at the probed video width.
+type ProbeOutput = { kind: string; targetResolution?: { width: number; height: number } };
+const mockResolveConstraints = jest.fn(
+  async (
+    device: ReturnType<typeof fakeDevice>,
+    outputs: { output: ProbeOutput; mirrorMode: string }[],
+    constraints: Record<string, unknown>[],
+  ) => {
+    const video = outputs.find(o => o.output.kind === 'video')?.output;
+    const fps = constraints.find(c => 'fps' in c)?.fps as number;
+    return { selectedFPS: device.delivers(video?.targetResolution?.width ?? 0, fps) };
+  },
+);
+
 jest.mock('react-native-vision-camera', () => ({
+  VisionCamera: {
+    createPreviewOutput: () => ({ kind: 'preview' }),
+    createVideoOutput: (options: { targetResolution: { width: number; height: number } }) => ({
+      kind: 'video',
+      targetResolution: options.targetResolution,
+    }),
+    resolveConstraints: (...args: Parameters<typeof mockResolveConstraints>) => mockResolveConstraints(...args),
+  },
   useCameraDevices: () => mockDevices,
-  useCameraPermission: () => mockPermission(mockCameraStatus),
-  useMicrophonePermission: () => mockPermission(mockMicStatus),
+  useCameraPermission: () => mockPermission(mockCameraStatus, mockRequestCamera),
+  useMicrophonePermission: () => mockPermission(mockMicStatus, mockRequestMicrophone),
   useVideoOutput: (options: unknown) => {
     mockVideoOutputOptions(options);
     return mockVideoOutput;
@@ -84,6 +119,12 @@ function setup(initial: Partial<VideoSettings> = {}) {
         await flush();
       });
     },
+    /** Lets the format probe answer. */
+    async settle() {
+      await act(async () => {
+        await flush();
+      });
+    },
     unmount: () => act(() => renderer?.unmount()),
   };
 }
@@ -106,6 +147,9 @@ beforeEach(() => {
   mockCreateRecorder.mockClear();
   mockStartRecording.mockClear();
   mockStopRecording.mockClear();
+  mockResolveConstraints.mockClear();
+  mockRequestCamera.mockClear();
+  mockRequestMicrophone.mockClear();
 });
 
 describe('lens, format, stabilization (AC-22, AC-23, AC-24, AC-26)', () => {
@@ -118,7 +162,17 @@ describe('lens, format, stabilization (AC-22, AC-23, AC-24, AC-26)', () => {
     expect(mockVideoOutputOptions).toHaveBeenLastCalledWith(
       expect.objectContaining({ targetResolution: { width: 3840, height: 2160 } }),
     );
-    expect(t.api().constraints).toEqual([{ fps: 60 }, { videoStabilizationMode: 'auto' }]);
+    // BUG-46: 'standard' — 'auto' does not switch anything on, on Android.
+    expect(t.api().constraints).toEqual([{ fps: 60 }, { videoStabilizationMode: 'standard' }]);
+    t.unmount();
+  });
+
+  it('hides the stabilization switch on a lens that only "supports" auto (BUG-46)', () => {
+    mockDevices = [fakeDevice({ id: 'wide', type: 'wide-angle', stabilization: false })];
+    const t = setup({ stabilizationEnabled: true });
+
+    expect(t.api().stabilizationSupported).toBe(false);
+    expect(t.api().constraints).toEqual([{ fps: 30 }]);
     t.unmount();
   });
 
@@ -140,6 +194,58 @@ describe('lens, format, stabilization (AC-22, AC-23, AC-24, AC-26)', () => {
   it('falls back to the wide lens when the remembered lens does not exist on this phone', () => {
     const t = setup({ lens: 'ultraWide' });
     expect(t.api().lens?.type).toBe('wide');
+    t.unmount();
+  });
+
+  it('offers only the combinations the camera really records at their frame rate (BUG-47)', async () => {
+    // 4K goes up to 30 fps only — the session would silently drop 60 to 30.
+    mockDevices = [
+      fakeDevice({ id: 'wide', type: 'wide-angle', delivers: (width, fps) => (width === 3840 ? Math.min(fps, 30) : fps) }),
+    ];
+    const t = setup({ resolution: '2160p', fps: 60, stabilizationEnabled: true });
+    expect(t.api().formats).toEqual([]); // still asking
+
+    await t.settle();
+
+    expect(t.api().formats).toEqual([
+      { resolution: '1080p', fps: 30 },
+      { resolution: '1080p', fps: 60 },
+      { resolution: '2160p', fps: 30 },
+    ]);
+    // The remembered 4K/60 is not offered → the default (AC-26).
+    expect(t.api().format).toEqual({ resolution: '1080p', fps: 30 });
+    // Probed with the outputs and stabilization the real session uses.
+    expect(mockResolveConstraints).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'wide' }),
+      [
+        { output: { kind: 'preview' }, mirrorMode: 'auto' },
+        { output: { kind: 'video', targetResolution: { width: 3840, height: 2160 } }, mirrorMode: 'auto' },
+      ],
+      [{ fps: 60 }, { videoStabilizationMode: 'standard' }],
+    );
+    t.unmount();
+  });
+
+  it('drops a combination whose probe fails', async () => {
+    mockResolveConstraints.mockImplementationOnce(async () => {
+      throw new Error('unsupported');
+    });
+    mockDevices = [fakeDevice({ id: 'wide', type: 'wide-angle', resolutions: [{ width: 1920, height: 1080 }] })];
+    const t = setup();
+    await t.settle();
+
+    expect(t.api().formats).toEqual([{ resolution: '1080p', fps: 60 }]);
+    t.unmount();
+  });
+
+  it('says so when the session still lands on another frame rate', async () => {
+    const t = setup({ resolution: '1080p', fps: 60 });
+
+    await act(async () => {
+      t.api().onSessionConfigSelected({ selectedFPS: 30 } as never);
+      await flush();
+    });
+    expect(t.api().notice).toBe('60 fps nicht verfügbar — es wird mit 30 fps aufgenommen');
     t.unmount();
   });
 
@@ -254,10 +360,70 @@ describe('recorder port', () => {
     finishedCallback('/tmp/take.mp4');
     errorCallback(new Error('boom'));
     expect(onFinished).toHaveBeenCalledWith('/tmp/take.mp4');
-    expect(onError).toHaveBeenCalledWith(new Error('boom'));
+    // BUG-44: the file written so far comes with the error.
+    expect(onError).toHaveBeenCalledWith(new Error('boom'), '/cache/VisionCamera_1.mp4');
 
     await recording.stop();
     expect(mockStopRecording).toHaveBeenCalledTimes(1);
+    t.unmount();
+  });
+});
+
+describe('prepare — may a take start? (AC-20, BUG-42)', () => {
+  it('lets a take start with camera and microphone granted', () => {
+    const t = setup({ soundEnabled: true });
+    expect(t.api().recorder.prepare()).toBeNull();
+    t.unmount();
+  });
+
+  it('asks for the camera where Android still allows it, and blocks the take', () => {
+    mockCameraStatus = 'not-determined';
+    const t = setup();
+
+    expect(t.api().recorder.prepare()).toBe(
+      'Für die Videoaufnahme wird Kamera-Zugriff benötigt — bitte erlauben und erneut starten.',
+    );
+    expect(mockRequestCamera).toHaveBeenCalledTimes(1);
+    t.unmount();
+  });
+
+  it('points to the system settings once the camera was denied', () => {
+    mockCameraStatus = 'denied';
+    const t = setup();
+
+    expect(t.api().recorder.prepare()).toBe(
+      'Kamera-Zugriff wurde abgelehnt — in den Einstellungen erlauben, dann erneut starten.',
+    );
+    expect(mockRequestCamera).not.toHaveBeenCalled();
+    t.unmount();
+  });
+
+  it('blocks a take with sound but no microphone, naming "Ton ausschalten" as the way out', () => {
+    mockMicStatus = 'not-determined';
+    const asking = setup({ soundEnabled: true });
+    expect(asking.api().recorder.prepare()).toContain('oder Ton ausschalten');
+    expect(mockRequestMicrophone).toHaveBeenCalledTimes(1);
+    asking.unmount();
+
+    mockMicStatus = 'denied';
+    const denied = setup({ soundEnabled: true });
+    expect(denied.api().recorder.prepare()).toBe(
+      'Mikrofon-Zugriff wurde abgelehnt — in den Einstellungen erlauben oder Ton ausschalten.',
+    );
+    denied.unmount();
+  });
+
+  it('needs no microphone with sound off', () => {
+    mockMicStatus = 'denied';
+    const t = setup({ soundEnabled: false });
+    expect(t.api().recorder.prepare()).toBeNull();
+    t.unmount();
+  });
+
+  it('blocks a take while no back camera is known', () => {
+    mockDevices = [];
+    const t = setup();
+    expect(t.api().recorder.prepare()).toBe('Keine Rückkamera verfügbar');
     t.unmount();
   });
 });

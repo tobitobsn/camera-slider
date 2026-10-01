@@ -98,13 +98,39 @@ function supportsResolution(device: CameraDevice, resolution: VideoResolution): 
 }
 
 /**
- * AC-22: every combination of the three standard resolutions and the five
- * standard frame rates that this lens reports, sorted by resolution, then fps.
+ * AC-22: the candidates — every combination of the three standard resolutions
+ * and the five standard frame rates that this lens reports individually,
+ * sorted by resolution, then fps. The lens reports frame rates per lens, not
+ * per resolution (4K often only goes to 30 fps), so `probeFormats` narrows
+ * this down to what the camera really delivers.
  */
 export function availableFormats(device: CameraDevice): VideoFormat[] {
   const resolutions = VIDEO_RESOLUTIONS.filter(resolution => supportsResolution(device, resolution));
   const fpsValues = VIDEO_FPS.filter(fps => device.supportsFPS(fps));
   return resolutions.flatMap(resolution => fpsValues.map(fps => ({ resolution, fps })));
+}
+
+/** Asks the camera which frame rate it would actually use for this resolution and target fps. */
+export type FpsResolver = (format: VideoFormat) => Promise<number | undefined>;
+
+/**
+ * AC-22 (qa-report.md BUG-47): keeps only the candidates the camera really
+ * records at the chosen frame rate — it otherwise picks the nearest one
+ * silently. A failed probe drops the combination.
+ */
+export async function probeFormats(
+  candidates: readonly VideoFormat[],
+  resolveFps: FpsResolver,
+): Promise<VideoFormat[]> {
+  const delivered = await Promise.all(
+    candidates.map(format =>
+      resolveFps(format).then(
+        fps => fps === format.fps,
+        () => false,
+      ),
+    ),
+  );
+  return candidates.filter((_, index) => delivered[index]);
 }
 
 /**
@@ -125,9 +151,15 @@ export function effectiveFormat(
   );
 }
 
-/** AC-24: the stabilization switch is only shown when the lens supports it. */
+/**
+ * AC-24: the stabilization switch is only shown when the lens supports it.
+ * Only 'standard' reflects the real capability — 'auto' is always "supported"
+ * on Android and does not switch anything on (qa-report.md BUG-46).
+ */
+export const STABILIZATION_MODE = 'standard';
+
 export function supportsStabilization(device: CameraDevice): boolean {
-  return device.supportsVideoStabilizationMode('auto');
+  return device.supportsVideoStabilizationMode(STABILIZATION_MODE);
 }
 
 /** Display label, e.g. "4K · 25 fps". */

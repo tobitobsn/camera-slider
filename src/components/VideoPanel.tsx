@@ -87,6 +87,7 @@ export function VideoPanel({ camera, settings, onChange, phase, elapsedSeconds, 
               constraints={camera.constraints}
               isActive
               onError={camera.onCameraError}
+              onSessionConfigSelected={camera.onSessionConfigSelected}
               style={StyleSheet.absoluteFill}
               pointerEvents="none"
             />

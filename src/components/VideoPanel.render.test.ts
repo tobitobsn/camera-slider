@@ -38,11 +38,12 @@ function fakeCamera(overrides: Partial<VideoCameraApi> = {}): VideoCameraApi {
     constraints: [],
     cameraRef: { current: null },
     onCameraError: jest.fn(),
+    onSessionConfigSelected: jest.fn(),
     notice: null,
     focusLock: null,
     lockAt: jest.fn(),
     unlock: jest.fn(),
-    recorder: { startRecording: jest.fn() },
+    recorder: { prepare: jest.fn(() => null), startRecording: jest.fn() },
     ...overrides,
   };
 }

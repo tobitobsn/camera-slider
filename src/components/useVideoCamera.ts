@@ -13,12 +13,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Linking } from 'react-native';
 import {
+  VisionCamera,
   useCameraDevices,
   useCameraPermission,
   useMicrophonePermission,
   useVideoOutput,
   type CameraDevice,
   type CameraRef,
+  type CameraSessionConfig,
   type CameraVideoOutput,
   type Constraint,
 } from 'react-native-vision-camera';
@@ -31,9 +33,11 @@ import {
   RESOLUTION_SIZES,
   availableFormats,
   availableLenses,
+  STABILIZATION_MODE,
   effectiveFormat,
   effectiveLens,
   formatLabel,
+  probeFormats,
   supportsStabilization,
   type Lens,
   type VideoFormat,
@@ -54,6 +58,7 @@ export type VideoCameraApi = {
   openSettings: () => void;
   lenses: Lens[];
   lens: Lens | undefined;
+  /** Offered formats (AC-22) — empty while the camera is still being asked which it delivers. */
   formats: VideoFormat[];
   format: VideoFormat | undefined;
   stabilizationSupported: boolean;
@@ -63,6 +68,8 @@ export type VideoCameraApi = {
   constraints: Constraint[];
   cameraRef: React.RefObject<CameraRef | null>;
   onCameraError: (error: Error) => void;
+  /** For `<Camera onSessionConfigSelected>` — reports a frame rate the camera did not honour. */
+  onSessionConfigSelected: (config: CameraSessionConfig) => void;
   /** A one-line hint (format fallback, focus lock unsupported), or null. */
   notice: string | null;
   /** Where the lock was set, in preview coordinates — null while on "Auto" (AC-25). */
@@ -80,6 +87,10 @@ function describeError(err: unknown): string {
   return err instanceof Error && err.message ? err.message : 'Unbekannter Fehler';
 }
 
+function stabilizationConstraint(enabled: boolean): Constraint {
+  return { videoStabilizationMode: enabled ? STABILIZATION_MODE : 'off' };
+}
+
 export function useVideoCamera(settings: VideoSettings): VideoCameraApi {
   const cameraPermission = useCameraPermission();
   const microphonePermission = useMicrophonePermission();
@@ -93,10 +104,51 @@ export function useVideoCamera(settings: VideoSettings): VideoCameraApi {
 
   const lenses = useMemo(() => availableLenses(devices), [devices]);
   const lens = effectiveLens(lenses, settings.lens);
-  const formats = useMemo(() => (lens ? availableFormats(lens.device) : []), [lens]);
+  const lensDevice = lens?.device;
+  const candidates = useMemo(() => (lensDevice ? availableFormats(lensDevice) : []), [lensDevice]);
+  const stabilizationSupported = lensDevice ? supportsStabilization(lensDevice) : false;
+  const stabilizationOn = stabilizationSupported && settings.stabilizationEnabled;
+
+  // AC-22 / BUG-47: ask the camera which candidates it really records at
+  // their frame rate — with the same outputs and stabilization the real
+  // session uses. Until it has answered, the candidates stand in.
+  const probeKey = lensDevice ? `${lensDevice.id}|${stabilizationSupported ? stabilizationOn : '-'}` : '';
+  const [probed, setProbed] = useState<{ key: string; formats: VideoFormat[] } | null>(null);
+  useEffect(() => {
+    if (!lensDevice) {
+      return;
+    }
+    let current = true;
+    const preview = VisionCamera.createPreviewOutput();
+    const sessionConstraints: Constraint[] = stabilizationSupported ? [stabilizationConstraint(stabilizationOn)] : [];
+    probeFormats(candidates, async probe => {
+      const output = VisionCamera.createVideoOutput({
+        targetResolution: RESOLUTION_SIZES[probe.resolution],
+        enableAudio: false,
+      });
+      const config = await VisionCamera.resolveConstraints(
+        lensDevice,
+        [
+          { output: preview, mirrorMode: 'auto' },
+          { output, mirrorMode: 'auto' },
+        ],
+        [{ fps: probe.fps }, ...sessionConstraints],
+      );
+      return config.selectedFPS;
+    }).then(result => {
+      if (current) {
+        setProbed({ key: probeKey, formats: result });
+      }
+    });
+    return () => {
+      current = false;
+    };
+  }, [lensDevice, candidates, stabilizationSupported, stabilizationOn, probeKey]);
+  const probedFormats = probed?.key === probeKey ? probed.formats : null;
+  const formats = probedFormats ?? [];
+
   const remembered: VideoFormat = { resolution: settings.resolution, fps: settings.fps };
-  const format = effectiveFormat(formats, formatRejected ? DEFAULT_FORMAT : remembered);
-  const stabilizationSupported = lens ? supportsStabilization(lens.device) : false;
+  const format = effectiveFormat(probedFormats ?? candidates, formatRejected ? DEFAULT_FORMAT : remembered);
 
   useEffect(() => {
     setFormatRejected(false);
@@ -113,10 +165,10 @@ export function useVideoCamera(settings: VideoSettings): VideoCameraApi {
       result.push({ fps: format.fps });
     }
     if (stabilizationSupported) {
-      result.push({ videoStabilizationMode: settings.stabilizationEnabled ? 'auto' : 'off' });
+      result.push(stabilizationConstraint(stabilizationOn));
     }
     return result;
-  }, [format, stabilizationSupported, settings.stabilizationEnabled]);
+  }, [format, stabilizationSupported, stabilizationOn]);
 
   // Any reconfiguration of the session drops an existing lock (design.md).
   const lensType = lens?.type;
@@ -139,7 +191,20 @@ export function useVideoCamera(settings: VideoSettings): VideoCameraApi {
     [formatRejected],
   );
 
-  const lensDevice = lens?.device;
+  // Safety net for AC-22: the probe and the session should agree — if the
+  // session still lands on another frame rate, say so instead of recording
+  // silently at it.
+  const chosenFps = format?.fps;
+  const onSessionConfigSelected = useCallback(
+    (config: CameraSessionConfig): void => {
+      const selected = config.selectedFPS;
+      if (chosenFps !== undefined && selected !== undefined && selected !== chosenFps) {
+        setNotice(`${chosenFps} fps nicht verfügbar — es wird mit ${selected} fps aufgenommen`);
+      }
+    },
+    [chosenFps],
+  );
+
   const lockAt = useCallback(
     (point: FocusLock): void => {
       const camera = cameraRef.current;
@@ -166,15 +231,63 @@ export function useVideoCamera(settings: VideoSettings): VideoCameraApi {
     cameraRef.current?.resetFocus().catch(() => {});
   }, []);
 
+  const {
+    hasPermission: cameraGranted,
+    canRequestPermission: cameraCanRequest,
+    requestPermission: requestCamera,
+  } = cameraPermission;
+  const {
+    hasPermission: microphoneGranted,
+    canRequestPermission: microphoneCanRequest,
+    requestPermission: requestMicrophone,
+  } = microphonePermission;
+  const soundEnabled = settings.soundEnabled;
+
   const recorder = useMemo(
     (): VideoRecorderPort => ({
+      // AC-20 / BUG-42: checked on every trigger; asks Android where it still may.
+      prepare() {
+        if (!cameraGranted) {
+          if (cameraCanRequest) {
+            requestCamera().catch(() => {});
+            return 'Für die Videoaufnahme wird Kamera-Zugriff benötigt — bitte erlauben und erneut starten.';
+          }
+          return 'Kamera-Zugriff wurde abgelehnt — in den Einstellungen erlauben, dann erneut starten.';
+        }
+        if (soundEnabled && !microphoneGranted) {
+          if (microphoneCanRequest) {
+            requestMicrophone().catch(() => {});
+            return 'Für Ton wird Mikrofon-Zugriff benötigt — bitte erlauben oder Ton ausschalten, dann erneut starten.';
+          }
+          return 'Mikrofon-Zugriff wurde abgelehnt — in den Einstellungen erlauben oder Ton ausschalten.';
+        }
+        if (!lensDevice) {
+          return 'Keine Rückkamera verfügbar';
+        }
+        return null;
+      },
       async startRecording({ onFinished, onError }) {
         const nativeRecorder = await videoOutput.createRecorder({});
-        await nativeRecorder.startRecording(filePath => onFinished(filePath), onError);
+        // BUG-44: after an error the recorder never calls onFinished — hand
+        // over the file it has written so far.
+        await nativeRecorder.startRecording(
+          filePath => onFinished(filePath),
+          error => onError(error, nativeRecorder.filePath ?? null),
+        );
         return { stop: () => nativeRecorder.stopRecording() };
       },
     }),
-    [videoOutput],
+    [
+      videoOutput,
+      cameraGranted,
+      cameraCanRequest,
+      requestCamera,
+      soundEnabled,
+      microphoneGranted,
+      microphoneCanRequest,
+      requestMicrophone,
+      lensDevice,
+    ],
   );
 
   const openSettings = useCallback((): void => {
@@ -203,6 +316,7 @@ export function useVideoCamera(settings: VideoSettings): VideoCameraApi {
     constraints,
     cameraRef,
     onCameraError,
+    onSessionConfigSelected,
     notice,
     focusLock,
     lockAt,

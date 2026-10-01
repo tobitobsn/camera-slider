@@ -137,7 +137,7 @@ Deckt AC-13 bis AC-29 und EC-5 bis EC-10 ab. Grundlage: die mit PROJ-5 bereits e
 | Ton an/aus | Option „Audio aktivieren" am Video-Output, Mikrofon-Berechtigungs-Hook der Bibliothek | ✅ |
 | Auflösung | Ziel-Auflösung am Video-Output; die vom Objektiv unterstützten Video-Auflösungen sind abfragbar | ✅ |
 | Bildrate | Bildraten-Vorgabe an die Kamera-Sitzung; pro Objektiv abfragbar, welche fps unterstützt werden | ✅ |
-| Stabilisierung | Stabilisierungs-Vorgabe an die Sitzung (aus / automatisch); pro Objektiv abfragbar, ob unterstützt | ✅ |
+| Stabilisierung | Stabilisierungs-Vorgabe an die Sitzung (aus / „standard"); pro Objektiv abfragbar, ob unterstützt — nur über „standard", „automatisch" meldet Android immer als unterstützt und schaltet nichts ein (QA BUG-46, 2026-10-02) | ✅ |
 | Objektiv | Liste aller Kameras mit Typ (Weitwinkel / Ultraweitwinkel / Tele) und Position (vorn/hinten) | ✅ sofern der Hersteller die Objektive einzeln freigibt |
 | Fokus + Belichtung + **Weißabgleich** per Tippen sperren | „Fokussieren auf Punkt" mit Modus „gesperrt" und ohne automatisches Zurücksetzen, für alle drei Messarten (AF/AE/AWB), die das Objektiv unterstützt; „Fokus zurücksetzen" hebt die Sperre auf | ✅ — beantwortet die Open Question zum Weißabgleich: er wird mitgesperrt, wo das Objektiv AWB-Messung unterstützt |
 | Manuelle ISO/Verschlusszeit, direkte Sperr-Befehle | in der Bibliothek ausdrücklich „nur iOS" | ❌ — passt zum Out of Scope der Spec |
@@ -197,8 +197,10 @@ Ein einziger Datensatz im AsyncStorage unter dem Schlüssel `camera-slider.video
 ### Angebotene Formate und Objektive
 
 - **Objektive (AC-23):** alle Rückkameras, deren Typ Weitwinkel, Ultraweitwinkel oder Tele ist; pro Typ die erste. Gibt der Hersteller nur eine (logische) Rückkamera frei, gibt es genau ein Objektiv → keine Auswahl angezeigt.
-- **Formate (AC-22):** für das gewählte Objektiv jede Kombination aus den drei Standard-Auflösungen (nur solche, die das Objektiv für Video meldet) und den fünf Standard-Bildraten (nur solche, die das Objektiv meldet). Anzeige z. B. „4K · 25 fps", sortiert nach Auflösung, dann fps. Bewusst keine exotischen Seitenverhältnisse oder Zwischenwerte.
-- **Stabilisierung (AC-24):** Schalter nur sichtbar, wenn das gewählte Objektiv Video-Stabilisierung meldet. An = „automatisch", aus = „aus".
+- **Formate (AC-22):** Kandidaten sind für das gewählte Objektiv die Kombinationen aus den drei Standard-Auflösungen (nur solche, die das Objektiv für Video meldet) und den fünf Standard-Bildraten (nur solche, die das Objektiv meldet). Anzeige z. B. „4K · 25 fps", sortiert nach Auflösung, dann fps. Bewusst keine exotischen Seitenverhältnisse oder Zwischenwerte.
+- **Vorab-Abfrage (QA BUG-47, 2026-10-02):** Das Objektiv meldet Bildraten nur pro Objektiv, nicht pro Auflösung — 4K geht oft nur bis 30 fps, und die Kamera wählt dann still die nächstliegende Bildrate. Deshalb fragt die App bei jedem Objektiv- bzw. Stabilisierungswechsel für jeden Kandidaten bei der Kamera nach (VisionCamera `resolveConstraints` mit denselben Outputs — Vorschau + Video in der Ziel-Auflösung — und derselben Stabilisierung wie die echte Sitzung), welche Bildrate tatsächlich käme, und bietet nur die Kombinationen an, bei denen genau die gewählte herauskommt. Bis die Antwort da ist, ist die Format-Auswahl kurz ausgeblendet; die Sitzung nutzt solange das gemerkte Format aus den Kandidaten.
+- **Sicherheitsnetz:** Landet die echte Sitzung trotzdem auf einer anderen Bildrate (`onSessionConfigSelected`), zeigt die App „60 fps nicht verfügbar — es wird mit 30 fps aufgenommen", statt still abzuweichen.
+- **Stabilisierung (AC-24):** Schalter nur sichtbar, wenn das gewählte Objektiv Video-Stabilisierung meldet (Modus „standard"). An = „standard" (schaltet auf Android die Stabilisierung wirklich ein), aus = „aus".
 - **Lehnt die Kamera eine Kombination trotzdem ab** (Fehler beim Konfigurieren der Sitzung) → zurück auf den Standard aus der Liste oben, Hinweis „Format nicht verfügbar — auf 1080p · 30 fps zurückgesetzt".
 - Jede Änderung an Objektiv, Format oder Stabilisierung konfiguriert die Sitzung neu → eine bestehende Fokus-/Belichtungssperre ist danach aufgehoben und wird als „Auto" angezeigt.
 
@@ -215,9 +217,11 @@ Zustände: **bereit** → **startet** → **Vorlauf** → **Fahrt** → **Nachla
 
 | Von | Ereignis | Nach | Was passiert |
 |---|---|---|---|
-| bereit | Fahrt-Button (Richtung, Dauer) | startet | Bildschirm-Sperre verhindern (`useKeepAwake`, AC-27); Berechtigungen prüfen (Kamera, bei Ton an auch Mikrofon) — fehlt eine → Hinweis, zurück zu bereit, keine Fahrt (AC-20) |
+| bereit | Fahrt-Button, aber Kamera- bzw. (bei Ton an) Mikrofon-Berechtigung fehlt oder keine Rückkamera bekannt | bereit | Hinweis; die Berechtigung wird angefragt, wo Android das noch erlaubt, sonst Verweis auf die Einstellungen; keine Aufnahme, keine Fahrt (AC-20) |
+| bereit | Fahrt-Button (Richtung, Dauer), alles erteilt | startet | Bildschirm-Sperre verhindern (`useKeepAwake`, AC-27); 5-s-Start-Wächter |
 | startet | Recorder angelegt und Aufnahme gestartet | Vorlauf | Aufnahmedauer-Uhr läuft (Anzeige AC-16), 2-s-Timer |
 | startet | Aufnahme kann nicht starten | bereit | Fehlermeldung, keine Fahrt (AC-18) |
+| startet (auch nach Stopp) | Start-Wächter läuft ab, ohne dass die Kamera geantwortet hat | bereit | Meldung „Aufnahme konnte nicht starten — die Kamera reagiert nicht"; Bildschirm-Sperre freigeben (AC-27). Kommt der Start später doch noch, wird die Aufnahme sofort gestoppt und ihre Datei gelöscht |
 | Vorlauf | 2 s abgelaufen | Fahrt | AUTO_DRIVE (bestehender Opcode, Richtung + Dauer) senden; 3-s-Wächter „Fahrt hat begonnen" starten |
 | Fahrt | Firmware meldet `driving` | Fahrt | Wächter beendet |
 | Fahrt | Wächter läuft ab, ohne dass `driving` kam (Firmware hat abgelehnt) | speichert | Aufnahme stoppen, Meldung „Fahrt konnte nicht starten" |
@@ -225,14 +229,16 @@ Zustände: **bereit** → **startet** → **Vorlauf** → **Fahrt** → **Nachla
 | Fahrt | `driving` wird falsch, Schlitten **nicht** am Ziel (Schutz-Stopp, PROJ-6) | speichert | Aufnahme sofort stoppen (EC-6) |
 | Nachlauf | 2 s abgelaufen | speichert | Aufnahme stoppen (AC-14) |
 | startet/Vorlauf/Fahrt/Nachlauf | Stopp gedrückt | speichert | in „Fahrt" STOP senden; Timer abbrechen; Aufnahme sofort stoppen (AC-17) |
-| startet/Vorlauf/Fahrt/Nachlauf | Aufnahme-Fehler, **oder** App geht in den Hintergrund | speichert | in „Fahrt" STOP senden; Vorlauf-Timer abbrechen (Schlitten fährt nie los, EC-7); Fehlermeldung mit Grund (AC-18) |
+| Vorlauf/Fahrt/Nachlauf/speichert | Aufnahme-Fehler des Recorders | speichert → bereit | in „Fahrt" STOP senden; alle Timer abbrechen; Fehlermeldung mit Grund; die bis dahin geschriebene Datei (Pfad vom Recorder) sofort in die Galerie — der Recorder meldet sie nach einem Fehler nie als „fertig" (AC-18, QA BUG-44) |
+| Vorlauf/Fahrt/Nachlauf | Recorder meldet „fertig", ohne dass die App gestoppt hat (z. B. Kamera entzogen, Sitzung neu konfiguriert) | speichert → bereit | wie ein Aufnahme-Fehler: in „Fahrt" STOP senden, Meldung „Aufnahme wurde unerwartet beendet", Datei speichern; im Vorlauf fährt der Schlitten nie los (AC-18, EC-7, QA BUG-45) |
+| startet/Vorlauf/Fahrt/Nachlauf | App geht in den Hintergrund | speichert | in „Fahrt" STOP senden; Vorlauf-Timer abbrechen (Schlitten fährt nie los, EC-7); Fehlermeldung mit Grund (AC-18). Im Zustand „speichert" wird nichts mehr unterbrochen |
 | startet/Vorlauf/Fahrt/Nachlauf | BLE-Verbindung weg | speichert | Aufnahme stoppen (Firmware stoppt den Motor selbst, AC-19/AC-10) |
-| speichert | Aufnahme-Datei fertig | bereit | Video in die Galerie (Typ „Video"); Erfolg → „Video gespeichert" (AC-15); Fehler → Meldung „Video konnte nicht gespeichert werden"; Bildschirm-Sperre freigeben |
+| speichert | Aufnahme-Datei fertig | bereit | Video in die Galerie (Typ „Video"); Erfolg → „Video gespeichert" (AC-15); Fehler → Meldung „Video konnte nicht gespeichert werden" (eine frühere Fehlermeldung des Laufs bleibt stehen); danach die Kopie im App-Cache löschen; Bildschirm-Sperre freigeben |
 
 - **Doppelte Auslösung (EC-5):** Fahrt-Buttons reagieren nur im Zustand „bereit"; der Hook ignoriert einen zweiten Start in jedem anderen Zustand. Zusätzlich lehnt die Firmware einen zweiten AUTO_DRIVE ohnehin ab (EC-2).
 - **Hintergrund:** Der Wechsel in den Hintergrund wird über den App-Zustand von React Native erkannt und **selbst** als Fehler behandelt, statt sich darauf zu verlassen, dass die Kamera-Bibliothek einen Aufnahmefehler meldet — so ist EC-7 deterministisch.
-- **Teil-Take bei Fehler:** Liefert der Recorder trotz Fehler eine fertige Datei, wird sie gespeichert; sonst nur die Fehlermeldung („soweit möglich", AC-18).
-- **Video-Datei:** wird in den temporären Ordner der App aufgenommen und von dort in die Galerie kopiert; der Temp-Ordner gehört dem System.
+- **Teil-Take bei Fehler:** Der Recorder gibt mit dem Fehler den Pfad der bis dahin geschriebenen Datei mit; die App versucht sie zu speichern. Scheitert das (Datei unbrauchbar), bleibt es bei der Fehlermeldung („soweit möglich", AC-18).
+- **Video-Datei:** wird in den Cache-Ordner der App aufgenommen und von dort in die Galerie kopiert. Danach löscht die App die Cache-Kopie über ein eigenes kleines Android-Modul (`CacheFiles`, löscht nur innerhalb des App-Caches) — auch nach einem gescheiterten Speichern, weil die Kopie für den Nutzer ohnehin unerreichbar ist. Beim App-Start werden außerdem übrig gebliebene Aufnahmen (`VisionCamera_*.mp4`, z. B. nach einem Absturz) gelöscht (QA BUG-48).
 - **Ohne Video** (Schalter aus) bleibt der bisherige Weg der Fahrt-Buttons unverändert — AC-3/AC-4 und EC-4 (Fahrt läuft im Hintergrund weiter) gelten dort weiter.
 
 ### Sperren der Bedienung
@@ -250,7 +256,7 @@ Zustände: **bereit** → **startet** → **Vorlauf** → **Fahrt** → **Nachla
 
 ### Abhängigkeiten (Erweiterung)
 
-- Keine neue Bibliothek. Genutzt werden: `react-native-vision-camera` (Video-Output, Recorder, Geräteliste, Mikrofon-Berechtigung, Punkt-Messung), `@react-native-camera-roll/camera-roll` (Speichern als Video), `@sayem314/react-native-keep-awake` (über den bestehenden `useKeepAwake`), `@react-native-async-storage/async-storage` (Einstellungen).
+- Keine neue Bibliothek. Neu ist ein eigenes kleines Android-Modul im App-Projekt (`android/app/src/main/java/com/camerasliderapp/CacheFilesModule.kt` + `CacheFilesPackage.kt`, registriert in `MainApplication.kt`, erreicht über den TurboModule-Interop-Layer) zum Löschen der Cache-Kopien (QA BUG-48, Entscheidung des Nutzers 2026-10-02). Genutzt werden: `react-native-vision-camera` (Video-Output, Recorder, Geräteliste, Mikrofon-Berechtigung, Punkt-Messung), `@react-native-camera-roll/camera-roll` (Speichern als Video), `@sayem314/react-native-keep-awake` (über den bestehenden `useKeepAwake`), `@react-native-async-storage/async-storage` (Einstellungen).
 - Firmware: unverändert.
 
 ### Technische Entscheidungen (Erweiterung 2026-10-01)
@@ -266,7 +272,11 @@ Zustände: **bereit** → **startet** → **Vorlauf** → **Fahrt** → **Nachla
 | Sperre per Punkt-Messung im Modus „gesperrt" für AF/AE/AWB, statt der direkten Sperr-Befehle | Die direkten Sperr-Befehle sind in VisionCamera 5.2.3 nur iOS; die Punkt-Messung mit Sperre ist auf Android implementiert (CameraX) und sperrt den Weißabgleich mit | Natives Camera2-Modul | Gesperrt wird der Wert am Tipp-Punkt — kein „aktuellen Wert festhalten" ohne Tippen | 2026-10-01 |
 | Feste Format-Liste (3 Auflösungen × 5 Bildraten), gefiltert nach dem, was das Objektiv meldet | Verständliche Auswahl statt Dutzender Roh-Formate; deckt die üblichen Video-Normen (24/25/30/50/60) ab | Alle Roh-Formate des Geräts anzeigen | Exotische Formate (z. B. 120 fps Zeitlupe) bewusst nicht angeboten | 2026-10-01 |
 | Objektiv als Typ speichern, nicht als Geräte-ID | Überlebt einen Handywechsel und Neuinstallationen der Kamera-Treiber; fällt sauber auf Weitwinkel zurück | Geräte-ID speichern | Haben zwei Objektive denselben Typ, wird nur das erste angeboten | 2026-10-01 |
-| Videos zuerst in den Temp-Ordner, dann in die Galerie kopieren | Gleicher Weg wie die Zeitraffer-Fotos (PROJ-5), eine bewährte Speicherroute | Direkt in einen Galerie-Pfad aufnehmen | Kurzzeitig doppelter Speicherplatz bis zum Kopieren | 2026-10-01 |
+| Videos zuerst in den Temp-Ordner, dann in die Galerie kopieren | Gleicher Weg wie die Zeitraffer-Fotos (PROJ-5), eine bewährte Speicherroute | Direkt in einen Galerie-Pfad aufnehmen | Kurzzeitig doppelter Speicherplatz bis zum Kopieren — **nur mit Aufräumen** (siehe nächste Zeile) | 2026-10-01 |
+| Cache-Kopie nach dem Kopieren per eigenem Android-Modul löschen, plus Aufräumen beim App-Start (QA BUG-48) | Weder VisionCamera noch CameraRoll löschen die Quelle; ohne Löschen bliebe jeder Take dauerhaft doppelt liegen (bei 4K Hunderte MB) | Neue Datei-Bibliothek (z. B. react-native-blob-util); fester Dateiname, der jede Aufnahme überschreibt | Eigener nativer Code (rund 60 Zeilen Kotlin) und ein neuer Release-Build; das Modul löscht nur innerhalb des App-Caches | 2026-10-02 |
+| Formate vorab bei der Kamera abfragen (`resolveConstraints`) statt nur nach Objektiv-Meldung filtern (QA BUG-47) | AC-22 verlangt, nur wirklich verfügbare Kombinationen anzubieten; die Kamera wählt sonst still eine andere Bildrate | Erst nach der Wahl prüfen und die Kombination dann ausblenden (vom Nutzer verworfen) | Bis zu 15 Abfragen pro Objektiv-/Stabilisierungswechsel; die Format-Auswahl erscheint einen Moment später | 2026-10-02 |
+| Stabilisierung über den Modus „standard" statt „automatisch" (QA BUG-46) | „Automatisch" meldet Android immer als unterstützt und lässt die Stabilisierung unbestimmt; „standard" entspricht der echten Fähigkeit und schaltet sie ein | — | — | 2026-10-02 |
+| Berechtigungsprüfung über die Aufnahme-Schnittstelle (`prepare()`), aufgerufen von `useVideoDrive` vor jedem Start (QA BUG-42) | Die Zustandsmaschine bleibt der eine Ort, der über den Start entscheidet; die Kamera-Seite kennt die Berechtigungen | Prüfung in `AutoDriveControls` vor dem Aufruf | Die Fahrt-Buttons bleiben bei fehlender Berechtigung bedienbar — der Tipp löst Hinweis und Anfrage aus, wie AC-20 es verlangt | 2026-10-02 |
 | `VideoPanel` in eigener Datei | `AutoDriveControls.tsx` hat bereits ~960 Zeilen; die Video-Teile sind ein abgegrenzter Block | Alles in `AutoDriveControls.tsx` | Eine Datei mehr | 2026-10-01 |
 
 ### Umsetzungsnotizen (`/build`, 2026-10-01)
@@ -276,6 +286,13 @@ Zustände: **bereit** → **startet** → **Vorlauf** → **Fahrt** → **Nachla
 - Ein fehlgeschlagenes Schreiben der Video-Einstellungen behält die Änderung für die laufende Sitzung (keine Fehlermeldung) — die Einstellungen sind Komfort, keine Nutzerdaten.
 - `TimelapseControls` bekommt die Prop „Kamera wird für Video genutzt" als optionale Prop mit Standard „aus"; `RootScreen` übergibt sie immer.
 - Kein Firmware-Code geändert.
+
+### Umsetzungsnotizen (`/build`, QA-Fixes 2026-10-02)
+
+- QA-Lauf vom 2026-10-02 (`qa-report.md`): gefixt sind BUG-42 bis BUG-48 (2 High, 5 Medium), dazu BUG-53 (Low, eine Zeile in derselben Funktion). Die übrigen Low-Bugs (BUG-49 bis BUG-52, BUG-54 bis BUG-57) sind offen.
+- `VideoRecorderPort` hat zwei Änderungen: neu `prepare()` (BUG-42), und `onError` bekommt zusätzlich den Dateipfad (BUG-44).
+- Der Test-Recorder in `useVideoDrive.test.ts` verhält sich jetzt wie VisionCamera: kein `onFinished` nach einem Fehler, `stop()` danach schlägt fehl. Der alte Fake hatte BUG-44 verdeckt.
+- Das Aufräumen der Zeitraffer-Fotos (PROJ-5, `VisionCamera_*.jpg`) ist bewusst **nicht** Teil dieses Fixes. PROJ-5 ist ausgeliefert, und das wäre eine eigene Änderung (`/refine PROJ-5`). Das Modul könnte es leisten.
 
 ## Open Questions
 

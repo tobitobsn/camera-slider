@@ -6,6 +6,7 @@ import {
   effectiveFormat,
   effectiveLens,
   formatLabel,
+  probeFormats,
   supportsStabilization,
   type VideoFormat,
 } from './videoFormats';
@@ -33,7 +34,9 @@ function fakeDevice({
     position,
     getSupportedResolutions: (streamType: string) => (streamType === 'video' ? resolutions : []),
     supportsFPS: (value: number) => fps.includes(value),
-    supportsVideoStabilizationMode: (mode: string) => stabilization && mode === 'auto',
+    // Like VisionCamera on Android: 'auto' is always "supported", only
+    // 'standard' tells whether the lens can stabilize.
+    supportsVideoStabilizationMode: (mode: string) => mode === 'auto' || (mode === 'standard' && stabilization),
   } as unknown as CameraDevice;
 }
 
@@ -139,8 +142,35 @@ describe('effectiveFormat (AC-22, AC-26)', () => {
   });
 });
 
+describe('probeFormats (AC-22, BUG-47)', () => {
+  const candidates: VideoFormat[] = [
+    { resolution: '1080p', fps: 30 },
+    { resolution: '1080p', fps: 60 },
+    { resolution: '2160p', fps: 30 },
+    { resolution: '2160p', fps: 60 },
+  ];
+
+  it('keeps only the combinations recorded at exactly their frame rate, in order', async () => {
+    const delivered = (format: VideoFormat) =>
+      Promise.resolve(format.resolution === '2160p' ? Math.min(format.fps, 30) : format.fps);
+
+    expect(await probeFormats(candidates, delivered)).toEqual([
+      { resolution: '1080p', fps: 30 },
+      { resolution: '1080p', fps: 60 },
+      { resolution: '2160p', fps: 30 },
+    ]);
+  });
+
+  it('drops a combination whose probe fails or has no frame rate', async () => {
+    const resolve = (format: VideoFormat) =>
+      format.fps === 60 ? Promise.reject(new Error('unsupported')) : Promise.resolve(format.resolution === '2160p' ? undefined : 30);
+
+    expect(await probeFormats(candidates, resolve)).toEqual([{ resolution: '1080p', fps: 30 }]);
+  });
+});
+
 describe('supportsStabilization (AC-24)', () => {
-  it('reflects whether the lens supports automatic video stabilization', () => {
+  it('reflects whether the lens really supports video stabilization (BUG-46)', () => {
     expect(supportsStabilization(fakeDevice({ stabilization: true }))).toBe(true);
     expect(supportsStabilization(fakeDevice({ stabilization: false }))).toBe(false);
   });
