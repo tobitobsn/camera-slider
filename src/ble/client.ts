@@ -85,7 +85,7 @@ export type SliderStatus = {
   /**
    * PROJ-6: pack voltage in millivolts, the firmware's standstill display
    * value. Null when the payload has no battery bytes (older firmware), the
-   * firmware has no value yet (0) or the value is implausible (> 20000).
+   * firmware has no value yet (0) or the value is implausible (> MAX_PLAUSIBLE_BATTERY_MILLIVOLTS, 13 500).
    * Below 5000 mV means "no battery detected" — see battery.ts.
    */
   batteryMillivolts: number | null;
