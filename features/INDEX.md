@@ -30,7 +30,7 @@
 | PROJ-3 | Start-/Endpunkt & Auto-Fahrt | Start- und Endpunkt setzen und automatische Fahrt dazwischen mit einstellbarer Geschwindigkeit/Dauer auslösen | Deployed | [features/PROJ-3-start-endpunkt-auto-fahrt/](PROJ-3-start-endpunkt-auto-fahrt/) | 2026-09-22 |
 | PROJ-4 | Presets verwalten | Mehrere benannte Fahrt-Profile lokal speichern, laden und löschen | Deployed | [features/PROJ-4-presets-verwalten/](PROJ-4-presets-verwalten/) | 2026-09-22 |
 | PROJ-5 | Zeitraffer-Modus | Schrittweise Fahrt mit automatischer Kameraauslösung für Zeitraffer-Aufnahmen | Deployed | [features/PROJ-5-zeitraffer-modus/](PROJ-5-zeitraffer-modus/) | 2026-09-22 |
-| PROJ-6 | Akkuanzeige | Ladezustand des 3S-Akkus (3× 18650) in der App anzeigen und bei niedrigem Stand warnen | Approved | [features/PROJ-6-akkuanzeige/](PROJ-6-akkuanzeige/) | 2026-09-30 |
+| PROJ-6 | Akkuanzeige | Ladezustand des 3S-Akkus (3× 18650) in der App anzeigen und bei niedrigem Stand warnen | Deployed | [features/PROJ-6-akkuanzeige/](PROJ-6-akkuanzeige/) | 2026-09-30 |
 
 **Build order:** _P0 (MVP): PROJ-1 → PROJ-2 → PROJ-3 · P1: PROJ-4 (needs PROJ-3), PROJ-5 (needs PROJ-3), PROJ-6 (needs PROJ-1 + Spannungsteiler-Hardware)_
 
@@ -44,6 +44,7 @@
 - _v1.1.0-PROJ-3 · 2026-09-24 · lokaler Release-Build (APK), kein Hosting/Play-Store — `android/app/build/outputs/apk/release/app-release.apk` · PROJ-3_
 - _v1.2.0-PROJ-4 · 2026-09-25 · lokaler Release-Build (APK), kein Hosting/Play-Store — `android/app/build/outputs/apk/release/app-release.apk` · PROJ-4_
 - _v1.3.0 · 2026-09-30 · lokaler Release-Build (APK) + Firmware `a763cb3` (gemeinsam ausgeliefert, App ohne Preset-Migration passt nicht zur Firmware mit DIR-Umkehr) — `android/app/build/outputs/apk/release/app-release.apk` · PROJ-2, PROJ-3, PROJ-5_
+- _v1.4.0-PROJ-6 · 2026-10-01 · lokaler Release-Build (APK) + Firmware `9629317` (gemeinsam ausgeliefert, die App erwartet den 10-Byte-Status der Firmware) — `android/app/build/outputs/apk/release/app-release.apk` · PROJ-6_
 
 _(Die vorherige Zeile hier — `v1.0.0 · 2026-01-31 · https://app.example.com` — war ein nie bereinigter Kit-Platzhalter aus dem Scaffolding, kein echter Release; siehe BUG-11 in PROJ-1s `qa-report.md`. Ersetzt durch die echte erste Deployment-Zeile oben.)_
 
