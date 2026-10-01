@@ -64,7 +64,7 @@
 
 ## Level 10 — Videoaufnahme: Einbindung
 
-- [ ] T18  App: `RootScreen` — `useVideoSettings`, `useVideoCamera`, `useVideoDrive` je einmal aufrufen und verdrahten (Aufnahme-Schnittstelle von T13 an T14); Kamera-Besitz aus „Video aufnehmen" ableiten; `JogControls` zusätzlich gesperrt, solange die Video-Fahrt nicht „bereit" ist; `TimelapseControls` bekommt „Kamera wird für Video genutzt"  · files: src/screens/RootScreen.tsx  · → AC-28, EC-9, EC-10
+- [x] T18  App: `RootScreen` — `useVideoSettings`, `useVideoCamera`, `useVideoDrive` je einmal aufrufen und verdrahten (Aufnahme-Schnittstelle von T13 an T14); Kamera-Besitz aus „Video aufnehmen" ableiten; `JogControls` zusätzlich gesperrt, solange die Video-Fahrt nicht „bereit" ist; `TimelapseControls` bekommt „Kamera wird für Video genutzt"  · files: src/screens/RootScreen.tsx  · → AC-28, EC-9, EC-10
 
 ## Parallelisierung
 

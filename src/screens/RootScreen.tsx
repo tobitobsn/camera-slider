@@ -13,6 +13,9 @@ import { ReconnectingBanner } from '../components/ReconnectingBanner';
 import { ScanningIndicator } from '../components/ScanningIndicator';
 import { TimelapseControls } from '../components/TimelapseControls';
 import { useCameraCapture } from '../components/useCameraCapture';
+import { useVideoCamera } from '../components/useVideoCamera';
+import { useVideoDrive } from '../components/useVideoDrive';
+import { useVideoSettings } from '../components/useVideoSettings';
 import { useConnection } from '../connection/ConnectionProvider';
 import { useSliderStatus } from '../components/useSliderStatus';
 import type { SliderStatus } from '../ble/client';
@@ -20,6 +23,13 @@ import { useTimelapseSequence, type TimelapseSequenceApi } from '../components/u
 import { colors, spacing, typography } from '../theme/colors';
 
 type CameraCapture = ReturnType<typeof useCameraCapture>;
+
+type Video = {
+  settings: ReturnType<typeof useVideoSettings>['settings'];
+  onChange: ReturnType<typeof useVideoSettings>['update'];
+  camera: ReturnType<typeof useVideoCamera>;
+  drive: ReturnType<typeof useVideoDrive>;
+};
 
 /**
  * The app's single screen (PROJ-1 owns the shell — see docs/app-shell.md).
@@ -54,6 +64,19 @@ export function RootScreen() {
   // is threaded down as props; JogControls/AutoDriveControls also need
   // `isRunning` to lock themselves while a sequence is running.
   const timelapse = useTimelapseSequence(device, cameraCapture.capturePhoto);
+  // PROJ-3 video: each called once here, for the same "one stateful hook,
+  // passed down" reason as the two above — a second useVideoCamera() would
+  // create a video output that is never attached to the rendered <Camera>,
+  // and useVideoDrive's busy state has to lock jog and timelapse too.
+  const videoSettings = useVideoSettings();
+  const videoCamera = useVideoCamera(videoSettings.settings);
+  const videoDrive = useVideoDrive(device, status, videoCamera.recorder);
+  const video: Video = {
+    settings: videoSettings.settings,
+    onChange: videoSettings.update,
+    camera: videoCamera,
+    drive: videoDrive,
+  };
   // qa-report.md BUG-17 (PROJ-2): true while a jog button is held, reported
   // up by JogControls via onJoggingChange — used below to disable the
   // ScrollView's own touch responder for the duration, see its own comment.
@@ -63,7 +86,7 @@ export function RootScreen() {
     <View style={styles.container}>
       <ConnectionHeader />
       <View style={styles.content}>
-        {renderContent(state.status, device, status, timelapse, cameraCapture, jogging, setJogging)}
+        {renderContent(state.status, device, status, timelapse, cameraCapture, video, jogging, setJogging)}
       </View>
     </View>
   );
@@ -75,6 +98,7 @@ function renderContent(
   sliderStatus: SliderStatus,
   timelapse: TimelapseSequenceApi,
   cameraCapture: CameraCapture,
+  video: Video,
   jogging: boolean,
   setJogging: (jogging: boolean) => void,
 ) {
@@ -128,7 +152,14 @@ function renderContent(
             />
           ) : null}
           <JogControls
-            disabled={sliderStatus.driving || timelapse.isRunning || sliderStatus.batteryLocked}
+            // PROJ-3 AC-28: also during a take with video — its pre-/post-roll
+            // is not reported as `driving` by the firmware.
+            disabled={
+              sliderStatus.driving ||
+              timelapse.isRunning ||
+              sliderStatus.batteryLocked ||
+              video.drive.busy
+            }
             onJoggingChange={setJogging}
           />
           {/* qa-report.md BUG-4: the battery lock is passed separately so it
@@ -137,6 +168,7 @@ function renderContent(
           <AutoDriveControls
             disabled={timelapse.isRunning}
             batteryLocked={sliderStatus.batteryLocked}
+            video={video}
           />
           <TimelapseControls
             device={device}
@@ -151,6 +183,9 @@ function renderContent(
             requestPermission={cameraCapture.requestPermission}
             cameraDevice={cameraCapture.cameraDevice}
             photoOutput={cameraCapture.photoOutput}
+            // PROJ-3 EC-10: one camera owner — with "Video aufnehmen" on,
+            // the auto-drive section has it.
+            cameraInUseByVideo={video.settings.videoEnabled}
           />
         </ScrollView>
       );

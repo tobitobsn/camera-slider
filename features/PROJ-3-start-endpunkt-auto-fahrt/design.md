@@ -269,6 +269,14 @@ Zustände: **bereit** → **startet** → **Vorlauf** → **Fahrt** → **Nachla
 | Videos zuerst in den Temp-Ordner, dann in die Galerie kopieren | Gleicher Weg wie die Zeitraffer-Fotos (PROJ-5), eine bewährte Speicherroute | Direkt in einen Galerie-Pfad aufnehmen | Kurzzeitig doppelter Speicherplatz bis zum Kopieren | 2026-10-01 |
 | `VideoPanel` in eigener Datei | `AutoDriveControls.tsx` hat bereits ~960 Zeilen; die Video-Teile sind ein abgegrenzter Block | Alles in `AutoDriveControls.tsx` | Eine Datei mehr | 2026-10-01 |
 
+### Umsetzungsnotizen (`/build`, 2026-10-01)
+
+- `useVideoDrive` bekommt den Slider-Status als Parameter (aus `RootScreen`, wo `useSliderStatus` ohnehin läuft), statt selbst `useSliderStatus` aufzurufen — macht die Zustandsmaschine direkt testbar; Verhalten wie im Design.
+- Die Aufnahme-Schnittstelle (`VideoRecorderPort`) ist in `useVideoDrive.ts` definiert und wird von `useVideoCamera` erfüllt; zusätzlich zum 3-s-Wächter hat „speichert" eine 10-s-Obergrenze, falls der Recorder nach dem Stopp keine Datei liefert (dann Meldung „Video konnte nicht abgeschlossen werden").
+- Ein fehlgeschlagenes Schreiben der Video-Einstellungen behält die Änderung für die laufende Sitzung (keine Fehlermeldung) — die Einstellungen sind Komfort, keine Nutzerdaten.
+- `TimelapseControls` bekommt die Prop „Kamera wird für Video genutzt" als optionale Prop mit Standard „aus"; `RootScreen` übergibt sie immer.
+- Kein Firmware-Code geändert.
+
 ## Open Questions
 
 - [x] Lässt sich der Weißabgleich mitsperren? → Ja, über die Punkt-Messung im Modus „gesperrt" (AWB), wo das Objektiv AWB-Messung unterstützt (2026-10-01)
