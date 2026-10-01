@@ -344,4 +344,40 @@ Die Firmware übernimmt den Wert unter 5 V im Stillstand sofort (`battery.cpp:18
 - **Security:** keine Umgehung per BLE; Lücke per Verkabelung nur noch im Boot-Fenster (NEU-A)
 - **Regression:** keine
 
-**Production-Ready:** ausstehend — siehe Entscheidung unten.
+**Production-Ready:** siehe Abschluss unten.
+
+## Abschluss Nachtrag 3 — Fix NEU-A und NEU-C, Nutzertest, Entscheidung (2026-10-01)
+
+**Fix** `9629317` (Diff: `git diff 8e113ba..9629317 -- firmware/src`):
+- NEU-A: „Akku erkannt“ zählt jetzt 5 Messwerte ≥ 5000 mV seit dem Start, statt 1 s am Stück zu verlangen (`battery.cpp`).
+- NEU-C: EN wird HIGH getrieben, bevor der Hold freigegeben wird (`motor.cpp` `motorSetup`).
+
+Der Fix wurde in diesem Lauf nicht von einer eigenen Lane geprüft, sondern über die Simulation des Owners und einen Nutzertest am Gerät. Beides deckt genau den geänderten Code ab.
+
+- [x] Firmware-Build `[SUCCESS]`, geflasht 2026-10-01
+- [x] Simulation `scratchpad/sim9.js` (Nachbau `battery.cpp`):
+  - **Wackeln ab dem Einschalten** (9000/0 mV alle 200 ms, 500/500 ms, 800/200 ms): Sperre „gestört“ nach 6,0–6,6 s, Tiefschlaf nach weiteren 60 s
+  - **Bisherige Fälle** (konstant 9000 mV, Teiler ab, Wackeln nach erkanntem Akku, EC-1, EC-7, Einzelspike, voller Akku mit Wackeln, `millis()==0`): Ergebnisse unverändert
+  - **USB-Betrieb:** 4 Spikes oder ein Akku für nur 0,8 s führen zu keiner Sperre
+- [x] **AC-7 am Gerät** (Nutzer, Labornetzteil 9,0 V, Firmware `9629317`, 2026-10-01): Kontakt fest, nach dem Einschalten erscheint „Akku leer – bitte laden“ mit Countdown, danach schaltet der Slider ab. Rückmeldung: „ok“.
+- [x] **EC-9 und AC-13 am Gerät, Wackeln ab dem Einschalten** (Nutzer, gleiche Sitzung): „Akkumessung gestört“. Rückmeldung: „ok“.
+- **NEU-A: geschlossen. NEU-C: geschlossen** (Code; das Aufwachen aus dem Tiefschlaf kommt ohne Weckquelle nicht vor).
+- **Bekannte Grenze** (`design.md`): Fünf verstreute Störspitzen an einem offenen Messpin würden im USB-Betrieb sperren (Simulation „5 Spikes verteilt“ → Sperre nach 13 s). Mit dem verbauten 22-kΩ-Pull-down ist das nicht realistisch. Gewertet als Grenze, nicht als Bug.
+- **Offen:** NEU-B (Low). Bei einer Messstörung zeigt der Header „🔋 –“, wörtlich gegen EC-4. Inhaltlich gilt AC-13.
+
+**Weiterhin nicht verifiziert:**
+- EC-8 am Gerät (Verbinden während der 60-s-Frist)
+- Jog nach Tiefschlaf und Reset
+- Ruhestrom im Tiefschlaf
+- Optik von Banner und Header (kein Viewport)
+- Firmware-Tests (kein Testkommando)
+
+**Production-Ready: JA.**
+- Kein Critical, kein High offen; offen ist nur NEU-B (Low).
+- Die Laufzeit-Kriterien des Schutzes wurden vom Nutzer am Gerät ausgeführt:
+  - AC-7, AC-12, AC-13 und EC-9 auf der aktuellen Firmware
+  - Anzeige-ACs am 2026-09-30
+  - T19
+- Die oben genannten Punkte bleiben ungeprüft.
+
+Status: **Approved**.
