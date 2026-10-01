@@ -36,6 +36,36 @@
 - [x] T8  App: Dauer-Feld füllt beim Verlassen die kürzestmögliche gültige Dauer ein, wenn sie leer, unlesbar oder zu kurz ist (aufgerundet auf Zehntelsekunden)  · files: src/components/AutoDriveControls.tsx, src/components/AutoDriveControls.test.ts  · Commits: 7ce09e9, 655f28d  · → AC-11
 - [x] T9  App: sichtbarer Hinweis „Zu kurz für diese Strecke — Minimum N s" mit Button „Minimum übernehmen", wenn die Dauer zu kurz ist (getippt, aus Preset oder durch Distanzänderung); keine automatische Korrektur außerhalb von AC-11  · files: src/components/AutoDriveControls.tsx, src/components/AutoDriveControls.render.test.ts  · Commits: df41c8c (ersetzt a6b837d, fd34882, b5c92da, aa1ce58)  · → AC-12
 
+## Level 6 — Videoaufnahme: Grundbausteine (Erweiterung 2026-10-01)
+
+<!-- Drei unabhängige Bausteine ohne gemeinsame Dateien → alle [P]. -->
+
+- [ ] T10 [P]  App: `useVideoSettings` — ein gemerkter Datensatz im AsyncStorage unter `camera-slider.video-settings` (Schema-Version 1; Video aufnehmen Nein, Ton Ja, Auflösung `1080p`, Bildrate 30, Objektiv `wide`, Stabilisierung Nein); fehlender/unlesbarer Datensatz oder unbekannter Feldwert → Standard nur für dieses Feld; Schreiben des ganzen Datensatzes bei jeder Nutzeränderung + Unit-Tests  · files: src/components/useVideoSettings.ts, src/components/useVideoSettings.test.ts  · → AC-13, AC-21, AC-24, AC-26
+- [ ] T11 [P]  App: `videoFormats` — reine Funktionen: Objektive aus der Geräteliste (Rückkameras vom Typ Weitwinkel/Ultraweitwinkel/Tele, pro Typ das erste); angebotene Formate je Objektiv (3 Standard-Auflösungen × 24/25/30/50/60 fps, nur was das Objektiv meldet, sortiert); Stabilisierung unterstützt ja/nein; wirksamer Wert bei nicht verfügbarem gemerktem Objektiv/Format (`wide`, dann 1080p/30, sonst erste Kombination) ohne den gemerkten Wert zu überschreiben + Unit-Tests  · files: src/components/videoFormats.ts, src/components/videoFormats.test.ts  · → AC-22, AC-23, AC-24, AC-26
+- [ ] T12 [P]  Android: Berechtigung `RECORD_AUDIO` im Manifest (mit Kommentar wie bei CAMERA, BUG-3 aus PROJ-5)  · files: android/app/src/main/AndroidManifest.xml  · → AC-20, AC-21
+
+## Level 7 — Videoaufnahme: Kamera und Ablauf
+
+<!-- T13 und T14 haben disjunkte Dateien → beide [P]. T14 definiert in seiner eigenen Datei eine schmale Aufnahme-Schnittstelle (Aufnahme starten → liefert „stoppen"; Rückmeldungen „fertig mit Dateipfad" und „Fehler"), die T13 erfüllt; die Passung prüft T18. -->
+
+- [ ] T13 [P]  App: `useVideoCamera` — Kamera- und Mikrofon-Berechtigung (Mikrofon nur bei Ton an, inkl. „dauerhaft abgelehnt"); gewähltes Objektiv und wirksames Format über `videoFormats` (T11); Video-Output mit Ziel-Auflösung und Ton an/aus; fps- und Stabilisierungs-Vorgabe an die Sitzung; Konfigurationsfehler → Rückfall auf Standard-Format + Hinweis; Sperre per Tippen (Punkt-Messung AF/AE/AWB im Modus „gesperrt", ohne Auto-Reset), „Auto" hebt sie auf, Sperre gilt nach Neukonfiguration als aufgehoben, Hinweis bei nicht unterstützter Messung; stellt die Aufnahme-Schnittstelle aus T14 bereit + Unit-Tests (Bibliothek gemockt)  · files: src/components/useVideoCamera.ts, src/components/useVideoCamera.test.ts  · → AC-20, AC-21, AC-22, AC-23, AC-24, AC-25, AC-26
+- [ ] T14 [P]  App: `useVideoDrive` — Zustandsmaschine bereit → startet → Vorlauf (2 s) → Fahrt → Nachlauf (2 s) → speichert → bereit gemäß Tabelle in `design.md`: AUTO_DRIVE über den bestehenden `sendAutoDriveCommand`, 3-s-Wächter auf `driving`, Ankunft über `driving` fällt + `atEnd`/`atStart`, Stopp in jeder Phase (STOP nur in „Fahrt"), Aufnahmefehler und Wechsel in den Hintergrund (App-Zustand) → STOP + Fehlermeldung, Vorlauf-Abbruch ohne Losfahren, Verbindungsabbruch → Aufnahme stoppen, Bildschirm-Sperre über `useKeepAwake`, Speichern in die Galerie als Video, Aufnahmedauer + Phase für die Anzeige, zweiter Start außerhalb von „bereit" ignoriert + Unit-Tests (Fake-Timer)  · files: src/components/useVideoDrive.ts, src/components/useVideoDrive.test.ts  · → AC-14, AC-15, AC-16, AC-17, AC-18, AC-19, AC-27, EC-5, EC-6, EC-7
+
+## Level 8 — Videoaufnahme: Bedienoberfläche
+
+<!-- Neue Datei VideoPanel und bestehende TimelapseControls — disjunkt → beide [P]. -->
+
+- [ ] T15 [P]  App: `VideoPanel` (neue Datei) — Berechtigungs-Hinweis (erlauben / Einstellungen öffnen / „oder Ton ausschalten"), Vorschau mit Tippen-zum-Sperren, Schloss-Markierung am Tipp-Punkt und Button „Auto", REC-Anzeige (mm:ss + Phase Vorlauf/Fahrt/Nachlauf), Einstellungen Ton · Format · Objektiv (nur bei >1) · Stabilisierung (nur wenn unterstützt); alles gesperrt, solange beschäftigt + Render-Tests  · files: src/components/VideoPanel.tsx, src/components/VideoPanel.render.test.ts  · → AC-13, AC-16, AC-20, AC-21, AC-22, AC-23, AC-24, AC-25, AC-28
+- [ ] T16 [P]  App: `TimelapseControls` — neue Prop „Kamera wird für Video genutzt": keine Kamera-Vorschau, Hinweis „Kamera wird für Video genutzt — „Video aufnehmen" ausschalten, um den Zeitraffer zu nutzen", Start gesperrt; ohne die Prop unverändert + Tests  · files: src/components/TimelapseControls.tsx, src/components/TimelapseControls.test.ts  · → EC-10
+
+## Level 9 — Videoaufnahme: Auto-Fahrt-Anbindung
+
+- [ ] T17  App: `AutoDriveControls` — Schalter „Video aufnehmen" (gesperrt während Zeitraffer und während einer Fahrt mit Video), Anzeige „Videolänge ca. X s" (Dauer + 4 s), `VideoPanel` nur bei Schalter an; Fahrt-Buttons und Stopp über `useVideoDrive`, wenn der Schalter an ist, sonst bisheriger Weg; Sperre aller Bedienelemente außer Stopp, solange beschäftigt; Meldung „Video gespeichert" bzw. Fehlermeldung; Preset laden lässt die Video-Einstellungen unverändert + Render-Tests  · files: src/components/AutoDriveControls.tsx, src/components/AutoDriveControls.render.test.ts  · → AC-13, AC-14, AC-15, AC-17, AC-28, AC-29, EC-8, EC-9
+
+## Level 10 — Videoaufnahme: Einbindung
+
+- [ ] T18  App: `RootScreen` — `useVideoSettings`, `useVideoCamera`, `useVideoDrive` je einmal aufrufen und verdrahten (Aufnahme-Schnittstelle von T13 an T14); Kamera-Besitz aus „Video aufnehmen" ableiten; `JogControls` zusätzlich gesperrt, solange die Video-Fahrt nicht „bereit" ist; `TimelapseControls` bekommt „Kamera wird für Video genutzt"  · files: src/screens/RootScreen.tsx  · → AC-28, EC-9, EC-10
+
 ## Parallelisierung
 
 - **Ebenen sind Barrieren.** Eine Ebene startet erst, wenn die vorherige vollständig integriert und gegen ihre AC-IDs verifiziert ist.
@@ -43,3 +73,4 @@
 - **T6 ist bewusst nicht `[P]`** und läuft in einer eigenen Ebene — es ist der einzige Task, der sowohl das App-BLE-Client-Modul (T2, Level 1) als auch den Status-Hook (T5, Level 2) braucht, kann also erst nach beiden vollständig integrierten Ebenen gebaut werden.
 - **AC-10** (Disconnect während Auto-Fahrt → Firmware stoppt) braucht keinen eigenen Verdrahtungs-Task — `onDisconnect` ruft in PROJ-2 bereits `motorStop()` auf, T1s Erweiterung von `motorStop()` (Reset von `autoDriving`) deckt den Rest ab.
 - Während `/build` läuft jeder `[P]`-Task einer aktiven Ebene in einem eigenen Subagenten mit isoliertem Git-Worktree; danach integriert der Haupt-Agent, verifiziert gegen die AC-IDs der Ebene und hakt die Boxen hier ab.
+- **Videoaufnahme (T10–T18):** keine Firmware-Tasks und keine `[user]`-Tasks — die Erweiterung ist rein App-seitig, ohne Dashboard-Einstellungen. Die Verifikation am echten Slider und Handy übernimmt `/qa`.
