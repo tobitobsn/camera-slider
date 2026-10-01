@@ -31,6 +31,11 @@
 
 - [x] T7  `RootScreen.tsx` — rendert `<AutoDriveControls />` neben `<JogControls disabled={status.driving} />` im Zustand `connected`; `useSliderStatus` wird hier (oder in einer gemeinsamen Stelle) einmal aufgerufen und an beide Komponenten weitergereicht  · files: src/screens/RootScreen.tsx  · → AC-9
 
+## Level 5 — Nachträge nach /refine (bereits gebaut, nachgetragen 2026-10-01)
+
+- [x] T8  App: Dauer-Feld füllt beim Verlassen die kürzestmögliche gültige Dauer ein, wenn sie leer, unlesbar oder zu kurz ist (aufgerundet auf Zehntelsekunden)  · files: src/components/AutoDriveControls.tsx, src/components/AutoDriveControls.test.ts  · Commits: 7ce09e9, 655f28d  · → AC-11
+- [x] T9  App: sichtbarer Hinweis „Zu kurz für diese Strecke — Minimum N s" mit Button „Minimum übernehmen", wenn die Dauer zu kurz ist (getippt, aus Preset oder durch Distanzänderung); keine automatische Korrektur außerhalb von AC-11  · files: src/components/AutoDriveControls.tsx, src/components/AutoDriveControls.render.test.ts  · Commits: df41c8c (ersetzt a6b837d, fd34882, b5c92da, aa1ce58)  · → AC-12
+
 ## Parallelisierung
 
 - **Ebenen sind Barrieren.** Eine Ebene startet erst, wenn die vorherige vollständig integriert und gegen ihre AC-IDs verifiziert ist.
