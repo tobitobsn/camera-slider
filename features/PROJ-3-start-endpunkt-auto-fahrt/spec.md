@@ -75,6 +75,7 @@
 - **EC-7** — Angenommen die App wird während des Vorlaufs in den Hintergrund verdrängt, wenn die Aufnahme dadurch abbricht, dann fährt der Schlitten gar nicht erst los (AC-18) — EC-4 („Fahrt läuft im Hintergrund weiter") gilt nur für Fahrten ohne Video
 - **EC-8** — Angenommen der Nutzer lädt ein Preset (PROJ-4), wenn Dauer und Distanz übernommen werden, dann bleiben die Video-Einstellungen unverändert
 - **EC-9** — Angenommen „Video aufnehmen" ist an, wenn eine Zeitraffer-Sequenz (PROJ-5) läuft, dann sind die Auto-Fahrt-Auslöser weiterhin gesperrt (PROJ-5 AC-9) — und umgekehrt kann während einer Fahrt mit Video keine Zeitraffer-Sequenz starten
+- **EC-10** — Angenommen „Video aufnehmen" ist an, wenn der Nutzer den Zeitraffer-Abschnitt (PROJ-5) sieht, dann zeigt dieser statt seiner Kamera-Vorschau den Hinweis, dass die Kamera für Video genutzt wird und „Video aufnehmen" ausgeschaltet werden muss, und sein Start ist gesperrt — ist der Schalter aus, verhält sich der Zeitraffer unverändert
 
 ## Technical Requirements
 - Geschwindigkeit wird aus der Distanz (Steps) zwischen Start und Ende und der eingegebenen Dauer berechnet: `speed = distance_steps / duration_seconds`, muss innerhalb 200–8000 Steps/s liegen (derselbe Bereich wie PROJ-2s Jog)
@@ -86,7 +87,7 @@
 
 ## Open Questions
 - [ ] Genaue min/max-Dauer-Grenzen hängen von der noch ausstehenden Steps-pro-mm-Kalibrierung der Mechanik ab (wie bei PROJ-2 offen)
-- [ ] Ob sich zusätzlich der Weißabgleich festsetzen lässt (AC-25 fordert nur Fokus + Belichtung), hängt davon ab, was die Kamera-Bibliothek auf Android freigibt — klärt `/architecture`; falls ja, gehört er mit in die Sperre
+- [x] Ob sich zusätzlich der Weißabgleich festsetzen lässt → Ja, die Sperre aus AC-25 umfasst den Weißabgleich, wo das Objektiv das unterstützt (`/architecture`, 2026-10-01)
 - [ ] Welche Auflösungen, Bildraten und Objektive das konkrete Handy der App tatsächlich anbietet, zeigt sich erst am Gerät — beeinflusst nur die Auswahl (AC-22/AC-23), nicht den Vertrag
 
 ## Decision Log
@@ -122,3 +123,4 @@
 | Stopp während Fahrt mit Video speichert den Teil-Take | Ein abgebrochener Take kann trotzdem brauchbar sein; löschen kann der Nutzer selbst in der Galerie | 2026-10-01 |
 | Abbruch der Aufnahme stoppt den Motor mit Fehlermeldung | Wie in PROJ-5 AC-6: lieber sofort sichtbar abbrechen als eine Fahrt ohne Video, die erst beim Sichten auffällt | 2026-10-01 |
 | Kamera-Vorschau im Auto-Fahrt-Abschnitt, nur bei eingeschaltetem Video | Ohne Video bleibt der Abschnitt so kompakt wie bisher; keine Änderung am Seitenaufbau oder am Zeitraffer-Abschnitt | 2026-10-01 |
+| EC-10: Ist „Video aufnehmen" an, gehört die Kamera der Auto-Fahrt; der Zeitraffer zeigt einen Hinweis und ist gesperrt | Android erlaubt nur eine aktive Kamera-Sitzung (festgestellt in `/architecture`); eine feste Vorrang-Regel ist eindeutig und robust, eine automatische Übergabe beim Zeitraffer-Start wurde verworfen. Bestehende AC-IDs unverändert | 2026-10-01 |

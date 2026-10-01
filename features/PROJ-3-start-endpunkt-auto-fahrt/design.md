@@ -4,6 +4,7 @@
 > Plattform: **mobile** (Android, React Native) — wie bei PROJ-1/PROJ-2.
 > Das Feature spannt zwei Layer: die **App** (React Native, erweitert PROJ-2s `JogControls`-Bereich um einen neuen Auto-Fahrt-Bereich) und die **Firmware** (Layer `firmware`, ESP32/PlatformIO — `docs/stacks/firmware-esp32-tmc2209.md`). Die Grenze ist eine Erweiterung des in PROJ-2 eingeführten BLE-Kommandoprotokolls, plus die erstmalige echte Nutzung der seit PROJ-1 deklarierten, bisher ungenutzten Status-Characteristic.
 > Erfordert PROJ-2 (Approved/Deployed) — erweitert dessen Firmware- und App-Code additiv, ändert keine PROJ-1/PROJ-2-Acceptance-Criteria.
+> **Erweiterung 2026-10-01 — Videoaufnahme (AC-13 bis AC-29, EC-5 bis EC-10):** reine App-Erweiterung, **keine Firmware-Änderung**, kein neuer BLE-Opcode. Beschrieben im Abschnitt „Videoaufnahme während der Auto-Fahrt" am Ende dieses Dokuments; alles davor beschreibt den unveränderten Stand von AC-1 bis AC-12.
 
 ## Component Structure (App)
 
@@ -124,6 +125,152 @@ _Keine — kein Backend, kein Provider-Dashboard betroffen._
 | Das Ende der Preset-Anwendung (`endPresetApply`: Distanz eingetroffen, Schreibfehler oder 3-s-Timer) korrigiert die Dauer einmal gegen die aktuell bekannte Distanz; der Timer wird gespeichert, bei einer neuen Anwendung ersetzt und beim Unmount abgebrochen | BUG-29/30 (stumm gesperrte Auslöser nach Handeingabe oder ausbleibender Preset-Distanz) und BUG-31/32 (alter Timer beendete den Guard eines neueren Presets, Open-Handle in Jest) |
 | **Ersetzt die drei AC-12-Einträge oben (2026-09-30):** Keine automatische Korrektur mehr bei Distanzänderung, keine Schutzphase, kein Timer. Ist die Dauer zu kurz, leer oder unlesbar, zeigt `AutoDriveControls` „Zu kurz für diese Strecke — Minimum X s" (bzw. „Keine gültige Dauer") mit Button „Minimum übernehmen" (`showDurationTooShort`, `handleUseMinimumDuration`); AC-11 (Korrektur beim Verlassen des Felds) bleibt | Die automatische Überschreibung musste Nutzer-Änderungen von der Zwischen-Distanz des Preset-Ablaufs unterscheiden und erzeugte über fünf QA-Runden neue Rennen (BUG-24, 27, 29–37). Die sichtbare Meldung löst den Kern von BUG-19 („stumm gesperrt") ohne Raten; Preset-Dauern werden nie angefasst |
 
+## Videoaufnahme während der Auto-Fahrt (Erweiterung 2026-10-01)
+
+Deckt AC-13 bis AC-29 und EC-5 bis EC-10 ab. Grundlage: die mit PROJ-5 bereits eingebundene Kamera-Bibliothek `react-native-vision-camera` **5.2.3**. Alle unten genannten Fähigkeiten wurden gegen deren installierte Typdefinitionen und den Android-Quellcode geprüft (`node_modules/react-native-vision-camera/src/specs/…`, `android/…/HybridCameraController.kt`), nicht aus dem Gedächtnis.
+
+### Was die Bibliothek auf Android hergibt (geprüft)
+
+| Bedarf | Verfügbar über | Ergebnis |
+|---|---|---|
+| Video aufnehmen, stoppen, Datei erhalten | Video-Output der Kamera + „Recorder" (Start mit Rückmeldung „fertig" und „Fehler", Stopp, Abbruch) | ✅ Datei ist immer `.mp4` |
+| Ton an/aus | Option „Audio aktivieren" am Video-Output, Mikrofon-Berechtigungs-Hook der Bibliothek | ✅ |
+| Auflösung | Ziel-Auflösung am Video-Output; die vom Objektiv unterstützten Video-Auflösungen sind abfragbar | ✅ |
+| Bildrate | Bildraten-Vorgabe an die Kamera-Sitzung; pro Objektiv abfragbar, welche fps unterstützt werden | ✅ |
+| Stabilisierung | Stabilisierungs-Vorgabe an die Sitzung (aus / automatisch); pro Objektiv abfragbar, ob unterstützt | ✅ |
+| Objektiv | Liste aller Kameras mit Typ (Weitwinkel / Ultraweitwinkel / Tele) und Position (vorn/hinten) | ✅ sofern der Hersteller die Objektive einzeln freigibt |
+| Fokus + Belichtung + **Weißabgleich** per Tippen sperren | „Fokussieren auf Punkt" mit Modus „gesperrt" und ohne automatisches Zurücksetzen, für alle drei Messarten (AF/AE/AWB), die das Objektiv unterstützt; „Fokus zurücksetzen" hebt die Sperre auf | ✅ — beantwortet die Open Question zum Weißabgleich: er wird mitgesperrt, wo das Objektiv AWB-Messung unterstützt |
+| Manuelle ISO/Verschlusszeit, direkte Sperr-Befehle | in der Bibliothek ausdrücklich „nur iOS" | ❌ — passt zum Out of Scope der Spec |
+
+### Kamera-Besitz (EC-10)
+
+Android erlaubt nur **eine** aktive Kamera-Sitzung. Die App bekommt deshalb eine einzige, eindeutige Regel, abgeleitet allein aus dem gemerkten Schalter „Video aufnehmen":
+
+- **Schalter an** → Besitzer ist die Auto-Fahrt. Nur ihre Vorschau ist aktiv. Der Zeitraffer-Abschnitt rendert keine Kamera, zeigt „Kamera wird für Video genutzt — „Video aufnehmen" ausschalten, um den Zeitraffer zu nutzen", und sein Start-Button ist gesperrt.
+- **Schalter aus** → Besitzer ist der Zeitraffer, exakt wie heute (PROJ-5 unverändert). Die Auto-Fahrt rendert keine Kamera.
+
+Der Schalter selbst ist gesperrt, solange eine Zeitraffer-Sequenz läuft (EC-9) oder eine Fahrt mit Video läuft (AC-28) — so kann der Besitz nie mitten in einer Aufnahme wechseln.
+
+### Component Structure (App) — Erweiterung
+
+```
+RootScreen (erweitert)
++-- useVideoSettings()  (NEU, einmal hier — gemerkte Video-Einstellungen, liefert auch den Kamera-Besitz)
++-- useVideoCamera(…)   (NEU, einmal hier — Berechtigungen, Objektive, Formate, Video-Output, Sperre)
++-- useVideoDrive(…)    (NEU, einmal hier — Ablauf einer Fahrt mit Video, siehe Zustandsmodell)
++-- JogControls         (disabled zusätzlich, solange useVideoDrive nicht „bereit" ist — auch im Vor-/Nachlauf, in dem die Firmware nicht „driving" meldet)
++-- AutoDriveControls   (erweitert)
+|   +-- … bestehende Teile (Punkte, Dauer, Fahrt-Buttons, Stopp, Status, Presets) unverändert
+|   +-- VideoToggle            „Video aufnehmen" (Schalter)
+|   +-- ExpectedVideoLength    „Videolänge ca. X s" = Dauer + 4 s (AC-29), nur bei Schalter an und gültiger Dauer
+|   +-- VideoPanel (NEU, nur bei Schalter an)
+|   |   +-- VideoPermissionHint   Kamera fehlt / Mikrofon fehlt (bei Ton an) — Anfragen bzw. „Einstellungen öffnen", plus Hinweis „oder Ton ausschalten" (AC-20)
+|   |   +-- VideoPreview          Kamera-Vorschau, Tippen = sperren (AC-25), Sperr-Markierung am Tipp-Punkt + Button „Auto"
+|   |   +-- RecordingIndicator    roter Punkt „REC", Aufnahmedauer mm:ss, Phase „Vorlauf" / „Fahrt" / „Nachlauf" (AC-16)
+|   |   +-- VideoSettings         Ton (Schalter) · Format (Auswahl „1080p · 30 fps") · Objektiv (Auswahl, nur bei >1) · Stabilisierung (Schalter, nur wenn unterstützt)
+|   +-- Fahrt-Buttons            bei Schalter an → starten useVideoDrive statt direkt AUTO_DRIVE
++-- TimelapseControls  (erweitert: neue Prop „Kamera wird für Video genutzt" → keine Vorschau, Hinweis, Start gesperrt)
+```
+
+`useVideoDrive` sitzt — wie `useTimelapseSequence` — in `RootScreen`, weil sein „beschäftigt"-Zustand Jog, Auto-Fahrt und Zeitraffer gleichzeitig sperren muss. Die Fahrt-Buttons, der Stopp-Button und die Video-Teile in `AutoDriveControls` bekommen seine Schnittstelle als Props. `VideoPanel` und seine Teile kommen in eine **eigene Datei** (`AutoDriveControls.tsx` hat bereits ~960 Zeilen).
+
+### Datenmodell: Video-Einstellungen (lokal)
+
+Ein einziger Datensatz im AsyncStorage unter dem Schlüssel `camera-slider.video-settings` (Namensschema wie `camera-slider.presets`). Gehört dem Nutzer, liegt nur auf dem Handy, bleibt bis zur Deinstallation der App. Keine personenbezogenen Daten.
+
+| Feld | Typ | Werte | Standard |
+|---|---|---|---|
+| Schema-Version | Zahl | `1` | 1 |
+| Video aufnehmen | Ja/Nein | — | Nein |
+| Ton | Ja/Nein | — | Ja |
+| Auflösung | Auswahl | `720p` (1280×720), `1080p` (1920×1080), `2160p` (3840×2160) | `1080p` |
+| Bildrate | Zahl | 24, 25, 30, 50, 60 | 30 |
+| Objektiv | Auswahl | `wide` (Weitwinkel), `ultraWide` (Ultraweitwinkel), `tele` (Tele) | `wide` |
+| Stabilisierung | Ja/Nein | — | Nein |
+
+- **Gespeichert wird das Objektiv als Typ, nicht als Geräte-ID** — so passt der Wert auch nach einem Handywechsel noch, oder fällt sauber auf den Standard zurück.
+- **Laden:** fehlt der Datensatz, ist er nicht lesbar oder hat ein Feld einen unbekannten Wert → das betroffene Feld bekommt seinen Standard (die übrigen bleiben). Kein Fehlerdialog.
+- **Nicht verfügbar auf diesem Gerät (AC-26):** Ist das gemerkte Objektiv nicht vorhanden → `wide`. Ist die gemerkte Kombination aus Auflösung + fps auf dem gewählten Objektiv nicht verfügbar → 1080p/30, falls verfügbar, sonst die erste angebotene Kombination. Der gemerkte Wert wird dabei **nicht** überschrieben, solange der Nutzer nichts ändert (ein kurzzeitig anderes Objektiv soll die Wahl nicht löschen).
+- **Schreiben:** bei jeder Änderung durch den Nutzer der ganze Datensatz (Lesen-Ändern-Schreiben wie bei den Presets).
+- **Nicht gespeichert:** die Fokus-/Belichtungssperre (nur Sitzung, AC-26), aufgenommene Videos (liegen in der Galerie, gehören danach nicht mehr zur App).
+
+### Angebotene Formate und Objektive
+
+- **Objektive (AC-23):** alle Rückkameras, deren Typ Weitwinkel, Ultraweitwinkel oder Tele ist; pro Typ die erste. Gibt der Hersteller nur eine (logische) Rückkamera frei, gibt es genau ein Objektiv → keine Auswahl angezeigt.
+- **Formate (AC-22):** für das gewählte Objektiv jede Kombination aus den drei Standard-Auflösungen (nur solche, die das Objektiv für Video meldet) und den fünf Standard-Bildraten (nur solche, die das Objektiv meldet). Anzeige z. B. „4K · 25 fps", sortiert nach Auflösung, dann fps. Bewusst keine exotischen Seitenverhältnisse oder Zwischenwerte.
+- **Stabilisierung (AC-24):** Schalter nur sichtbar, wenn das gewählte Objektiv Video-Stabilisierung meldet. An = „automatisch", aus = „aus".
+- **Lehnt die Kamera eine Kombination trotzdem ab** (Fehler beim Konfigurieren der Sitzung) → zurück auf den Standard aus der Liste oben, Hinweis „Format nicht verfügbar — auf 1080p · 30 fps zurückgesetzt".
+- Jede Änderung an Objektiv, Format oder Stabilisierung konfiguriert die Sitzung neu → eine bestehende Fokus-/Belichtungssperre ist danach aufgehoben und wird als „Auto" angezeigt.
+
+### Fokus-, Belichtungs- und Weißabgleich-Sperre (AC-25)
+
+- Tippen in die Vorschau → die Kamera misst Fokus, Belichtung und (wo unterstützt) Weißabgleich an diesem Punkt und hält sie danach fest, ohne zeitliches Zurücksetzen. Die Vorschau zeigt am Tipp-Punkt eine Markierung mit Schloss, daneben den Button „Auto".
+- Erneutes Tippen → neue Messung am neuen Punkt, wieder gesperrt. „Auto" → Sperre aufgehoben, Kamera regelt wieder automatisch.
+- Unterstützt das Objektiv keine Punkt-Messung, ist Tippen wirkungslos und es erscheint einmal „Fokus-Sperre wird von diesem Objektiv nicht unterstützt".
+- Während einer Fahrt mit Video ist Tippen und „Auto" gesperrt (AC-28) — die Sperre bleibt garantiert unverändert.
+
+### Ablauf einer Fahrt mit Video — Zustandsmodell (`useVideoDrive`)
+
+Zustände: **bereit** → **startet** → **Vorlauf** → **Fahrt** → **Nachlauf** → **speichert** → bereit.
+
+| Von | Ereignis | Nach | Was passiert |
+|---|---|---|---|
+| bereit | Fahrt-Button (Richtung, Dauer) | startet | Bildschirm-Sperre verhindern (`useKeepAwake`, AC-27); Berechtigungen prüfen (Kamera, bei Ton an auch Mikrofon) — fehlt eine → Hinweis, zurück zu bereit, keine Fahrt (AC-20) |
+| startet | Recorder angelegt und Aufnahme gestartet | Vorlauf | Aufnahmedauer-Uhr läuft (Anzeige AC-16), 2-s-Timer |
+| startet | Aufnahme kann nicht starten | bereit | Fehlermeldung, keine Fahrt (AC-18) |
+| Vorlauf | 2 s abgelaufen | Fahrt | AUTO_DRIVE (bestehender Opcode, Richtung + Dauer) senden; 3-s-Wächter „Fahrt hat begonnen" starten |
+| Fahrt | Firmware meldet `driving` | Fahrt | Wächter beendet |
+| Fahrt | Wächter läuft ab, ohne dass `driving` kam (Firmware hat abgelehnt) | speichert | Aufnahme stoppen, Meldung „Fahrt konnte nicht starten" |
+| Fahrt | `driving` wird wieder falsch **und** Schlitten steht am Ziel (`atEnd` bzw. `atStart`) | Nachlauf | 2-s-Timer |
+| Fahrt | `driving` wird falsch, Schlitten **nicht** am Ziel (Schutz-Stopp, PROJ-6) | speichert | Aufnahme sofort stoppen (EC-6) |
+| Nachlauf | 2 s abgelaufen | speichert | Aufnahme stoppen (AC-14) |
+| startet/Vorlauf/Fahrt/Nachlauf | Stopp gedrückt | speichert | in „Fahrt" STOP senden; Timer abbrechen; Aufnahme sofort stoppen (AC-17) |
+| startet/Vorlauf/Fahrt/Nachlauf | Aufnahme-Fehler, **oder** App geht in den Hintergrund | speichert | in „Fahrt" STOP senden; Vorlauf-Timer abbrechen (Schlitten fährt nie los, EC-7); Fehlermeldung mit Grund (AC-18) |
+| startet/Vorlauf/Fahrt/Nachlauf | BLE-Verbindung weg | speichert | Aufnahme stoppen (Firmware stoppt den Motor selbst, AC-19/AC-10) |
+| speichert | Aufnahme-Datei fertig | bereit | Video in die Galerie (Typ „Video"); Erfolg → „Video gespeichert" (AC-15); Fehler → Meldung „Video konnte nicht gespeichert werden"; Bildschirm-Sperre freigeben |
+
+- **Doppelte Auslösung (EC-5):** Fahrt-Buttons reagieren nur im Zustand „bereit"; der Hook ignoriert einen zweiten Start in jedem anderen Zustand. Zusätzlich lehnt die Firmware einen zweiten AUTO_DRIVE ohnehin ab (EC-2).
+- **Hintergrund:** Der Wechsel in den Hintergrund wird über den App-Zustand von React Native erkannt und **selbst** als Fehler behandelt, statt sich darauf zu verlassen, dass die Kamera-Bibliothek einen Aufnahmefehler meldet — so ist EC-7 deterministisch.
+- **Teil-Take bei Fehler:** Liefert der Recorder trotz Fehler eine fertige Datei, wird sie gespeichert; sonst nur die Fehlermeldung („soweit möglich", AC-18).
+- **Video-Datei:** wird in den temporären Ordner der App aufgenommen und von dort in die Galerie kopiert; der Temp-Ordner gehört dem System.
+- **Ohne Video** (Schalter aus) bleibt der bisherige Weg der Fahrt-Buttons unverändert — AC-3/AC-4 und EC-4 (Fahrt läuft im Hintergrund weiter) gelten dort weiter.
+
+### Sperren der Bedienung
+
+- Solange `useVideoDrive` nicht „bereit" ist: Jog, Punkte setzen, Presets laden/löschen, Dauer, alle Video-Einstellungen, Schalter „Video aufnehmen", Tippen in die Vorschau → gesperrt; nur Stopp bedienbar (AC-28, analog AC-9).
+- Läuft eine Zeitraffer-Sequenz: Schalter „Video aufnehmen" gesperrt (EC-9). Ist der Schalter an: Zeitraffer-Start gesperrt (EC-10).
+- Akku-Sperre (PROJ-6) sperrt die Fahrt-Buttons wie bisher, unabhängig vom Video.
+
+### Berechtigungen
+
+- Kamera: bestehende Android-Berechtigung (seit PROJ-5 im Manifest).
+- **Mikrofon: neu** — `RECORD_AUDIO` muss ins Android-Manifest (ohne Eintrag lehnt Android die Anfrage still ab, wie BUG-3 in PROJ-5 bei der Kamera). Angefragt wird nur, wenn Ton an ist.
+- Galerie: bestehend (`WRITE_EXTERNAL_STORAGE` bis Android 9, ab Android 10 nicht nötig).
+- Hinweis-Muster wie in PROJ-5: noch nicht abgelehnt → „Zugriff erlauben"; dauerhaft abgelehnt → „Einstellungen öffnen".
+
+### Abhängigkeiten (Erweiterung)
+
+- Keine neue Bibliothek. Genutzt werden: `react-native-vision-camera` (Video-Output, Recorder, Geräteliste, Mikrofon-Berechtigung, Punkt-Messung), `@react-native-camera-roll/camera-roll` (Speichern als Video), `@sayem314/react-native-keep-awake` (über den bestehenden `useKeepAwake`), `@react-native-async-storage/async-storage` (Einstellungen).
+- Firmware: unverändert.
+
+### Technische Entscheidungen (Erweiterung 2026-10-01)
+
+| Entscheidung | Begründung | Alternative erwogen | Trade-off | Datum |
+|---|---|---|---|---|
+| Keine Firmware-Änderung — Vor- und Nachlauf werden in der App getimt, die Fahrt nutzt den bestehenden AUTO_DRIVE | Die Firmware kennt keine Kamera; Vor-/Nachlauf sind reine Aufnahme-Zeit, kein Motorverhalten. Kein neues Protokoll, kein gemeinsamer Firmware-Release nötig | Neuer Opcode „Fahrt mit Verzögerung" in der Firmware | Die 2 s sind App-Timer, nicht auf die Millisekunde genau — für einen Puffer zum Wegschneiden unerheblich | 2026-10-01 |
+| Ein Kamera-Besitzer, abgeleitet aus dem Schalter „Video aufnehmen" (EC-10) | Android erlaubt nur eine aktive Kamera-Sitzung; die Regel ist eindeutig, hat keine Übergangszustände und lässt PROJ-5 bei ausgeschaltetem Schalter völlig unverändert | Automatische Übergabe beim Zeitraffer-Start (vom Nutzer verworfen) | Der Zeitraffer ist gesperrt, solange „Video aufnehmen" an ist — ein Schalter-Tipp mehr | 2026-10-01 |
+| `useVideoDrive` als eigener Orchestrator in `RootScreen`, nicht in `AutoDriveControls` | Sein „beschäftigt"-Zustand muss Jog und Zeitraffer sperren, auch im Vor-/Nachlauf, in dem die Firmware nicht „driving" meldet — gleiches Muster wie `useTimelapseSequence` | Zustand in `AutoDriveControls` und per Callback nach oben melden | Mehr Props von `RootScreen` nach unten | 2026-10-01 |
+| Ankunft über den bestehenden Status (`driving` fällt, `atEnd`/`atStart` gesetzt), nicht über die Dauer | Die Firmware ist die Quelle der Wahrheit für die Position; unterscheidet sauber „angekommen" (→ Nachlauf) von „unterwegs gestoppt" (→ sofort stoppen, EC-6) | Nach Ablauf der eingegebenen Dauer annehmen, dass der Schlitten angekommen ist | Abhängig vom Status-Notify — der ist seit PROJ-3 bewährt | 2026-10-01 |
+| 3-s-Wächter nach AUTO_DRIVE | Die Firmware lehnt eine ungültige Fahrt still ab; ohne Wächter liefe die Aufnahme endlos weiter | Kein Wächter | Ein seltener Fehlalarm bei extrem langsamer BLE-Antwort wäre möglich — 3 s liegen weit über der üblichen Notify-Latenz | 2026-10-01 |
+| Hintergrund-Wechsel selbst als Fehler behandeln (App-Zustand), zusätzlich zum Fehler-Callback des Recorders | Deterministisches EC-7/AC-18 unabhängig davon, wie schnell oder ob die Kamera-Bibliothek die Unterbrechung meldet | Nur den Recorder-Fehler abwarten | Auch ein kurzer Blick auf die Benachrichtigungsleiste kann (je nach Gerät) die Aufnahme beenden — konsistent mit „Bildschirm bleibt an" | 2026-10-01 |
+| Sperre per Punkt-Messung im Modus „gesperrt" für AF/AE/AWB, statt der direkten Sperr-Befehle | Die direkten Sperr-Befehle sind in VisionCamera 5.2.3 nur iOS; die Punkt-Messung mit Sperre ist auf Android implementiert (CameraX) und sperrt den Weißabgleich mit | Natives Camera2-Modul | Gesperrt wird der Wert am Tipp-Punkt — kein „aktuellen Wert festhalten" ohne Tippen | 2026-10-01 |
+| Feste Format-Liste (3 Auflösungen × 5 Bildraten), gefiltert nach dem, was das Objektiv meldet | Verständliche Auswahl statt Dutzender Roh-Formate; deckt die üblichen Video-Normen (24/25/30/50/60) ab | Alle Roh-Formate des Geräts anzeigen | Exotische Formate (z. B. 120 fps Zeitlupe) bewusst nicht angeboten | 2026-10-01 |
+| Objektiv als Typ speichern, nicht als Geräte-ID | Überlebt einen Handywechsel und Neuinstallationen der Kamera-Treiber; fällt sauber auf Weitwinkel zurück | Geräte-ID speichern | Haben zwei Objektive denselben Typ, wird nur das erste angeboten | 2026-10-01 |
+| Videos zuerst in den Temp-Ordner, dann in die Galerie kopieren | Gleicher Weg wie die Zeitraffer-Fotos (PROJ-5), eine bewährte Speicherroute | Direkt in einen Galerie-Pfad aufnehmen | Kurzzeitig doppelter Speicherplatz bis zum Kopieren | 2026-10-01 |
+| `VideoPanel` in eigener Datei | `AutoDriveControls.tsx` hat bereits ~960 Zeilen; die Video-Teile sind ein abgegrenzter Block | Alles in `AutoDriveControls.tsx` | Eine Datei mehr | 2026-10-01 |
+
 ## Open Questions
 
+- [x] Lässt sich der Weißabgleich mitsperren? → Ja, über die Punkt-Messung im Modus „gesperrt" (AWB), wo das Objektiv AWB-Messung unterstützt (2026-10-01)
+- [ ] Ob der Hersteller deines Handys Ultraweitwinkel/Tele einzeln freigibt und welche fps er für fremde Apps meldet, zeigt erst der Hardware-Test — betrifft nur die angebotene Auswahl
 - [ ] Aus `spec.md` übernommen: genaue min/max-Dauer-Grenzen stehen erst nach der Steps-pro-mm-Kalibrierung fest — betrifft nur die reale mm/s-Bedeutung, nicht die Steps/s-Rechnung selbst
