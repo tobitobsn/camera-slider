@@ -57,11 +57,7 @@
 - Der Schutz-Stopp muss in der Firmware liegen (wirkt ohne App), die Anzeige/Warnung in der App
 
 ## Open Questions
-- [x] Kalibrierung → Faktor 0,993, gemessen 2026-09-30 (design.md Umsetzungshinweise). Der genaue Umrechnungsfaktor des Spannungsteilers wird nach dem Einbau einmal mit einem Multimeter bestimmt — wie und wo er hinterlegt wird, entscheidet `/architecture`
-- [x] Welcher ADC1-Pin wird tatsächlich verwendet → GPIO 34, Teiler 104 kΩ / 22 kΩ, vom Nutzer verbaut (2026-09-30)
-- [x] Läuft der Motor im stromlosen Zustand frei, sodass der Schlitten nach einem Schutz-Stopp von Hand geschoben werden kann? → Nein — der Schlitten hält auch komplett ohne Strom, also mechanisch (Rastmoment/Antrieb), nicht durch den Treiber (Hardware-Test T19, 2026-10-01)
-
-- [x] Wird der ESP32 aus dem Akku versorgt? → Ja, über einen Step-down-Wandler; Akkuwechsel = Neustart, USB und Akku nicht gleichzeitig (Nutzer, 2026-09-30)
+_Keine offenen Fragen._
 
 ## Decision Log
 

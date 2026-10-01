@@ -71,30 +71,14 @@ Android EB2103, Release-APK vom 2026-09-30 (App-Stand `c976fba`), Firmware `c976
 
 ## Bugs Found
 
-### BUG-1 — High — Tiefentladungsschutz schützt nur vor Bewegung, nicht den Akku selbst (Spec-Lücke)
-- **Befund:** Nach dem Schutz-Stopp laufen ESP32 (BLE-Advertising), TMC2209-Logik und Spannungsteiler unbegrenzt weiter — kein Deep-Sleep, keine Abschaltung (`grep deep_sleep|esp_deep|light_sleep|stopAdvertising firmware/src` leer). `battery.cpp:78-83` sperrt nur die Bewegung. Die Zellen ohne BMS werden unter 3,1 V/Zelle weiter entladen, bis unter die Schädigungsgrenze.
-- **Warum High:** User Story 4 der Spec („schützt meine 18650-Zellen vor Tiefentladung, auch wenn die App nicht verbunden ist") wird nur teilweise erfüllt; AC-7/AC-8 sind im Wortlaut erfüllt, schützen aber nicht vor dem Grundverbrauch. Tiefentladene Li-Ion-Zellen wieder aufzuladen ist ein Sicherheitsrisiko. Bleibt der Slider nach dem Stopp eingeschaltet liegen (EC-2, ohne App), bemerkt es niemand.
-- **Voraussetzung:** Der ESP32 hängt am Akku (offene Frage in spec.md/design.md; das Design geht davon aus).
-- **Repro (Gerät):** Pack unter 9,3 V bringen, Sperre abwarten, eingeschaltet liegen lassen, Spannung über Stunden messen.
-- **Vorschlag:** `/refine PROJ-6` — z. B. nach der Sperre Motortreiber abschalten und ESP32 in Deep-Sleep (Aufwachen nur per Reset/Akkuwechsel).
-
-### BUG-2 — Medium — Schutz fällt still aus, wenn der Spannungsteiler sich löst (Spec-Lücke, spec-konform nach AC-11)
-- Löst sich im Akkubetrieb der obere Zweig oder der Abgriff, zieht der untere 22-kΩ-Widerstand den Pin auf ca. 0 V → < 5000 mV → „kein Akku": Schutz-Stopp dauerhaft aus (`battery.cpp:66-72`), App zeigt nur „🔋 –" wie im USB-Betrieb. Workaround: „–" im Akkubetrieb bemerken. Vorschlag: `/refine PROJ-6` (z. B. „einmal erkannter Akku, der danach verschwindet" als Fehler werten).
-
-### BUG-3 — Low — gemischter Anzeigewert beim Wechsel USB ↔ Akku (EC-4-Rand)
-- `battery.cpp:92-103` mittelt alle Ruhewerte seit der letzten Übernahme; Wechsel innerhalb eines 10-s-Fensters ergibt z. B. 6240 mV → ca. 10 s „🔋 0 %" rot und die Nachfrage. Praktisch kaum erreichbar, da USB und Akku nicht gleichzeitig gehen (Wechsel = Neustart).
-
-### BUG-4 — Low — Presets speichern/löschen während der Sperre gesperrt
-- `RootScreen.tsx:129` → `AutoDriveControls.tsx:379` sperrt auch „Als Preset speichern" und „Löschen", obwohl AC-9 nur Bewegungs-Bedienelemente nennt (design.md zusätzlich „Setzen und Presets laden"). Reine Speicheraktionen fehlen bis zum Neustart.
-
-### BUG-5 — Low — Zeitraffer-Start trotz Sperre über offenen Nachfrage-Dialog
-- Dialog offen → Sperre kommt → „Trotzdem starten": `TimelapseControls.tsx:172` prüft die Sperre nicht erneut, der Effekt reagiert nur auf einen Wechsel. Folge: ein Foto, dann Timeout-Meldung statt „Akku leer – Bewegung gestoppt". Keine Bewegung (Firmware verwirft).
-
-### BUG-6 — Low — Rundungsgrenze 5000 mV nicht deckungsgleich
-- Firmware prüft „Akku erkannt" am ungerundeten Wert, überträgt gerundet (20 mV): 4990–4999 mV werden als 5000 gesendet → App zeigt „0 %" rot + Nachfrage, Firmware nimmt „kein Akku" an. Praktisch sehr unwahrscheinlich.
-
-### BUG-7 — Low — Doku/Plausibilität
-- design.md („einziger Zugriff ist der verschlüsselte BLE-Link") widerspricht dem ungeschützten Status-Notify (`ble.cpp:394`), über den jetzt zusätzlich Spannung, Sperre und Fahrtzustand lesbar sind (keine PII). `MAX_PLAUSIBLE_BATTERY_MILLIVOLTS = 20000` ist für 3S (max. 12,6 V) weit — Werte 12,6–20 V erscheinen still als 100 %. Stopp-Button der Auto-Fahrt ist bei Sperre `disabled` (design.md sagt „bedienbar"), praktisch folgenlos.
+### Previously Fixed
+- BUG-1 — High — Tiefentladungsschutz schützt nur vor Bewegung, nicht den Akku selbst (Spec-Lücke)
+- BUG-2 — Medium — Schutz fällt still aus, wenn der Spannungsteiler sich löst (Spec-Lücke, spec-konform nach AC-11)
+- BUG-3 — Low — gemischter Anzeigewert beim Wechsel USB ↔ Akku (EC-4-Rand)
+- BUG-4 — Low — Presets speichern/löschen während der Sperre gesperrt
+- BUG-5 — Low — Zeitraffer-Start trotz Sperre über offenen Nachfrage-Dialog
+- BUG-6 — Low — Rundungsgrenze 5000 mV nicht deckungsgleich
+- BUG-7 — Low — Doku/Plausibilität
 
 ## Nicht verifiziert in diesem Lauf
 
@@ -191,35 +175,13 @@ Der Nutzer hat „alles ok“ zurückgemeldet. Dass der Schlitten im Tiefschlaf 
 
 ## Neue Bugs
 
-### BUG-8 — High — Wackelkontakt am Spannungsteiler hebelt den Tiefentladungsschutz aus (AC-7, AC-13)
-- **Ort:** `firmware/src/battery.cpp:90-127`. „Leer“ (5000–9299 mV) und „gestört“ (< 5000 mV nach erkanntem Akku) haben getrennte Zähler, und jede Messung im jeweils anderen Bereich setzt den Zähler zurück (so in `design.md:161` festgelegt).
-- **Folge:** Ein loser Abgriff liefert immer nur zu niedrige Werte. Bei leerem Pack liegt deshalb jede Messung unter 9,3 V, springt aber zwischen „leer“ und „< 5 V“. Keiner der beiden Zähler erreicht 5 s. Bewegung, Treiber und ESP32 laufen weiter, und die Zellen ohne BMS werden tiefentladen.
-- **Belege:** In beiden Simulationen (Security `p6sec/wackel.js`, Acceptance `p6r2/probe.js`) gab es keine Sperre:
-  - 9000 und 0 mV im 200-ms-Wechsel: keine Sperre in 600 s
-  - Wechsel im 1-s-Takt: keine Sperre in 300 s
-  - 4 s 9000 mV und eine Messung mit 0 mV, wiederholt: keine Sperre
-  - Zufallswerte 0..9000 mV: keine Sperre in 3600 s
-
-  Zum Vergleich mit gesundem Teiler: konstant 9000 mV sperrt nach 5,2 s, ein dauerhaft gelöster Teiler nach 5 s (Grund „gestört“).
-- **Severity:** Die Acceptance-Lane bewertet Medium, die Security-Lane High. Zusammengeführt: **High**. Die Messung liegt 5 s und länger ununterbrochen unter 9,3 V, das ist der Auslöser von AC-7, und trotzdem wird nicht gesperrt. Außerdem ist ein gelöster Teiler genau der Fall, für den AC-13 eingeführt wurde. Die Folge ist eine Tiefentladung von Zellen ohne BMS.
-- **Repro am Gerät:** Labornetzteil auf 9,0 V stellen, den Abgriff des Teilers im Takt von etwa 1–3 s an- und abklemmen. Ergebnis: keine Sperre, kein Countdown.
-- **Fix-Richtung (Design, kein `/refine` nötig):** ein gemeinsamer Zähler „unsicher“ (leer *oder* gestört nach erkanntem Akku). Der Sperrgrund ergibt sich aus der letzten Messung oder aus dem überwiegenden Bereich. Das ist AC-7-konform, `design.md:161` muss angepasst werden.
-
-### BUG-9 — Low — Halten des EN-Pins wird beim Booten nicht freigegeben
-`motorPrepareDeepSleep()` setzt `gpio_hold_en(GPIO27)` und `gpio_deep_sleep_hold_en()`. `gpio_hold_dis` kommt im Code nirgends vor. Heute ist das vermutlich folgenlos, denn es gibt keine Weckquelle, und ein Reset bzw. Stromwechsel löscht den Hold. Mit einer künftigen Weckquelle bliebe der Treiber nach dem Aufwachen aber aus. Prüfung am Gerät: Sperre auslösen, Tiefschlaf abwarten, Reset per EN-Taste, dann joggen. Fix: `gpio_hold_dis(GPIO27)` in `motorSetup()`.
-
-### BUG-10 — Low — Sperre bei genau `millis()==0` geht sofort in den Tiefschlaf
-`battery.cpp:137-140`: `lockedAtMillis = 1` und `elapsed = 0 − 1` ergeben einen Überlauf, also sofort `esp_deep_sleep_start()` ohne die 60-s-Frist. Beleg ist die Probe `p6r2/probe0.js`. Praktisch nur nach 49,7 Tagen Laufzeit auf die Millisekunde genau erreichbar.
-
-### BUG-11 — Low — Banner-Texte
-- AC-12 verlangt „Akku leer – Slider schaltet sich in 60 s ab“. Gerendert werden zwei Zeilen, „Akku leer – bitte laden“ und „Slider schaltet sich in 60 s ab“ (`BatteryLockBanner.tsx:20-30`). Inhaltlich ist das gleich, und so ist es in `design.md:166-169` entschieden.
-- Bei `measurementFault` steht im Hinweis weiterhin „… lade den Akku“ (`BatteryLockBanner.tsx:31-34`). Passend wäre ein Hinweis auf die Verkabelung.
-
-### BUG-12 — Low — Widerspruch in der Spec zwischen EC-4 und AC-13
-EC-4 verlangt bei „Akku erkannt, dann < 5 V ohne Neustart“ die Anzeige „🔋 –“ ohne Fehlermeldung. AC-13 verlangt in diesem Fall Sperre und Abschaltung. Der Code folgt AC-13. Laut Nutzer ist der Fall physisch nicht erreichbar, weil USB und Akku nie gleichzeitig angeschlossen sind; die Security-Lane nennt aber genau das als Bedien-Falle, etwa beim Flashen im Akkubetrieb. EC-4 per `/refine` angleichen.
-
-### BUG-13 — Low — Eine einzige Messung ≥ 5000 mV setzt „Akku erkannt“ dauerhaft
-`battery.cpp:106-108` hat keine Entprellung. Ohne verbauten Teiler schwebt GPIO 34; eine Störung, gefolgt von 5 s < 5 V, würde im USB-Betrieb sperren (Widerspruch zu AC-11 und EC-7). Mit dem verbauten 22-kΩ-Pull-down ist das unrealistisch.
+### Previously Fixed
+- BUG-8 — High — Wackelkontakt am Spannungsteiler hebelt den Tiefentladungsschutz aus (AC-7, AC-13)
+- BUG-9 — Low — Halten des EN-Pins wird beim Booten nicht freigegeben
+- BUG-10 — Low — Sperre bei genau `millis()==0` geht sofort in den Tiefschlaf
+- BUG-11 — Low — Banner-Texte
+- BUG-12 — Low — Widerspruch in der Spec zwischen EC-4 und AC-13
+- BUG-13 — Low — Eine einzige Messung ≥ 5000 mV setzt „Akku erkannt“ dauerhaft
 
 ### Beobachtungen (kein Bug)
 - `motorSetStart`, `motorSetEnd` und `motorSetEndFromDistance` sind in der Firmware nicht an `lockedOut` gebunden; gesperrt wird nur in der App. Bewegt wird dabei nichts.
@@ -310,23 +272,12 @@ Alle übrigen Ergebnisse aus Nachtrag 2 gelten weiter: AC-1 bis AC-6, AC-10, EC-
 - [!] Laufzeit am Gerät — no way to run and probe this project was recorded
 
 ## Neue Befunde
-### NEU-A — Medium — Wackelkontakt schon ab dem Einschalten wird nie gesperrt
-- **Ursache:** „Akku erkannt“ verlangt seit dem Fix für BUG-13 eine Sekunde am Stück mindestens 5 V (`battery.cpp:114-125`). Liefert ein loser Abgriff vom Einschalten an nie 6 Messungen in Folge über 5 V, wird der Akku nie erkannt, und der Slider sperrt nie.
-- **Simulation** (leerer Pack, 9000 mV): Keine dieser Folgen sperrt in 3600 s.
-  - Wechsel 9000/0 mV alle 200 ms
-  - 500 ms Kontakt / 500 ms keiner
-  - 800 ms Kontakt / 200 ms keiner
-- Mit 10 s festem Kontakt vor dem Wackeln sperrt der Slider nach 5 s.
-- **Abweichung von der Spec:** AC-13 definiert „erkannt“ als „Messwert ≥ 5 V“, ohne Dauer. Der Code-Kommentar in `battery.cpp:52` ist veraltet.
-- **Keine Regression:** Vor dem Fix sperrte dieser Fall wegen BUG-8 ebenfalls nicht.
-- **Warum nur Medium:** Die Vorbedingung ist eng: Das Flackern muss schon ab dem Einschalten im Takt unter 1 s laufen. Ein Teiler, der schon vor dem Einschalten ganz ab ist, fällt ohnehin unter AC-11.
-- **Lösungsrichtung:** Den Filter zählend bauen, also mindestens 1 s über 5 V seit dem Start, auch mit Unterbrechungen. Alternativ die Spec anpassen und die Lücke als bekannte Grenze dokumentieren.
-
 ### NEU-B — Low — Header zeigt „🔋 –“ bei erkanntem Akku unter 5 V
 Die Firmware übernimmt den Wert unter 5 V im Stillstand sofort (`battery.cpp:184-191`). Die App zeigt dafür „🔋 –“ (`battery.ts:41-42`). Das passiert in den 5 s vor der Sperre und danach neben dem Banner „Akkumessung gestört“. EC-4 sagt dagegen „kein Wechsel auf „🔋 –““. Inhaltlich greift AC-13, die Abweichung betrifft nur den Wortlaut von EC-4.
 
-### NEU-C — Low — EN-Hold wird vor dem aktiven HIGH freigegeben (heute nicht erreichbar)
-`gpio_hold_dis` (`motor.cpp:207`) läuft, bevor EN in `setEnablePin` HIGH getrieben wird (`motor.cpp:231`); `driver.toff(4)` kommt schon vorher. Beim Aufwachen aus dem Tiefschlaf wäre EN deshalb kurz undefiniert. Ohne Weckquelle kommt das heute nicht vor. Sichere Reihenfolge: EN als Ausgang auf HIGH setzen, erst dann den Hold freigeben.
+### Previously Fixed
+- NEU-A — Medium — Wackelkontakt schon ab dem Einschalten wurde nie gesperrt
+- NEU-C — Low — EN-Hold wurde vor dem aktiven HIGH freigegeben
 
 ### Beobachtungen (kein Bug)
 - In `design.md` steht die Frage „Hängt der ESP32 am Akku …“ noch als offen, in `spec.md` ist sie geschlossen (Doku-Drift).
