@@ -54,8 +54,24 @@ jest.mock('./useSliderStatus', () => {
   };
 });
 
+// PROJ-3 video: VideoPanel renders VisionCamera's native <Camera>, and
+// useVideoDrive (imported for its timing constants) pulls in native
+// camera-roll and keep-awake modules — none of them run in Jest.
+jest.mock('./VideoPanel', () => {
+  const R = require('react');
+  return { VideoPanel: (props: object) => R.createElement('VideoPanel', props) };
+});
+jest.mock('@react-native-camera-roll/camera-roll', () => ({ CameraRoll: { save: jest.fn() } }));
+jest.mock('@sayem314/react-native-keep-awake', () => ({
+  activateKeepAwake: jest.fn(),
+  deactivateKeepAwake: jest.fn(),
+}));
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Switch, ToastAndroid } from 'react-native';
 import { AutoDriveControls } from './AutoDriveControls';
+import type { VideoDriveApi } from './useVideoDrive';
+import { DEFAULT_VIDEO_SETTINGS, type VideoSettings } from './useVideoSettings';
 
 const flush = () => new Promise<void>(r => setImmediate(() => r()));
 
@@ -287,5 +303,138 @@ describe('PROJ-6 battery lock (BUG-4: motion only)', () => {
     expect(pressable(r, 'Schnell').props.disabled).toBe(true);
     expect(pressable(r, 'Als Preset speichern').props.disabled).toBe(false);
     expect(pressable(r, 'Löschen').props.disabled).toBe(false);
+  });
+});
+
+describe('video recording during the drive (PROJ-3 AC-13 ff.)', () => {
+  function fakeDrive(overrides: Partial<VideoDriveApi> = {}): VideoDriveApi {
+    return {
+      phase: 'ready',
+      busy: false,
+      elapsedSeconds: 0,
+      error: null,
+      savedCount: 0,
+      start: jest.fn(),
+      stop: jest.fn(),
+      ...overrides,
+    };
+  }
+
+  function videoProp(settings: Partial<VideoSettings> = {}, drive: VideoDriveApi = fakeDrive()) {
+    return {
+      settings: { ...DEFAULT_VIDEO_SETTINGS, ...settings },
+      onChange: jest.fn(),
+      camera: {} as never,
+      drive,
+    };
+  }
+
+  async function mountWith(props: object) {
+    let r!: ReactTestRenderer.ReactTestRenderer;
+    await act(async () => {
+      r = ReactTestRenderer.create(React.createElement(AutoDriveControls, props));
+      await flush();
+    });
+    return r;
+  }
+
+  const videoSwitch = (r: ReactTestRenderer.ReactTestRenderer) =>
+    r.root.findAllByType(Switch).find(s => s.props.accessibilityLabel === 'Video aufnehmen');
+  const panels = (r: ReactTestRenderer.ReactTestRenderer) => r.root.findAllByType('VideoPanel' as never);
+  const texts = (r: ReactTestRenderer.ReactTestRenderer) => r.root.findAllByType(Text).map(label);
+
+  it('has no video switch without the video prop (unchanged section)', async () => {
+    const r = await mount();
+    expect(videoSwitch(r)).toBeUndefined();
+  });
+
+  it('AC-13: the switch turns video on; the panel only shows while it is on', async () => {
+    const off = videoProp({ videoEnabled: false });
+    const r = await mountWith({ video: off });
+    expect(panels(r)).toHaveLength(0);
+    act(() => videoSwitch(r)?.props.onValueChange(true));
+    expect(off.onChange).toHaveBeenCalledWith({ videoEnabled: true });
+
+    const on = await mountWith({ video: videoProp({ videoEnabled: true }) });
+    expect(panels(on)).toHaveLength(1);
+  });
+
+  it('AC-14: with video on, "Start → Ende" starts the take instead of a bare drive', async () => {
+    const video = videoProp({ videoEnabled: true });
+    const r = await mountWith({ video });
+    await notify(both(10000));
+
+    await press(r, 'Start → Ende');
+
+    expect(video.drive.start).toHaveBeenCalledWith('startToEnd', 10);
+    expect(mockSent.filter(c => c[0] === 'auto')).toHaveLength(0);
+  });
+
+  it('with video off, "Start → Ende" drives as before', async () => {
+    const video = videoProp({ videoEnabled: false });
+    const r = await mountWith({ video });
+    await notify(both(10000));
+
+    await press(r, 'Start → Ende');
+
+    expect(video.drive.start).not.toHaveBeenCalled();
+    expect(mockSent).toContainEqual(['auto', 'startToEnd', 10]);
+  });
+
+  it('AC-29: shows the expected video length (duration + 4 s)', async () => {
+    const r = await mountWith({ video: videoProp({ videoEnabled: true }) });
+    await notify(both(10000));
+    expect(texts(r)).toContain('Videolänge ca. 14.0 s');
+  });
+
+  it('AC-17/AC-28: during a take only Stopp is usable, and it stops the take', async () => {
+    const drive = fakeDrive({ phase: 'preroll', busy: true });
+    const r = await mountWith({ video: videoProp({ videoEnabled: true }, drive) });
+    await notify(both(10000));
+
+    expect(pressable(r, 'Start → Ende').props.disabled).toBe(true);
+    expect(pressable(r, 'Als Start setzen').props.disabled).toBe(true);
+    expect(videoSwitch(r)?.props.disabled).toBe(true);
+    expect(panels(r)[0].props.busy).toBe(true);
+
+    await press(r, 'Stopp');
+    expect(drive.stop).toHaveBeenCalled();
+    expect(mockSent.filter(c => c[0] === 'auto')).toHaveLength(0);
+  });
+
+  it('AC-15: says "Video gespeichert" when a take was saved, and shows a take error', async () => {
+    const toast = jest.spyOn(ToastAndroid, 'show').mockImplementation(() => {});
+    const video = videoProp({ videoEnabled: true });
+    let r!: ReactTestRenderer.ReactTestRenderer;
+    await act(async () => {
+      r = ReactTestRenderer.create(React.createElement(AutoDriveControls, { video } as object));
+      await flush();
+    });
+
+    const saved = { ...video, drive: fakeDrive({ savedCount: 1, error: 'Aufnahme abgebrochen: voll' }) };
+    await act(async () => {
+      r.update(React.createElement(AutoDriveControls, { video: saved } as object));
+      await flush();
+    });
+
+    expect(toast).toHaveBeenCalledWith('Video gespeichert', ToastAndroid.SHORT);
+    expect(texts(r)).toContain('Aufnahme abgebrochen: voll');
+    toast.mockRestore();
+  });
+
+  it('EC-9: the video switch is locked while a timelapse runs', async () => {
+    const r = await mountWith({ disabled: true, video: videoProp() });
+    expect(videoSwitch(r)?.props.disabled).toBe(true);
+  });
+
+  it('EC-8: loading a preset leaves the video settings untouched', async () => {
+    await seed([SCHNELL]);
+    const video = videoProp({ videoEnabled: true, fps: 25 });
+    const r = await mountWith({ video });
+
+    await press(r, 'Schnell');
+
+    expect(value(r)).toBe('3.5');
+    expect(video.onChange).not.toHaveBeenCalled();
   });
 });

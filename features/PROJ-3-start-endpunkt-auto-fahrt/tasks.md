@@ -60,7 +60,7 @@
 
 ## Level 9 — Videoaufnahme: Auto-Fahrt-Anbindung
 
-- [ ] T17  App: `AutoDriveControls` — Schalter „Video aufnehmen" (gesperrt während Zeitraffer und während einer Fahrt mit Video), Anzeige „Videolänge ca. X s" (Dauer + 4 s), `VideoPanel` nur bei Schalter an; Fahrt-Buttons und Stopp über `useVideoDrive`, wenn der Schalter an ist, sonst bisheriger Weg; Sperre aller Bedienelemente außer Stopp, solange beschäftigt; Meldung „Video gespeichert" bzw. Fehlermeldung; Preset laden lässt die Video-Einstellungen unverändert + Render-Tests  · files: src/components/AutoDriveControls.tsx, src/components/AutoDriveControls.render.test.ts  · → AC-13, AC-14, AC-15, AC-17, AC-28, AC-29, EC-8, EC-9
+- [x] T17  App: `AutoDriveControls` — Schalter „Video aufnehmen" (gesperrt während Zeitraffer und während einer Fahrt mit Video), Anzeige „Videolänge ca. X s" (Dauer + 4 s), `VideoPanel` nur bei Schalter an; Fahrt-Buttons und Stopp über `useVideoDrive`, wenn der Schalter an ist, sonst bisheriger Weg; Sperre aller Bedienelemente außer Stopp, solange beschäftigt; Meldung „Video gespeichert" bzw. Fehlermeldung; Preset laden lässt die Video-Einstellungen unverändert + Render-Tests  · files: src/components/AutoDriveControls.tsx, src/components/AutoDriveControls.render.test.ts  · → AC-13, AC-14, AC-15, AC-17, AC-28, AC-29, EC-8, EC-9
 
 ## Level 10 — Videoaufnahme: Einbindung
 

@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Modal,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   ToastAndroid,
@@ -24,6 +25,13 @@ import { colors, minTouchTarget, radius, spacing, typography } from '../theme/co
 import { confirmIfBatteryCritical } from './battery';
 import { useSliderStatus } from './useSliderStatus';
 import { usePresets, type Preset } from './usePresets';
+import type { VideoCameraApi } from './useVideoCamera';
+import { POSTROLL_MS, PREROLL_MS, type VideoDriveApi } from './useVideoDrive';
+import type { VideoSettings } from './useVideoSettings';
+import { VideoPanel } from './VideoPanel';
+
+/** AC-29: the video is longer than the drive by the pre- and post-roll. */
+const VIDEO_EXTRA_SECONDS = (PREROLL_MS + POSTROLL_MS) / 1000;
 
 /**
  * Same 200-8000 steps/s range as PROJ-2's jog — verified against
@@ -240,6 +248,17 @@ type AutoDriveControlsProps = {
    * deleting presets stay available (qa-report.md BUG-4).
    */
   batteryLocked?: boolean;
+  /**
+   * PROJ-3 AC-13 ff.: video recording during the drive. Settings, camera and
+   * the take's orchestrator are called once in RootScreen and passed down;
+   * without this prop the section behaves exactly as before.
+   */
+  video?: {
+    settings: VideoSettings;
+    onChange: (changes: Partial<VideoSettings>) => void;
+    camera: VideoCameraApi;
+    drive: VideoDriveApi;
+  };
 };
 
 /**
@@ -257,6 +276,7 @@ type AutoDriveControlsProps = {
 export function AutoDriveControls({
   disabled = false,
   batteryLocked = false,
+  video,
 }: AutoDriveControlsProps = {}) {
   const { device } = useConnection();
   const status = useSliderStatus(device);
@@ -278,6 +298,21 @@ export function AutoDriveControls({
     distanceSteps: number;
     endIsAfterStart: boolean;
   } | null>(null);
+
+  const videoOn = video?.settings.videoEnabled ?? false;
+  // AC-28: a take with video is busy from its start to the saved file —
+  // also during pre-/post-roll, where the firmware does not report `driving`.
+  const videoBusy = video?.drive.busy ?? false;
+
+  // AC-15: "Video gespeichert" once per saved take.
+  const savedCount = video?.drive.savedCount ?? 0;
+  const lastSavedCountRef = useRef(savedCount);
+  useEffect(() => {
+    if (savedCount > lastSavedCountRef.current) {
+      ToastAndroid.show('Video gespeichert', ToastAndroid.SHORT);
+    }
+    lastSavedCountRef.current = savedCount;
+  }, [savedCount]);
 
   const [saveDialogVisible, setSaveDialogVisible] = useState(false);
   const [presetNameText, setPresetNameText] = useState('');
@@ -361,6 +396,7 @@ export function AutoDriveControls({
 
   const autoDriveBaseEnabled =
     !status.driving &&
+    !videoBusy &&
     !disabled &&
     !batteryLocked &&
     status.hasStart &&
@@ -387,7 +423,7 @@ export function AutoDriveControls({
   // PROJ-5 T6: single OR'd flag for every element that only ever checked
   // status.driving before — kept as one constant rather than repeating
   // `status.driving || disabled` at each call site.
-  const lockedByOtherMode = status.driving || disabled;
+  const lockedByOtherMode = status.driving || disabled || videoBusy;
   // PROJ-6: motion-only lock — see the batteryLocked prop.
   const motionLocked = lockedByOtherMode || batteryLocked;
 
@@ -447,12 +483,22 @@ export function AutoDriveControls({
     }
     // PROJ-6 AC-6: ask first when the battery is below 10 %.
     confirmIfBatteryCritical(status.batteryMillivolts, () => {
-      sendAutoDriveCommand(device, direction, durationSeconds).catch(() => {});
+      if (video && videoOn) {
+        // AC-14: record, pre-roll, drive, post-roll — useVideoDrive.
+        video.drive.start(direction, durationSeconds);
+      } else {
+        sendAutoDriveCommand(device, direction, durationSeconds).catch(() => {});
+      }
     });
   };
 
   const handleStop = () => {
-    sendStopCommand(device).catch(() => {});
+    if (video && videoBusy) {
+      // AC-17: also stops the recording, in any phase.
+      video.drive.stop();
+    } else {
+      sendStopCommand(device).catch(() => {});
+    }
   };
 
   // AC-4: loading a preset always replaces whatever was loaded before —
@@ -597,6 +643,40 @@ export function AutoDriveControls({
         <Text style={styles.errorText}>Start und Ende müssen sich unterscheiden</Text>
       )}
 
+      {video && (
+        <View style={styles.videoBlock}>
+          <View style={styles.videoToggleRow}>
+            <Text style={styles.durationLabel}>Video aufnehmen</Text>
+            <Switch
+              accessibilityLabel="Video aufnehmen"
+              value={videoOn}
+              // EC-9 / AC-28: never switch the camera owner during a take
+              // or a running timelapse.
+              disabled={lockedByOtherMode}
+              onValueChange={value => video.onChange({ videoEnabled: value })}
+              trackColor={{ false: colors.border, true: colors.primaryActive }}
+              thumbColor={videoOn ? colors.primary : colors.mutedForeground}
+            />
+          </View>
+          {videoOn && durationValid && durationSeconds !== null && (
+            <Text style={styles.statusLine}>
+              Videolänge ca. {formatSeconds(roundToDeciseconds(durationSeconds) + VIDEO_EXTRA_SECONDS)} s
+            </Text>
+          )}
+          {videoOn && (
+            <VideoPanel
+              camera={video.camera}
+              settings={video.settings}
+              onChange={video.onChange}
+              phase={video.drive.phase}
+              elapsedSeconds={video.drive.elapsedSeconds}
+              busy={lockedByOtherMode}
+            />
+          )}
+          {video.drive.error && <Text style={styles.errorText}>{video.drive.error}</Text>}
+        </View>
+      )}
+
       <View style={styles.buttonRow}>
         <Pressable
           onPress={() => handleDrive('startToEnd')}
@@ -622,7 +702,7 @@ export function AutoDriveControls({
         </Pressable>
       </View>
 
-      {status.driving && (
+      {(status.driving || videoBusy) && (
         <Pressable
           onPress={handleStop}
           disabled={disabled}
@@ -736,6 +816,15 @@ export function AutoDriveControls({
 export default AutoDriveControls;
 
 const styles = StyleSheet.create({
+  videoBlock: {
+    marginTop: spacing.md,
+  },
+  videoToggleRow: {
+    minHeight: minTouchTarget,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   container: {
     padding: spacing.lg,
   },
