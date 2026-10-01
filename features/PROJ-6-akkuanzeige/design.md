@@ -45,7 +45,7 @@ Die Sperre wird wie die bestehende gegenseitige Sperre von PROJ-5 in `RootScreen
 main.cpp loop()
 +-- motorWatchdogCheck() / motorAutoDriveCheck() / motorTimelapseMoveCheck()   (unverändert)
 +-- batteryUpdate()            (NEU, battery.cpp)
-+-- bleNotifyStatusIfChanged() (erweitert: 8-Byte-Payload)
++-- bleNotifyStatusIfChanged() (erweitert: 10-Byte-Payload)
 
 battery.cpp / battery.h (NEU)
 +-- batterySetup()      — ADC-Pin konfigurieren (11-dB-Dämpfung, Messbereich bis ca. 2,5 V am Pin)
@@ -56,16 +56,18 @@ battery.cpp / battery.h (NEU)
 |   · Schutzwert: jede Messung, auch unter Last — für den 5-s-Filter des Schutz-Stopps
 +-- batteryDisplayMillivolts() — letzter Anzeigewert, 0 = noch kein Wert
 +-- batteryIsLocked()          — Sperre aktiv (bis Neustart)
++-- batteryShutdownSeconds()   — Restsekunden bis zum Tiefschlaf (1–60), sonst 0
 
 motor.cpp (erweitert)
-+-- motorLockout()   (NEU) — setzt das Sperr-Flag und ruft motorStop()
++-- motorLockout(grund) (NEU) — setzt Sperr-Flag und Sperrgrund, ruft motorStop(), schaltet den Treiber stromlos
++-- motorPrepareDeepSleep() (NEU) — hält den EN-Pin für den Tiefschlaf auf HIGH
 +-- motorJog / motorAutoDrive / motorTimelapseMoveTo — verwerfen jeden Befehl, solange gesperrt
 +-- motorGetStatus() — liefert zusätzlich `locked` und `moving` (Stepper läuft)
 ```
 
 **Schutz-Stopp-Logik (AC-7, AC-8, EC-1, EC-3, AC-11):**
-- „Akku erkannt" = Schutzwert ≥ 5,0 V. Darunter: kein Schutz-Stopp, Zähler zurückgesetzt.
-- Liegt der Schutzwert ≥ 5,0 V und < 9,3 V, läuft ein Zähler; jede Messung ≥ 9,3 V setzt ihn zurück. Erreicht er 5 s ununterbrochen → `motorLockout()`.
+- „Akku erkannt" (seit dem Start) = insgesamt 5 Messwerte ≥ 5,0 V — Einzelheiten unter „Fehlererkennung der Messung". Ohne erkannten Akku: kein Schutz-Stopp.
+- Ein gemeinsamer Zähler läuft, solange jede Messung „unsicher" ist: ≥ 5,0 V und < 9,3 V (leer) oder — nach erkanntem Akku — < 5,0 V (gestört). Jede Messung ≥ 9,3 V (oder < 5,0 V ohne erkannten Akku) setzt ihn zurück. Erreicht er 5 s ununterbrochen → `motorLockout()` mit Grund „gestört", wenn die Strecke einen Wert < 5,0 V enthielt, sonst „leer".
 - Gilt in Bewegung **und** im Stillstand (AC-8: auch im Stillstand unter 9,3 V → gesperrt).
 - Die Sperre ist ein reiner RAM-Zustand und wird **nur** durch einen Neustart des ESP32 aufgehoben (Akkuwechsel = Neustart, da der ESP32 am Akku hängt). Keine automatische Aufhebung bei Spannungserholung (EC-3).
 - Solange gesperrt, prüft `batteryUpdate()` in jedem Durchlauf, ob der Stepper trotzdem läuft, und ruft dann erneut `motorStop()` (siehe Technische Entscheidungen, Race-Garantie).
@@ -94,7 +96,7 @@ Die Status-Characteristic (`6e400003-…`, Notify) wächst von 6 auf **10 Byte**
 Keine persistierte Entität — `docs/data-model.md` bleibt unverändert. Alle Werte sind flüchtiger Laufzeitzustand.
 
 **App — `SliderStatus` (bestehend, PROJ-3) wird erweitert um:**
-- `batteryMillivolts` — ganze Zahl oder `null`. `null`, wenn der Payload keine Bytes 6–7 hat oder der Wert `0` ist (noch kein Wert, EC-5). Werte über 20 000 mV gelten als unplausibel und werden als `null` behandelt.
+- `batteryMillivolts` — ganze Zahl oder `null`. `null`, wenn der Payload keine Bytes 6–7 hat oder der Wert `0` ist (noch kein Wert, EC-5). Werte über 13 500 mV gelten als unplausibel (3S max. 12 600 mV + Toleranz) und werden als `null` behandelt.
 - `batteryLocked` — ja/nein (bit6)
 - `moving` — ja/nein (bit7)
 
@@ -120,8 +122,8 @@ Keine persistierte Entität — `docs/data-model.md` bleibt unverändert. Alle W
 0 % fällt damit genau auf die Schutz-Schwelle der Firmware.
 
 **Firmware — Konstanten (in `battery.cpp`, keine Laufzeit-Einstellung):**
-- Messpin GPIO 34; Teilerfaktor 126/22; Kalibrierfaktor (Start 1,000, nach der Multimeter-Messung einmal gesetzt, siehe „Settings the user makes")
-- Schwellen: „Akku erkannt" 5000 mV, Schutz 9300 mV, Filter 5000 ms
+- Messpin GPIO 34; Teilerfaktor 126/22; Kalibrierfaktor 0,993 (per Multimeter bestimmt, siehe „Settings the user makes" und Umsetzungshinweise)
+- Schwellen: „Akku erkannt" 5000 mV (5 Messwerte seit dem Start), Schutz 9300 mV, Filter 5000 ms, Frist bis zum Tiefschlaf 60 000 ms
 - Messtakt 200 ms, 16 Einzelwerte je Messung, Anzeige-Übernahme höchstens alle 10 s, Rundung 20 mV
 
 ## Behaviors & Access
@@ -156,7 +158,7 @@ Sperre ausgelöst (Grund: Akku leer ODER Messung gestört)
 ### Fehlererkennung der Messung (AC-13, EC-7)
 
 - `battery.cpp` merkt sich **„Akku seit Start erkannt"** (Ja/Nein, RAM, gesetzt nach insgesamt 5 Messwerten ≥ 5000 mV seit dem Start — gezählt, nicht am Stück, nie zurückgesetzt. BUG-13: ein einzelner Störwert reicht nicht; NEU-A: ein schon beim Einschalten wackelnder Kontakt wird trotzdem erkannt).
-- Ist er gesetzt und liegt der Schutzwert **5 s ununterbrochen unter 5000 mV** → Sperre mit Grund „Messung gestört" (derselbe Ablauf wie oben).
+- Ist er gesetzt und liegt der Schutzwert **5 s ununterbrochen unter 5000 mV** → Sperre mit Grund „Messung gestört" (derselbe Ablauf wie oben). Wechseln die Werte zwischen „leer" und „< 5000 mV", zählt die Strecke gemeinsam (nächster Punkt).
 - Ist er nicht gesetzt (Start im USB-Betrieb, EC-7) → Werte < 5000 mV bedeuten weiter „kein Akku": keine Sperre, keine Abschaltung.
 - **Ein gemeinsamer Zähler „unsicher"** (geändert nach QA BUG-8, 2026-10-01): Jede Messung, die „leer" (5,0–9,3 V) **oder** „gestört" (< 5 V nach erkanntem Akku) ist, zählt weiter; nur eine Messung ≥ 9,3 V (oder < 5 V ohne erkannten Akku) setzt ihn zurück. Nach 5 s → Sperre. Grund: „Messung gestört", wenn die Strecke mindestens einen Wert < 5 V enthielt, sonst „Akku leer". Vorher waren die Zähler getrennt — ein Wackelkontakt bei leerem Akku hat sie gegenseitig zurückgesetzt und den Schutz ausgehebelt.
 
@@ -167,7 +169,7 @@ Sperre ausgelöst (Grund: Akku leer ODER Messung gestört)
   - `lowBattery`: Titel „Akku leer – bitte laden"
   - `measurementFault`: Titel „Akkumessung gestört – bitte Verkabelung prüfen"
   - mit Restsekunden: Zeile „Slider schaltet sich in N s ab" (N zählt live mit, 1× pro Sekunde vom Slider gemeldet); danach bricht die Verbindung ab und die App zeigt ihren normalen Zustand für eine verlorene Verbindung
-  - Text „Bitte schalte den Slider aus und lade den Akku" als Hinweis auf den Restverbrauch
+  - Hinweistext je nach Grund: `lowBattery` → „… Bitte schalte den Slider aus und lade den Akku — auch abgeschaltet verbraucht die Elektronik noch etwas Strom."; `measurementFault` → „… Bitte schalte den Slider aus und prüfe die Verkabelung des Spannungsteilers." (BUG-11)
 - Die Sperre in `RootScreen`/`TimelapseControls` hängt weiter an `batteryLocked` (bit6) — unabhängig vom Grund.
 
 ### Low-Bugs aus der QA (ohne Spec-Änderung)
@@ -195,7 +197,7 @@ Keine neuen Pakete — App: bestehende React-Native-Mittel (`Alert` für die Nac
 
 | Decision | Rationale |
 | --- | --- |
-| Akkuwert in der bestehenden Status-Characteristic (6 → 8 Byte) | Ein Abo, ein Decoder, dasselbe additive Erweiterungsmuster wie PROJ-4/5; alte Firmware bleibt lesbar |
+| Akkuwert in der bestehenden Status-Characteristic (6 → 8 Byte, mit dem Refine 10 Byte) | Ein Abo, ein Decoder, dasselbe additive Erweiterungsmuster wie PROJ-4/5; alte Firmware bleibt lesbar |
 | Firmware überträgt Millivolt, die App rechnet in Prozent um | Kennlinie und Warnschwellen sind Anzeige-Logik, in der App leicht anpassbar und testbar; die Firmware braucht nur Volt für den Schutz-Stopp |
 | Anzeigewert nur im Stillstand, Schutzwert auch unter Last (zwei getrennte Werte) | Anzeige springt nicht bei Lastspitzen (AC-3); Schutz muss auch während der Fahrt greifen (AC-7) |
 | Schutz-Stopp über „5 s ununterbrochen < 9,3 V" (Zähler, bei jeder Messung ≥ 9,3 V zurückgesetzt) | Filtert Einbrüche beim Anfahren mit 8000 Steps/s (EC-1), greift bei echter Entladung trotzdem zuverlässig |

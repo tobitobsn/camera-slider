@@ -12,14 +12,14 @@ Owner: **PROJ-1** (BLE-Verbindung & Pairing) — der Rahmen ist ein einfacher He
 
 ## Top-Level-Bereiche
 
-Kein Navigationsmenü — die App ist eine einzelne Bildschirmseite. Presets (PROJ-4) und Zeitraffer (PROJ-5) werden als Abschnitte/Sheets auf derselben Seite ergänzt, sobald sie gebaut werden — keine eigenen Routen.
+Kein Navigationsmenü — die App ist eine einzelne Bildschirmseite. Presets (PROJ-4) und Zeitraffer (PROJ-5) sind Abschnitte derselben Seite — keine eigenen Routen.
 
 ## Layout-Bereiche
 
 - **Header:** Verbindungsstatus (verbunden/getrennt, Gerätename), Reconnect-Aktion; im Zustand `connected` rechts die Akkuanzeige (PROJ-6)
 - **Sperr-Banner (PROJ-6):** unter dem Header, nur wenn der Slider nach einem Schutz-Stopp gesperrt ist — „Akku leer – bitte laden“ bzw. „Akkumessung gestört – bitte Verkabelung prüfen“ mit Countdown bis zur Abschaltung, dauerhaft, nicht wegklickbar; nach der Abschaltung übernimmt der normale Zustand für eine verlorene Verbindung
 - **Content:** Manuelle Steuerung (Jog-Buttons/Slider), Start-/Endpunkt setzen, Auto-Fahrt auslösen — vertikal gestapelt
-- **Footer/Sheet (später):** Presets-Liste (PROJ-4), Zeitraffer-Einstellungen (PROJ-5)
+- **Weitere Abschnitte auf derselben Seite:** Auto-Fahrt mit Presets-Liste (PROJ-3/PROJ-4) und Zeitraffer (PROJ-5) — keine Sheets, keine eigenen Routen
 
 ## Seiten-Muster
 
