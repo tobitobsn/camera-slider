@@ -241,3 +241,107 @@ EC-4 verlangt bei „Akku erkannt, dann < 5 V ohne Neustart“ die Anzeige „�
 - **Regression:** keine in PROJ-1 bis PROJ-5
 
 **Production-Ready: NEIN.** BUG-8 (High) ist offen. Der Fix bleibt im Design, kein Vertragswechsel: `/build PROJ-6` mit gemeinsamem Unsicher-Zähler, die Low-Bugs BUG-9 bis BUG-11 und BUG-13 gleich mit. BUG-12 braucht ein kurzes `/refine PROJ-6`. Danach Re-Verifikation per `/qa`. Status: **In Review**.
+
+---
+
+# Nachtrag 3 — Re-Verifikation nach Bugfix-Build und `/refine`, 2026-10-01
+
+**Breite:** Re-Verifikation, `git diff --stat 2bed11a..HEAD`. Geänderte Produktionsdateien:
+- `firmware/src/battery.cpp`
+- `firmware/src/motor.cpp`
+- `src/components/BatteryLockBanner.tsx` (dazu der Test)
+
+Außerdem hat `/refine` in `spec.md` EC-4 enger gefasst, EC-9 ergänzt und eine offene Frage geschlossen. Der Vertrag hat sich damit nur an Stellen geändert, die der Diff selbst abdeckt. Deshalb lief eine einzige `qa-engineer`-Lane mit Step 2, dann 3, dann 4. Geprüft wurden BUG-8 bis BUG-13, EC-4, EC-9 und jedes AC/EC, dessen Code im Diff liegt.
+
+Alle übrigen Ergebnisse aus Nachtrag 2 gelten weiter: AC-1 bis AC-6, AC-10, EC-2, EC-5, EC-6 — unverändert seit 2026-10-01 (Nachtrag 2), in diesem Lauf nicht erneut ausgeführt, weil der Diff `battery.ts`, `BatteryIndicator`, `client.ts`, `ble.cpp` und die Steuer-Komponenten nicht berührt.
+
+**Probe:** `none` für App und Firmware. Belege kommen aus Code, Simulation (`scratchpad/qa14/fw.js`, `scen.js`, Nachbau von `battery.cpp`) und den Nutzertests.
+
+## Automatisierte Tests
+- [x] `npm test`: 16 Suites und 239 Tests bestanden, 0 fehlgeschlagen (`scratchpad/suite14.log`, ein Lauf durch den Owner)
+- [x] Firmware-Build `[SUCCESS]` (`scratchpad/fw14.log`); die Objektdateien sind jünger als die Quellen
+- [x] Gegenprobe einzeln: `npx jest src/components/BatteryLockBanner.test.ts` → 5/5. Der Rot-Nachweis für den neuen Test (BUG-11) wurde im Build erbracht: Gegen die alte Banner-Version schlug er fehl.
+- [!] Firmware-Tests — no test command recorded for layer firmware
+
+## Protokollierter Nutzertest (Gerät, Labornetzteil, 2026-10-01, Firmware `f798cce`, App-Release mit neuem Banner-Text)
+- Akku bei 9,0 V, Abgriff am Teiler im Takt von 1–3 s an- und abgeklemmt:
+  - Sperre mit „Akkumessung gestört – bitte Verkabelung prüfen“
+  - Hinweis auf die Verkabelung
+  - Countdown, danach Abschaltung
+- Gegenprobe bei 12 V: keine Sperre
+- Rückmeldung des Nutzers: „alles ok“
+
+## Offene Bugs aus Nachtrag 2
+- [x] **BUG-8 (High) — geschlossen.**
+  - Code: gemeinsamer Zähler in `battery.cpp:123-148`.
+  - Simulation: Wechsel 9000/0 mV (200 ms und 1 s), „4 s leer + 1× 0 mV“ und Zufallswerte 0..9000 sperren nach 5,0 s mit Grund „gestört“. Bei gesundem Akku ergibt der Wechsel 11000/0 mV keine Sperre.
+  - Am Gerät bestätigt durch den Nutzertest.
+  - Restlücke im Boot-Fenster: NEU-A.
+- [x] **BUG-9 (Low) — geschlossen** im Code (`motor.cpp:207-208`). Laufzeit „Tiefschlaf → Reset → Jog“ nicht verifiziert. Die Reihenfolge beim Aufwachen beschreibt NEU-C.
+- [x] **BUG-10 (Low) — geschlossen.** `battery.cpp:158-163`. Simulation: Sperre bei genau `millis()==0` und über den Überlauf ergibt 60..1 und den Tiefschlaf nach 60 000 ms.
+- [x] **BUG-11 (Low) — geschlossen.** `BatteryLockBanner.tsx:25-28`, Test `:34-39`. Der Text steht im Release-Bundle (UTF-16-Suche) und wurde vom Nutzer gesehen.
+- [x] **BUG-12 (Low) — geschlossen.** EC-4 in `spec.md:46` neu gefasst und deckungsgleich mit `battery.cpp:125`.
+- [x] **BUG-13 (Low) — geschlossen.** `battery.cpp:114-122`. Simulation im USB-Betrieb: ein Spike und 5 Spikes in Folge sperren nicht, erst 1 s am Stück. Folgedefekt: NEU-A.
+
+## Acceptance Criteria und Edge Cases im Diff
+- [x] AC-7 — Simulation: konstant 9200 mV → „leer“ nach 5,0 s, auch in der ersten Sekunde nach dem Boot. Schutz auch während der Fahrt (`battery.cpp:228`). [!] Am Gerät auf `f798cce`: nur über den Wackeltest; eine Sperre mit Grund „leer“ wurde dort nicht ausgelöst.
+- [x] AC-8 — Guards `motor.cpp:253, 425, 542`; `lockedOut` nur `= true` (`motor.cpp:667`)
+- [x] AC-9 — `RootScreen.tsx:124-139` ist unverändert, Titel per Test `BatteryLockBanner.test.ts:17-19`
+- [x] AC-11 — Simulation: USB 0 mV bzw. Rauschen 0..4999 über 600 s → keine Sperre (`battery.cpp:125`)
+- [x] AC-12 — `motor.cpp:673-679`, `battery.cpp:164-168`. Simulation: 60..1, Tiefschlaf nach 60 s, keine Weckquelle. Am Gerät: Countdown und Abschaltung im Nutzertest.
+- [x] AC-13 — Simulation: 11000 → 0 mV ergibt „gestört“ nach 5,0 s. Am Gerät: Nutzertest. Bei gemischter Strecke sperrt es früher, so gewollt (EC-9). Abweichung bei der Definition von „erkannt“: NEU-A.
+- [x] EC-1 — Simulation: 4,8 s 9000 mV / 0,2 s 9400 mV und ein einzelner 0-mV-Wert alle 3 s bei gesundem Akku → keine Sperre
+- [x] EC-3 — Simulation: 7 s 9000 mV, danach 12000 mV → bleibt gesperrt, Tiefschlaf; `motorLockout` idempotent (`motor.cpp:659-661`)
+- [x] EC-4 — Simulation: USB, dann Akku → Prozentwert ohne Fehler. Akku ab bei weiter angestecktem USB → „gestört“ nach 5 s. Den Header beschreibt NEU-B.
+- [x] EC-7 — Simulation: USB 0 mV, Rauschen, 1 und 5 Spikes → keine Sperre
+- [x] EC-8 — Code: Notify-on-Subscribe ist unverändert (`ble.cpp:262-275`), der Countdown-Wert stimmt in der Simulation. [!] Am Gerät nicht geprüft.
+- [x] EC-9 — Simulation und Nutzertest am Gerät, solange der Akku vorher erkannt war. Für das Boot-Fenster: NEU-A.
+
+## Security (beschränkt auf den Diff)
+- [ ] Schutz per Verkabelung aushebeln → NEU-A (nur im Boot-Fenster)
+- [x] Timing und Überlauf: Sperre bei `millis()==0`, über den Überlauf, „erkannt“-Filter über den Überlauf — Simulation
+- [x] Sperre per BLE auslösen, aufheben oder verzögern: nicht möglich. `motorLockout` wird nur aus `battery.cpp:142,147` aufgerufen; `ble.cpp` und `main.cpp` sind nicht im Diff.
+- [x] Secrets: `git diff 2bed11a..HEAD | grep -iE "key|secret|token|password"` liefert nichts
+- [!] Auth, Injection, Brute Force, Credentials in der URL — nicht anwendbar. Rate Limiting — not implemented (optional for MVP).
+
+## Regression
+- [x] PROJ-2, PROJ-3, PROJ-5 (`motorSetup`): nur `motor.cpp:207-208` ist dazugekommen, ohne Wirkung beim Kaltstart; `setEnablePin` und `setAutoEnable(true)` unverändert (`motor.cpp:231-232`)
+- [x] PROJ-1 / RootScreen: Banner-Props unverändert; `AutoDriveControls.render.test.ts`, `ConnectionProvider.test.tsx` und `App.test.tsx` grün (suite14)
+- [!] Laufzeit am Gerät — no way to run and probe this project was recorded
+
+## Neue Befunde
+### NEU-A — Medium — Wackelkontakt schon ab dem Einschalten wird nie gesperrt
+- **Ursache:** „Akku erkannt“ verlangt seit dem Fix für BUG-13 eine Sekunde am Stück mindestens 5 V (`battery.cpp:114-125`). Liefert ein loser Abgriff vom Einschalten an nie 6 Messungen in Folge über 5 V, wird der Akku nie erkannt, und der Slider sperrt nie.
+- **Simulation** (leerer Pack, 9000 mV): Keine dieser Folgen sperrt in 3600 s.
+  - Wechsel 9000/0 mV alle 200 ms
+  - 500 ms Kontakt / 500 ms keiner
+  - 800 ms Kontakt / 200 ms keiner
+- Mit 10 s festem Kontakt vor dem Wackeln sperrt der Slider nach 5 s.
+- **Abweichung von der Spec:** AC-13 definiert „erkannt“ als „Messwert ≥ 5 V“, ohne Dauer. Der Code-Kommentar in `battery.cpp:52` ist veraltet.
+- **Keine Regression:** Vor dem Fix sperrte dieser Fall wegen BUG-8 ebenfalls nicht.
+- **Warum nur Medium:** Die Vorbedingung ist eng: Das Flackern muss schon ab dem Einschalten im Takt unter 1 s laufen. Ein Teiler, der schon vor dem Einschalten ganz ab ist, fällt ohnehin unter AC-11.
+- **Lösungsrichtung:** Den Filter zählend bauen, also mindestens 1 s über 5 V seit dem Start, auch mit Unterbrechungen. Alternativ die Spec anpassen und die Lücke als bekannte Grenze dokumentieren.
+
+### NEU-B — Low — Header zeigt „🔋 –“ bei erkanntem Akku unter 5 V
+Die Firmware übernimmt den Wert unter 5 V im Stillstand sofort (`battery.cpp:184-191`). Die App zeigt dafür „🔋 –“ (`battery.ts:41-42`). Das passiert in den 5 s vor der Sperre und danach neben dem Banner „Akkumessung gestört“. EC-4 sagt dagegen „kein Wechsel auf „🔋 –““. Inhaltlich greift AC-13, die Abweichung betrifft nur den Wortlaut von EC-4.
+
+### NEU-C — Low — EN-Hold wird vor dem aktiven HIGH freigegeben (heute nicht erreichbar)
+`gpio_hold_dis` (`motor.cpp:207`) läuft, bevor EN in `setEnablePin` HIGH getrieben wird (`motor.cpp:231`); `driver.toff(4)` kommt schon vorher. Beim Aufwachen aus dem Tiefschlaf wäre EN deshalb kurz undefiniert. Ohne Weckquelle kommt das heute nicht vor. Sichere Reihenfolge: EN als Ausgang auf HIGH setzen, erst dann den Hold freigeben.
+
+### Beobachtungen (kein Bug)
+- In `design.md` steht die Frage „Hängt der ESP32 am Akku …“ noch als offen, in `spec.md` ist sie geschlossen (Doku-Drift).
+- An der 9,3-V-Schwelle gibt es keine Hysterese. Das war schon vor dem Diff so und ist EC-1-konform.
+
+## Nicht verifiziert in diesem Lauf
+- [!] Laufzeit am Gerät über den Wackeltest vom 2026-10-01 hinaus — no way to run and probe this project was recorded. Betroffen: Sperre „leer“ (AC-7) auf `f798cce`, EC-8, Neustart nach dem Tiefschlaf mit Jog (BUG-9), NEU-A und NEU-B.
+- [!] Firmware-Tests — no test command recorded for layer firmware (Ersatz: Simulation)
+- [!] Optik von Banner und Header — kein Viewport
+- [!] EN bleibt im Tiefschlaf HIGH; Ruhestrom — nur Code, am Gerät nicht messbar bzw. nicht gemessen
+
+## Zusammenfassung (Nachtrag 3)
+- **Offene Bugs aus Nachtrag 2:** alle 6 geschlossen (BUG-8 bis BUG-13)
+- **Neu:** 0 Critical, 0 High, 1 Medium (NEU-A), 2 Low (NEU-B, NEU-C)
+- **Security:** keine Umgehung per BLE; Lücke per Verkabelung nur noch im Boot-Fenster (NEU-A)
+- **Regression:** keine
+
+**Production-Ready:** ausstehend — siehe Entscheidung unten.

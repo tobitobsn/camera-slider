@@ -27,9 +27,11 @@ constexpr unsigned long kSerialLogIntervalMs = 2000;
 constexpr uint32_t kBatteryPresentMillivolts = 5000;
 constexpr uint32_t kProtectMillivolts = 9300;
 constexpr unsigned long kProtectFilterMs = 5000;
-// BUG-13: "battery seen" needs this long >= 5000 mV, so a single spike on a
-// floating pin can't arm the measurement-fault check during a USB start.
-constexpr unsigned long kBatterySeenFilterMs = 1000;
+// BUG-13 / NEU-A: "battery seen" needs this many readings >= 5000 mV since
+// boot (5 × 200 ms = 1 s worth), so a single spike on a floating pin can't
+// arm the measurement-fault check during a USB start. Counted, not "in a
+// row": a contact that is already loose at power-on still adds up.
+constexpr uint8_t kBatterySeenReadings = 5;
 
 constexpr uint16_t kDisplayRoundingMillivolts = 20;
 
@@ -47,9 +49,10 @@ unsigned long unsafeSinceMillis = 0;
 // Whether the current stretch contained a reading below "present" — then
 // the wiring is the more likely cause and the lock reports a fault.
 bool stretchHadFault = false;
-unsigned long presentSinceMillis = 0;
+uint8_t presentReadings = 0;
 
-// spec.md AC-13 / EC-7: set by the first reading >= 5000 mV, never cleared.
+// spec.md AC-13 / EC-7: set after kBatterySeenReadings readings >= 5000 mV,
+// never cleared.
 // USB and battery can't be connected at the same time, so a drop below
 // 5000 mV without a reboot can only be a measurement fault.
 bool batterySeenSinceBoot = false;
@@ -111,14 +114,8 @@ bool stretchReached(bool condition, unsigned long& sinceMillis, unsigned long no
 
 void updateProtection(uint32_t packMillivolts, unsigned long now) {
   const bool present = packMillivolts >= kBatteryPresentMillivolts;
-  if (present) {
-    if (presentSinceMillis == 0) {
-      presentSinceMillis = now == 0 ? 1 : now;
-    } else if (now - presentSinceMillis >= kBatterySeenFilterMs) {
-      batterySeenSinceBoot = true;
-    }
-  } else {
-    presentSinceMillis = 0;
+  if (present && !batterySeenSinceBoot && ++presentReadings >= kBatterySeenReadings) {
+    batterySeenSinceBoot = true;
   }
   const bool low = present && packMillivolts < kProtectMillivolts;
   // EC-7: a USB start that never saw a battery never counts as a fault.

@@ -202,8 +202,11 @@ uint32_t speedPercentToStepsPerSecond(uint8_t speedPercent) {
 }  // namespace
 
 void motorSetup() {
-  // BUG-9: release the EN hold motorPrepareDeepSleep() set, in case this
-  // boot is a wake-up that didn't reset the RTC domain.
+  // BUG-9 / NEU-C: release the EN hold motorPrepareDeepSleep() set, in case
+  // this boot is a wake-up that didn't reset the RTC domain — drive EN high
+  // (driver off) first, so the pin is never undefined in between.
+  pinMode(kEnablePin, OUTPUT);
+  digitalWrite(kEnablePin, HIGH);
   gpio_hold_dis(static_cast<gpio_num_t>(kEnablePin));
   gpio_deep_sleep_hold_dis();
   // EN pin high (driver off) is FastAccelStepper's default before any run
