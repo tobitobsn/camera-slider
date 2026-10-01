@@ -332,3 +332,73 @@ Der Fix wurde in diesem Lauf nicht von einer eigenen Lane geprüft, sondern übe
 - Die oben genannten Punkte bleiben ungeprüft.
 
 Status: **Approved**.
+
+---
+
+# Nachtrag 4 — Re-Verifikation nach Doku-Abgleich und `/refine` zu NEU-B, 2026-10-01
+
+**Breite:** Diff `git diff --stat ab636bf..HEAD` umfasst nur Doku:
+- `features/PROJ-6-akkuanzeige/spec.md`: EC-4 neu gefasst, Product Decision zu NEU-B
+- `features/PROJ-6-akkuanzeige/design.md`: an den gebauten Stand angeglichen
+- `docs/app-shell.md`
+- `features/PROJ-3-start-endpunkt-auto-fahrt/tasks.md`: T8/T9 nachgetragen
+
+Produktionscode ist unverändert (`git diff d9df3bd..HEAD -- src firmware/src` ist leer). Geprüft hat eine `qa-engineer`-Lane in der Reihenfolge Step 2 → 3 → 4. Alle übrigen Ergebnisse aus Nachtrag 3 gelten unverändert seit 2026-10-01 und wurden nicht erneut ausgeführt, weil der Diff keinen Code berührt. Probe: `none`. Firmware-Build und Release-Build wurden übersprungen, beide sind unverändert seit 2026-10-01 (siehe den Diff-Befehl oben).
+
+## Automatisierte Tests
+- [x] `npm test`: 16 Suites, 239 Tests bestanden, 0 fehlgeschlagen (`scratchpad/suite15.log`, ein Lauf durch den Owner)
+- [!] Firmware-Tests — no test command recorded for layer firmware
+
+## Ergebnisse
+- [x] **EC-4 (neuer Wortlaut)**, geprüft am Code:
+  - USB → Akku: Die Firmware übernimmt sofort den neuen Wert (`battery.cpp:181-188`) und sperrt nicht (`:120-123`), die App zeigt den Prozentwert (`client.ts:456-458`, `battery.ts:41-58`).
+  - Akku erkannt, dann < 5 V: nach 5 s Sperre mit Grund „gestört“ (`battery.cpp:117-139`, `ble.cpp:80`, `client.ts:463`, `BatteryLockBanner.tsx:20-23`).
+  - Der Header zeigt dabei „🔋 –“ ohne Warnfarbe (`battery.cpp:93-95`, `battery.ts:42`, `BatteryIndicator.tsx:15-16,32`, Test `BatteryIndicator.test.ts:34`).
+  - [!] Am Gerät nicht geprüft.
+- [x] **NEU-B — geschlossen durch die Spec-Änderung.** Der Code erfüllt EC-4 im neuen Wortlaut.
+- [x] **design.md-Aussagen aus dem Diff** stimmen mit dem Code überein:
+  - 10-Byte-Payload (`ble.cpp:44,56-81`)
+  - `batteryShutdownSeconds` (`battery.cpp:150-165`)
+  - `motorLockout` mit Grund und Treiber-Aus (`motor.cpp:661-683`)
+  - `motorPrepareDeepSleep` (`motor.cpp:689-694`)
+  - 5 Messwerte bis „erkannt“ (`battery.cpp:34,117-119`)
+  - gemeinsamer Zähler (`battery.cpp:120-145`)
+  - 13 500 mV (`client.ts:109`)
+  - Kalibrierfaktor 0,993 (`battery.cpp:18`)
+  - Schwellen (`battery.cpp:27-39`)
+  - Hinweistexte (`BatteryLockBanner.tsx:25-28`)
+- [x] **app-shell.md**: eine Seite ohne Navigation (`App.tsx:11,23`). Auto-Fahrt mit Presets und Zeitraffer sind Abschnitte im selben ScrollView (`RootScreen.tsx:137-154`). Das einzige Modal ist der Dialog für den Preset-Namen (`AutoDriveControls.tsx:693-731`).
+- [x] **PROJ-3 T8/T9**: Die Commits existieren und berühren die genannten Dateien (`git show --stat`).
+- [x] **Security**: Nur Markdown im Diff, der Secrets-Grep über den Diff liefert nichts. Auth, Injection, Rate-Limit und Brute-Force sind [!] nicht anwendbar.
+- [x] **Regression**: Ohne Code-Änderung ist kein Verhaltensbruch möglich. Der Rahmen in app-shell.md stimmt mit `RootScreen.tsx:62-68` und `ConnectionHeader.tsx:94-98` überein.
+
+### Previously Fixed
+- NEU-B — Low — Header zeigt „🔋 –“ bei erkanntem Akku unter 5 V (geschlossen durch `/refine`, EC-4 neu gefasst)
+
+## Neue Befunde
+### NEU-D — Low — Sperr-Banner scrollt aus dem Sichtbereich
+`BatteryLockBanner` steht im ScrollView (`RootScreen.tsx:115-129`), nicht fest unter dem Header. Die Begründung der NEU-B-Entscheidung (`spec.md:77`, „Banner dauerhaft sichtbar“) und `app-shell.md:20` treffen daher nur zu, solange ganz oben gescrollt ist.
+
+Repro: App verbunden, Akku erkannt, ganz nach unten zum Zeitraffer scrollen, Teiler abziehen. Nach 5 s ist der Slider gesperrt, im Sichtbereich steht nur „🔋 –“ im Header.
+
+Abgeschwächt wird das, weil alle Bewegungen gesperrt sind und eine laufende Zeitraffer-Sequenz „Akkumessung gestört – Bewegung gestoppt“ meldet (`useTimelapseSequence.ts:197-200`).
+
+Lösungsrichtung: entweder den Banner fest unter dem Header platzieren (`/build`), oder per `/refine` „dauerhaft“ als „nicht wegklickbar“ festlegen.
+
+### NEU-E — Low — Veralteter Code-Kommentar
+`src/ble/client.ts:87-88` nennt noch „> 20000“ als unplausibel, der Code nutzt 13 500 (`client.ts:109`).
+
+### Beobachtungen (kein Bug, außerhalb des Diffs)
+- Ein Wackelkontakt im Stillstand kann den Header bis zur Sperre zwischen Prozentwert und „🔋 –“ flackern lassen. Ursache: Die Übernahme beim Seitenwechsel um 5000 mV geht sofort (`battery.cpp:181-188`), entgegen „höchstens alle 10 s“ in `design.md:55`.
+- `design.md:86`: „andere Werte → wie 0 behandelt“ ist unscharf. Die App liest bei gesetztem Bit 6 jeden unbekannten Grund als „leer“ (`client.ts:463`), das ist die sichere Richtung.
+- `app-shell.md:31` nennt nur die `disabled`-Props. Zeitraffer und Auto-Fahrt sperren über eigene Bedingungen (`TimelapseControls.tsx:153`, `RootScreen.tsx:139`); das steht nur in design.md.
+- Die Lane meldete PROJ-6 in INDEX als „In Review“. Der Owner hat das geprüft: INDEX steht korrekt auf „Deployed“ (`features/INDEX.md:33`).
+
+## Nicht verifiziert in diesem Lauf
+- [!] EC-4 und NEU-D am Gerät — no way to run and probe this project was recorded
+- [!] Firmware-Tests — no test command recorded for layer firmware
+- [!] Laufzeit-Regression PROJ-1 bis PROJ-5 — no way to run and probe this project was recorded
+
+## Zusammenfassung (Nachtrag 4)
+- NEU-B geschlossen (Spec). Neu: 0 Critical, 0 High, 0 Medium, 2 Low (NEU-D, NEU-E).
+- **Production-Ready: JA** — am ausgelieferten Code hat sich nichts geändert. Die Laufzeit-Kriterien stützen sich auf die Nutzertests aus Nachtrag 3. Offen sind nur die Low-Befunde und die oben genannten nicht verifizierten Punkte. Status bleibt **Deployed**.
