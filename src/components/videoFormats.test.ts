@@ -52,10 +52,44 @@ describe('availableLenses (AC-23)', () => {
     ]);
 
     expect(lenses.map(lens => [lens.type, lens.device.id])).toEqual([
-      ['wide', 'wide-1'],
+      ['wide', 'multi'],
       ['ultraWide', 'uw'],
       ['tele', 'tele'],
     ]);
+  });
+
+  it('uses a single wide-angle camera as wide when there is no multi-camera', () => {
+    const lenses = availableLenses([
+      fakeDevice({ id: 'wide-1', type: 'wide-angle' }),
+      fakeDevice({ id: 'wide-2', type: 'wide-angle' }),
+    ]);
+
+    expect(lenses.map(lens => [lens.type, lens.device.id])).toEqual([['wide', 'wide-1']]);
+  });
+
+  it.each(['dual', 'dual-wide', 'triple', 'quad'])(
+    'treats a %s back camera as the wide lens (BUG-70)',
+    type => {
+      const lenses = availableLenses([fakeDevice({ id: 'multi', type })]);
+
+      expect(lenses.map(lens => [lens.type, lens.device.id])).toEqual([['wide', 'multi']]);
+    },
+  );
+
+  it('Galaxy S24: the triple main camera is wide, the separate fixed-focus camera ultra-wide (BUG-70)', () => {
+    // As VisionCamera reports it (dumpsys media.camera, SM-S921B): camera 0 is a
+    // logical triple camera with autofocus, camera 2 a single ultra-wide lens.
+    const lenses = availableLenses([
+      fakeDevice({ id: '0', type: 'triple' }),
+      fakeDevice({ id: '1', type: 'wide-angle', position: 'front' }),
+      fakeDevice({ id: '2', type: 'ultra-wide-angle' }),
+    ]);
+
+    expect(lenses.map(lens => [lens.type, lens.device.id])).toEqual([
+      ['wide', '0'],
+      ['ultraWide', '2'],
+    ]);
+    expect(effectiveLens(lenses, 'wide')?.device.id).toBe('0');
   });
 
   it('yields a single lens when the phone exposes only one back camera', () => {

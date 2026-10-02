@@ -47,25 +47,44 @@ const DEVICE_TYPE_TO_LENS: Partial<Record<CameraDevice['type'], LensType>> = {
   telephoto: 'tele',
 };
 
+/**
+ * Logical multi-cameras (qa-report.md BUG-70): many phones (e.g. Galaxy S24)
+ * expose their main camera only as one of these — it opens on the main lens
+ * with autofocus. VisionCamera types it by the number of lenses inside.
+ */
+const MULTI_CAMERA_TYPES: readonly CameraDevice['type'][] = ['dual', 'dual-wide', 'triple', 'quad'];
+
 export type VideoFormat = { resolution: VideoResolution; fps: VideoFps };
 
 export type Lens = { type: LensType; device: CameraDevice };
 
 /**
  * AC-23: every back camera whose type is wide / ultra-wide / tele, the first
- * one per type, in the order wide → ultra-wide → tele. A phone that only
- * exposes one logical back camera yields at most one lens.
+ * one per type, in the order wide → ultra-wide → tele. A logical
+ * multi-camera counts as wide and wins over a single wide-angle camera
+ * (BUG-70, user decision 2026-10-02). A phone that only exposes one back
+ * camera yields at most one lens.
  */
 export function availableLenses(devices: readonly CameraDevice[]): Lens[] {
   const firstPerType = new Map<LensType, CameraDevice>();
+  let multiCamera: CameraDevice | undefined;
   for (const device of devices) {
     if (device.position !== 'back') {
+      continue;
+    }
+    if (MULTI_CAMERA_TYPES.includes(device.type)) {
+      if (!multiCamera) {
+        multiCamera = device;
+      }
       continue;
     }
     const lensType = DEVICE_TYPE_TO_LENS[device.type];
     if (lensType !== undefined && !firstPerType.has(lensType)) {
       firstPerType.set(lensType, device);
     }
+  }
+  if (multiCamera) {
+    firstPerType.set('wide', multiCamera);
   }
   return LENS_TYPES.filter(type => firstPerType.has(type)).map(type => ({
     type,
