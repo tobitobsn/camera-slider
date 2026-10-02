@@ -76,8 +76,10 @@ export const FINALIZE_TIMEOUT_MS = 10000;
 /** Upper bound for the recording to start — the camera may never answer (BUG-43). */
 export const START_TIMEOUT_MS = 5000;
 
+/** The first line only — a native error's message carries its stack trace (BUG-68). */
 function describeError(err: unknown): string {
-  return err instanceof Error && err.message ? err.message : 'Unbekannter Fehler';
+  const firstLine = err instanceof Error ? err.message.split('\n')[0].trim() : '';
+  return firstLine || 'Unbekannter Fehler';
 }
 
 export function useVideoDrive(

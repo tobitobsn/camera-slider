@@ -344,6 +344,70 @@ describe('focus/exposure/white-balance lock (AC-25)', () => {
     expect(t.api().notice).toBe(FOCUS_UNSUPPORTED_NOTICE);
     t.unmount();
   });
+
+  // What CameraX hands over through VisionCamera when a newer focus request
+  // replaces one still converging (seen on a OnePlus Nord CE, BUG-68).
+  const CANCELLED = new Error(
+    'androidx.camera.core.CameraControl$OperationCanceledException: Cancelled by another startFocusAndMetering()\n' +
+      '  at androidx.camera.camera2.impl.FocusMeteringControl.setCancelException(FocusMeteringControl.kt:545)\n' +
+      '  at androidx.camera.camera2.impl.FocusMeteringControl.startFocusAndMetering(FocusMeteringControl.kt:141)',
+  );
+
+  it('a focus request replaced by a newer one is no error (BUG-68)', async () => {
+    const t = setup();
+    const ref = fakeCameraRef();
+    ref.focusTo.mockImplementationOnce(() => Promise.reject(CANCELLED));
+    t.api().cameraRef.current = ref as never;
+
+    await act(async () => {
+      t.api().lockAt({ x: 1, y: 2 });
+      t.api().lockAt({ x: 3, y: 4 });
+      await flush();
+    });
+
+    expect(t.api().notice).toBeNull();
+    expect(t.api().focusLock).toEqual({ x: 3, y: 4 });
+    t.unmount();
+  });
+
+  it('a real focus failure shows one line without the native stack trace (BUG-68)', async () => {
+    const t = setup();
+    const ref = fakeCameraRef();
+    ref.focusTo.mockImplementationOnce(() =>
+      Promise.reject(new Error('Camera is not ready\n  at com.margelo.nitro.camera.HybridCameraController.focusTo')),
+    );
+    t.api().cameraRef.current = ref as never;
+
+    await act(async () => {
+      t.api().lockAt({ x: 1, y: 2 });
+      await flush();
+    });
+
+    expect(t.api().notice).toBe('Fokus konnte nicht gesperrt werden: Camera is not ready');
+    expect(t.api().focusLock).toBeNull();
+    t.unmount();
+  });
+
+  it('a later successful lock clears an earlier focus failure notice (BUG-68)', async () => {
+    const t = setup();
+    const ref = fakeCameraRef();
+    ref.focusTo.mockImplementationOnce(() => Promise.reject(new Error('Camera is not ready')));
+    t.api().cameraRef.current = ref as never;
+    await act(async () => {
+      t.api().lockAt({ x: 1, y: 2 });
+      await flush();
+    });
+    expect(t.api().notice).not.toBeNull();
+
+    await act(async () => {
+      t.api().lockAt({ x: 5, y: 6 });
+      await flush();
+    });
+
+    expect(t.api().notice).toBeNull();
+    expect(t.api().focusLock).toEqual({ x: 5, y: 6 });
+    t.unmount();
+  });
 });
 
 describe('recorder port', () => {

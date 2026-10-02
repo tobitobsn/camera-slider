@@ -308,6 +308,19 @@ describe('useVideoDrive — failures (AC-18, AC-19, EC-6, EC-7)', () => {
     t.unmount();
   });
 
+  it('a native start error shows its first line, not the stack trace (BUG-68)', async () => {
+    const rec = fakeRecorder();
+    rec.port.startRecording = jest.fn(() =>
+      Promise.reject(new Error('Recorder is busy\n  at com.margelo.nitro.camera.HybridVideoRecorder.start')),
+    );
+    const t = setup(rec.port);
+
+    await t.run(() => t.api().start('startToEnd', 10));
+
+    expect(t.api().error).toBe('Aufnahme konnte nicht starten: Recorder is busy');
+    t.unmount();
+  });
+
   it('a recording error during the drive stops the motor, reports it and saves the part recorded (BUG-44)', async () => {
     const rec = fakeRecorder();
     const t = setup(rec.port);

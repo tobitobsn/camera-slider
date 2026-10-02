@@ -206,6 +206,7 @@ Ein einziger Datensatz im AsyncStorage unter dem Schlüssel `camera-slider.video
 - Tippen in die Vorschau → die Kamera misst Fokus, Belichtung und (wo unterstützt) Weißabgleich an diesem Punkt und hält sie danach fest, ohne zeitliches Zurücksetzen. Die Vorschau zeigt am Tipp-Punkt eine Markierung mit Schloss, daneben den Button „Auto".
 - Erneutes Tippen → neue Messung am neuen Punkt, wieder gesperrt. „Auto" → Sperre aufgehoben, Kamera regelt wieder automatisch.
 - Unterstützt das Objektiv keine Punkt-Messung, ist Tippen wirkungslos und es erscheint einmal „Fokus-Sperre wird von diesem Objektiv nicht unterstützt".
+- Wird eine Messung von einer neueren abgelöst (erneutes Tippen, „Auto“), bricht die Kamera die ältere ab. Das ist kein Fehler und wird nicht gemeldet, es zählt die neuere. Echte Fehler zeigen nur die erste Zeile der Fehlermeldung, nie den nativen Stacktrace. Eine erfolgreiche Sperre räumt eine frühere Fokus-Fehlermeldung ab (QA BUG-68).
 - Während einer Fahrt mit Video ist Tippen und „Auto" gesperrt (AC-28) — die Sperre bleibt garantiert unverändert.
 
 ### Ablauf einer Fahrt mit Video — Zustandsmodell (`useVideoDrive`)
@@ -302,6 +303,13 @@ Zustände: **bereit** → **startet** → **Vorlauf** → **Fahrt** → **Nachla
 - `availableLenses` (`videoFormats.ts`) behandelt `dual`, `dual-wide`, `triple` und `quad` als Weitwinkel mit Vorrang vor einer einzelnen Weitwinkel-Kamera. Diagnose per `adb shell dumpsys media.camera` am Galaxy S24: Kamera 0 = logische Kamera aus drei Linsen, Brennweite 5,4 mm, AF; Kamera 2 = 2,2 mm, AF-Modus nur „aus“. VisionCamera typisiert eine Kamera mit mehr als einer physischen Linse nach deren Anzahl (`CameraInfo+deviceType.kt`).
 - Behebt damit auch BUG-69 auf diesem Gerät: Die Weitwinkel-Wahl ist jetzt die Kamera mit Autofokus. Auf einer Linse ohne AF-Messung bleibt die Sperre weiterhin verweigert (Spec-Frage aus BUG-69, nicht entschieden).
 - Kein anderes Verhalten auf Geräten ohne Multi-Kamera (Test „uses a single wide-angle camera as wide when there is no multi-camera“).
+
+### Umsetzungsnotizen (`/build`, QA-Fix BUG-68, 2026-10-02)
+
+- Diagnose per `adb logcat` am OnePlus Nord CE (EB2103): Bei mehreren Tipps und „Auto“ liefen alle Fokus-Messungen sauber durch (`lock3A … converged … lock af`), kein Abbruch. Der Abbruch aus dem Screenshot („Cancelled by another startFocusAndMetering()“) tritt nur auf, wenn eine zweite Messung kommt, bevor die erste fertig ist. Woher die zweite vorhin kam, ließ sich nicht mehr klären. Der Fix hängt deshalb nicht von der Ursache ab.
+- `useVideoCamera.ts` `lockAt`: Ein abgebrochener Aufruf (`OperationCanceledException` bzw. „cancelled by …“) wird still ignoriert. Erfolg räumt eine frühere Meldung „Fokus konnte nicht gesperrt werden“ ab.
+- `describeError` in `useVideoCamera.ts` und `useVideoDrive.ts` gibt nur noch die erste Zeile der Fehlermeldung weiter. Native Fehler von VisionCamera tragen den Stacktrace in der Message.
+- Nicht angefasst: `useTimelapseSequence.ts` (PROJ-5) hat dieselbe ungekürzte `describeError`. PROJ-5 ist ausgeliefert, das wäre ein eigener Fix.
 
 ## Open Questions
 

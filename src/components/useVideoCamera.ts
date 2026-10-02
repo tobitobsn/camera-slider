@@ -83,8 +83,20 @@ const DEFAULT_FORMAT: VideoFormat = { resolution: DEFAULT_RESOLUTION, fps: DEFAU
 
 export const FOCUS_UNSUPPORTED_NOTICE = 'Fokus-Sperre wird von diesem Objektiv nicht unterstützt';
 
+const FOCUS_FAILED_PREFIX = 'Fokus konnte nicht gesperrt werden';
+
+/** The first line only — a native error's message carries its stack trace (BUG-68). */
 function describeError(err: unknown): string {
-  return err instanceof Error && err.message ? err.message : 'Unbekannter Fehler';
+  const firstLine = err instanceof Error ? err.message.split('\n')[0].trim() : '';
+  return firstLine || 'Unbekannter Fehler';
+}
+
+/**
+ * A focus request that a newer one (or "Auto") replaced before it settled —
+ * CameraX cancels it, the newer request decides. Not an error (BUG-68).
+ */
+function isFocusCancelled(err: unknown): boolean {
+  return err instanceof Error && /OperationCanceledException|cancell?ed by/i.test(err.message);
 }
 
 function stabilizationConstraint(enabled: boolean): Constraint {
@@ -220,8 +232,15 @@ export function useVideoCamera(settings: VideoSettings): VideoCameraApi {
       // metering modes the lens supports, white balance included.
       camera
         .focusTo(point, { responsiveness: 'snappy', adaptiveness: 'locked', autoResetAfter: null })
-        .then(() => setFocusLock(point))
-        .catch(err => setNotice(`Fokus konnte nicht gesperrt werden: ${describeError(err)}`));
+        .then(() => {
+          setFocusLock(point);
+          setNotice(current => (current?.startsWith(FOCUS_FAILED_PREFIX) ? null : current));
+        })
+        .catch(err => {
+          if (!isFocusCancelled(err)) {
+            setNotice(`${FOCUS_FAILED_PREFIX}: ${describeError(err)}`);
+          }
+        });
     },
     [lensDevice],
   );
