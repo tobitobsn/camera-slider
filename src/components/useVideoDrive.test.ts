@@ -517,6 +517,41 @@ describe('useVideoDrive — a camera that never answers (AC-27, BUG-43)', () => 
     expect(mockSendAutoDrive).not.toHaveBeenCalled();
     t.unmount();
   });
+
+  it('a late start of an aborted run leaves the next run its own timeout (BUG-58)', async () => {
+    // Every start stays pending on its own, so the first one can arrive
+    // while the second is still waiting.
+    const pending: ((value: { stop: () => Promise<void> }) => void)[] = [];
+    const lateStop = jest.fn(async () => {});
+    const port: VideoRecorderPort = {
+      prepare: jest.fn(() => null),
+      startRecording: jest.fn(
+        () =>
+          new Promise(resolve => {
+            pending.push(resolve);
+          }),
+      ),
+    };
+    const t = setup(port);
+    await t.run(() => t.api().start('startToEnd', 10));
+    await t.advance(START_TIMEOUT_MS);
+    expect(t.api().phase).toBe('ready');
+
+    await t.run(() => t.api().start('startToEnd', 10));
+    expect(t.api().phase).toBe('starting');
+    await t.advance(1000);
+    await t.run(() => pending[0]({ stop: lateStop }));
+    expect(lateStop).toHaveBeenCalledTimes(1);
+
+    await t.advance(START_TIMEOUT_MS);
+
+    expect(t.api().phase).toBe('ready');
+    expect(t.api().busy).toBe(false);
+    expect(t.api().error).toContain('Aufnahme konnte nicht starten');
+    expect(mockDeactivate).toHaveBeenCalledTimes(2);
+    expect(mockSendAutoDrive).not.toHaveBeenCalled();
+    t.unmount();
+  });
 });
 
 describe('useVideoDrive — cache copies (BUG-48)', () => {

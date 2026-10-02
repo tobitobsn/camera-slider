@@ -294,6 +294,11 @@ Zustände: **bereit** → **startet** → **Vorlauf** → **Fahrt** → **Nachla
 - Der Test-Recorder in `useVideoDrive.test.ts` verhält sich jetzt wie VisionCamera: kein `onFinished` nach einem Fehler, `stop()` danach schlägt fehl. Der alte Fake hatte BUG-44 verdeckt.
 - Das Aufräumen der Zeitraffer-Fotos (PROJ-5, `VisionCamera_*.jpg`) ist bewusst **nicht** Teil dieses Fixes. PROJ-5 ist ausgeliefert, und das wäre eine eigene Änderung (`/refine PROJ-5`). Das Modul könnte es leisten.
 
+### Umsetzungsnotizen (`/build`, QA-Fix BUG-58, 2026-10-02)
+
+- Der Start-Wächter gehört immer dem aktuellen Lauf. Ein verspätet eintreffender Start eines abgebrochenen Laufs prüft jetzt zuerst die Lauf-Nummer und fasst den Wächter nicht mehr an (`useVideoDrive.ts`, `startRecording(...).then`). Vorher löschte er den Wächter des nächsten Laufs, und die App hing dauerhaft in „Startet“ bzw. „Speichert“ (gleiche Folge wie BUG-43).
+- Nach Priorisierung durch den Nutzer nur BUG-58 gefixt. BUG-59 bis BUG-66 und die älteren Low-Bugs bleiben offen.
+
 ## Open Questions
 
 - [x] Lässt sich der Weißabgleich mitsperren? → Ja, über die Punkt-Messung im Modus „gesperrt" (AWB), wo das Objektiv AWB-Messung unterstützt (2026-10-01)

@@ -335,13 +335,15 @@ export function useVideoDrive(
           onError: (err, filePath) => handleRecordingError(myRunId, err, filePath),
         })
         .then(recording => {
-          if (startTimerRef.current !== null) {
-            clearTimeout(startTimerRef.current);
-            startTimerRef.current = null;
-          }
+          // BUG-58: a late start of an aborted run must not touch the timer —
+          // by now it belongs to the next run.
           if (runIdRef.current !== myRunId) {
             recording.stop().catch(() => {});
             return;
+          }
+          if (startTimerRef.current !== null) {
+            clearTimeout(startTimerRef.current);
+            startTimerRef.current = null;
           }
           recordingRef.current = recording;
           if (stopRequestedRef.current) {

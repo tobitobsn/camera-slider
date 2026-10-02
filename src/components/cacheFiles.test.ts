@@ -7,7 +7,13 @@ import { NativeModules } from 'react-native';
 
 import { deleteCacheFile, deleteLeftoverVideos } from './cacheFiles';
 
-const flush = () => new Promise(resolve => setImmediate(resolve));
+const flush = () => new Promise<void>(r => setImmediate(() => r()));
+
+// Jest runs on Node; the RN TypeScript config has no Node types.
+declare const process: {
+  on(event: 'unhandledRejection', listener: (reason: unknown) => void): void;
+  off(event: 'unhandledRejection', listener: (reason: unknown) => void): void;
+};
 
 afterEach(() => {
   delete (NativeModules as Record<string, unknown>).CacheFiles;
