@@ -552,6 +552,36 @@ describe('useVideoDrive — a camera that never answers (AC-27, BUG-43)', () => 
     expect(mockSendAutoDrive).not.toHaveBeenCalled();
     t.unmount();
   });
+
+  it('Stopp in the next run still ends after its own timeout when an aborted start arrives late (BUG-58)', async () => {
+    const pending: ((value: { stop: () => Promise<void> }) => void)[] = [];
+    const port: VideoRecorderPort = {
+      prepare: jest.fn(() => null),
+      startRecording: jest.fn(
+        () =>
+          new Promise(resolve => {
+            pending.push(resolve);
+          }),
+      ),
+    };
+    const t = setup(port);
+    await t.run(() => t.api().start('startToEnd', 10));
+    await t.advance(START_TIMEOUT_MS);
+
+    await t.run(() => t.api().start('startToEnd', 10));
+    await t.run(() => t.api().stop());
+    expect(t.api().phase).toBe('saving');
+    await t.run(() => pending[0]({ stop: jest.fn(async () => {}) }));
+
+    await t.advance(START_TIMEOUT_MS - 1);
+    expect(t.api().phase).toBe('saving');
+    await t.advance(1);
+
+    expect(t.api().phase).toBe('ready');
+    expect(t.api().busy).toBe(false);
+    expect(mockDeactivate).toHaveBeenCalledTimes(2);
+    t.unmount();
+  });
 });
 
 describe('useVideoDrive — cache copies (BUG-48)', () => {

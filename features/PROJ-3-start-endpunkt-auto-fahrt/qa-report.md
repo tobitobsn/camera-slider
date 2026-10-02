@@ -1,9 +1,132 @@
 # QA Test Results
 
-**Tested:** 2026-10-02 (Re-Verifikation 1 nach dem Fix-Commit `cbdc596`)
+**Tested:** 2026-10-02 (Re-Verifikation 2 nach dem Fix-Commit `90987bf`)
 **App URL:** hier nicht ausführbar (`probe.kind: none`, sowohl App-Ebene als auch Layer `firmware`). **Jedes Laufzeit-AC ist `[!] NOT VERIFIED`, bis ein Mensch es am Gerät testet.**
-**Tester:** QA Engineer (AI). Drei unabhängige `qa-engineer`-Lanes (Akzeptanz, Security, Regression) ohne Build-Kontext, zusammengeführt vom Owner.
-**Scope:** **Re-Verifikation.** Der letzte Report kam aus `44ec214`. Diff-Befehl: `git diff --stat 44ec214..HEAD`, HEAD `cbdc596` auf `feat/PROJ-3-videoaufnahme`. Geänderte Produktionsdateien:
+**Tester:** QA Engineer (AI). Eine unabhängige `qa-engineer`-Lane ohne Build-Kontext mit allen drei Scopes in der Reihenfolge Step 2 → 3 → 4, zusammengeführt vom Owner. Diese Session hat den Fix gebaut. Deshalb hat sie selbst nichts verifiziert, nur die Unit-Tests aus Step 6 ergänzt.
+**Scope:** **Re-Verifikation.** Der letzte Report kam aus `fbfce85`. Diff-Befehl: `git diff --stat fbfce85..HEAD`, HEAD `90987bf` auf `feat/PROJ-3-videoaufnahme`. Geänderte Produktionsdatei:
+- `src/components/useVideoDrive.ts` (+6/−4): Im `.then` von `startRecording` kommt die runId-Prüfung jetzt vor dem Löschen des Start-Wächters (BUG-58).
+
+Sonst sind nur Tests (`useVideoDrive.test.ts`, `cacheFiles.test.ts`, letzterer nur Typisierung) und eine Notiz in `design.md` geändert. Eine Produktionsdatei, kein geteilter Code → eine Lane.
+
+> Legende: `[x]` = in diesem Lauf geprüft (mit Beleg) · `[ ] BUG` = als fehlerhaft festgestellt · `[!] NOT VERIFIED` = in diesem Lauf nicht prüfbar (mit Grund)
+>
+> **Wichtig:** Ein `[x]` heißt hier „im Code, in den Bibliotheksquellen und in den Unit-Tests erfüllt“. Am echten Handy und Slider wurde nichts ausgeführt.
+
+## Re-Verifikation 2 (2026-10-02, nach `90987bf`)
+
+### Automatisierte Tests (Step 5)
+
+- [x] `npm test` (einmal vom Owner vor der Lane, Log `scratchpad/suite-run-2.log`): 22 Suites, **336 passed, 0 failed**.
+- [x] `npx tsc --noEmit`: exit 0. `npm run lint`: 0 Errors, 67 Warnings (wie vorher, keine in den geänderten Dateien).
+- [x] Release-Build `cd android && ./gradlew assembleRelease`: exit 0 (`scratchpad/build-2.log`).
+- [!] Layer `firmware`: NOT VERIFIED, no test command recorded for layer firmware. `firmware/` ist im Diff unverändert (`git diff --stat fbfce85..HEAD -- firmware` leer).
+- E2E-Suite: keine vorhanden, nicht ausgeführt.
+
+### BUG-58 (High, AC-17/AC-27)
+
+- [x] **Geschlossen im Code.**
+  - `useVideoDrive.ts:340-343` prüft zuerst `runIdRef.current !== myRunId`. Ein veralteter Lauf stoppt dann nur seine eigene Aufnahme. Erst danach wird der Start-Wächter gelöscht (`:344-347`).
+  - Der Wächter gehört immer dem aktuellen Lauf, weil `runIdRef` sich nur in `finish` (`:145`, direkt gefolgt von `clearAllTimers`) und in `start` (`:315`, nur aus „bereit“) ändert.
+- [x] **Gegenproben der Lane** (`scratchpad/probe2/qaprobe2.test.ts`):
+  - P1 ist der Ablauf aus dem Report. Lauf 2 steht bei 4999 ms noch in `starting` und ist bei 5000 ms `ready` mit Meldung. `activate` und `deactivate` laufen je 2×, gespeichert wird nichts, die späte Datei wird aus dem Cache gelöscht.
+  - P3 ist die Stopp-Variante: `ready`, 2× `deactivate`.
+  - P7 hat drei Läufe mit zwei späten Starts: 3× `deactivate`.
+  - Gegen die Vorversion `fbfce85` schlagen alle drei fehl (`starting`, `saving` bzw. `starting`).
+
+### Acceptance Criteria (Diff-Bereich: Umsetzung in `useVideoDrive.ts`)
+
+Alle Punkte sind im Code und in Jest geprüft. Laufzeit: `[!] NOT VERIFIED — no way to run and probe this project was recorded`.
+
+- [x] **AC-14**: Kette `start` `:302-370` → Vorlauf `:354-359` → AUTO_DRIVE `:295` → Nachlauf `:400-403` → `saveTake`. Test „records, waits the pre-roll, drives, waits the post-roll…“. Probe P2: Nach einem späten Start von Lauf 1 läuft Lauf 2 komplett durch und wird gespeichert.
+- [x] **AC-15**: `saveTake` `:209-220` (unverändert), die Cache-Kopie wird im `finally` gelöscht.
+- [x] **AC-17**: STOP in der Fahrt `:378-380`, sofortiges Ende `:176`/`:184`, Stopp in „Startet“ `:179-183` → `:349-352`, begrenzt durch den Wächter `:324-330`. **Folge-Lauf jetzt erfüllt** (P3). P6: Läuft ein aktueller Start nach einem Stopp noch ein, endet er sauber.
+- [x] **AC-18**: `.catch` `:361-367` (runId-geschützt), Recorder-Fehler `:264-276`, Hintergrund `:418-425`. P5: Eine späte Ablehnung von Lauf 1 wird während Lauf 2 ignoriert.
+- [x] **AC-19**: `:411-415` (unverändert). BUG-52 (Low) weiter offen.
+- [x] **AC-27**: Jeder Ausgang endet in `finish` → `deactivate` `:150` (Wächter `:328`, `.catch` `:366`, Finalize `:159`, `saveTake` `:216`, `endUnexpectedly` `:239`, Unmount `:436`). **Folge-Lauf jetzt erfüllt** (P1, P3, P7). Einschränkung: BUG-59 (Low) bleibt offen.
+- [x] **AC-28**: `busy = phase !== 'ready'` `:443`, die Verbraucher sind unverändert. BUG-51 (Low) weiter offen.
+- [x] **EC-5** (Timing-Garantie aus `design.md:238`): synchrone Ref-Prüfung `phaseRef.current !== 'ready'` `:306`, `setPhase` schreibt `phaseRef` synchron (`:111-114`). Die Firmware-Sperre ist unverändert. Test „ignores a second start while a take is running“.
+- [x] **EC-6**: `:404-407` (unverändert), Test „a stop on the way…“.
+- [x] **EC-7**: Hintergrund im Vorlauf → `fail` → `clearTimer` `:176`. Tests „…background during the pre-roll…“ und „…ends on its own during the pre-roll…“.
+- Alle anderen AC und EC: unverändert seit Re-Verifikation 1 (2026-10-02), in diesem Lauf nicht neu geprüft. Der Diff berührt nur `useVideoDrive.ts:337-347`.
+
+### Neue Befunde aus dem Fix
+
+- Keine. Die Lane hat jeden Pfad geprüft, über den ein veralteter Lauf geteilte Refs oder Timer des aktuellen Laufs anfassen könnte:
+  - `.then` `:340`, `.catch` `:362`
+  - `onFinished`/`onError` `:247`/`:266` (Probe P4)
+  - Finalize-Timer, Tick-Intervall, `recordingRef`
+  - `timerRef`-Callbacks `:280`/`:292`/`:173`
+  
+  Alle sind runId-geschützt.
+- **BUG-59 bis BUG-66 und BUG-49 bis BUG-57:** durch den Diff nicht berührt. Ihre Stellen liegen außerhalb von `:337-347` bzw. in Dateien ohne Änderung (`git diff --stat` leer). Keiner ist geschlossen, keiner verschlimmert.
+
+### Security (Diff-Bereich)
+
+- [x] Keine Secrets im Diff: `git diff fbfce85..HEAD -U0 | grep -iE "api[_-]?key|secret|token|passw|bearer|BEGIN .*KEY|AKIA|sk_live|ghp_"` → 0 Treffer.
+- [x] Keine Secrets im Release-Bundle: `strings …/index.android.bundle | grep -ciE …` → 0.
+- [x] Keine neuen Logs und keine Netzwerkzugriffe im Diff (grep auf `+`-Zeilen → 0).
+- [x] Abhängigkeiten, natives Modul und Manifest unverändert (`git diff --name-only` ohne `package.json`, Lockfile und `android/`).
+- [x] Ein verspätet gestarteter veralteter Recorder wird sofort gestoppt, Kamera und Mikrofon bleiben nicht offen (P1: `stop` 1×, P7: 1× je Lauf).
+- [x] Die Datei eines veralteten Laufs landet nicht in der Galerie und wird aus dem Cache gelöscht (P1: `save` 0×, `deleteCacheFile` 1×).
+- [!] Authentication, Authorization, Input Injection, Rate Limiting, Brute Force/Enumeration, API-Responses, Credentials in der URL: NOT VERIFIED, nicht anwendbar (kein Login, kein Backend, keine Endpoints, keine Web-Formulare, keine `[user]`-Tasks, `tasks.md:76`).
+- [!] Firmware-Fuzzing: NOT VERIFIED (layer firmware: nothing to probe, unverändert).
+
+**Security-Zusammenfassung:** 6 Prüfungen mit Beleg (6 PASS, 0 FAIL), 8 NOT VERIFIED (7 nicht anwendbare Web-Checks, Firmware-Fuzzing).
+
+### Regression (Deployed-Features)
+
+- [x] Der Diff ändert weder Exporte noch `VideoDriveApi` noch `VideoRecorderPort`. Der einzige Laufzeit-Import von `useVideoDrive` steht in `RootScreen.tsx:17`.
+- [x] Nachbarpfade unverändert: `git diff --stat fbfce85..HEAD -- firmware src/ble src/connection src/screens AutoDriveControls.tsx TimelapseControls.tsx useTimelapseSequence.ts useKeepAwake.ts useCameraCapture.ts useVideoCamera.ts VideoPanel.tsx videoFormats.ts cacheFiles.ts android package.json package-lock.json docs/data-model.md` ist leer.
+- [x] **PROJ-1**: Verbindungsabbruch `:411-415` unverändert. **PROJ-4**: kein Bezug. **PROJ-6**: Schutz-Stopp `:404-407` unverändert.
+- [x] **PROJ-2**: Die Jog-Sperre hängt an `video.drive.busy` (`RootScreen.tsx:161`). Das dauerhafte Sperren durch BUG-58 ist behoben (P1/P3: `busy=false` nach dem Timeout).
+- [x] **PROJ-5**: Die gemeinsame Wach-Sperre (`useKeepAwake.ts`, unverändert) bleibt pro Lauf 1:1 (P1: 2:2, P7: 3:3).
+- [x] Suites der Deployed-Nachbarn grün (Suite-Lauf, siehe oben).
+- [!] Laufzeit aller Deployed-Features: NOT VERIFIED, no way to run and probe this project was recorded.
+
+### Step 6: Unit-Tests (Owner)
+
+- [x] Neu in `src/components/useVideoDrive.test.ts`: „Stopp in the next run still ends after its own timeout when an aborted start arrives late (BUG-58)“. Er schließt die Testlücke, die die Lane gemeldet hat (Stopp-Variante, genaue 5-s-Grenze). `npx jest src/components/useVideoDrive.test.ts` → 27/27 grün.
+- [x] Rot-Prüfung: `useVideoDrive.ts` gegen die Vorversion (`git show fbfce85:…`) getauscht. Beide BUG-58-Tests wurden rot (`Received: "starting"` bzw. `"saving"`). Danach wiederhergestellt (`git diff` leer), wieder 27/27 grün, `tsc` exit 0.
+
+### E2E Tests
+
+- Status: **not run** (run `/e2e-tests` for critical flows)
+
+### Not Verified In This Run
+
+- [!] Alle Laufzeit-ACs und -ECs am Gerät: no way to run and probe this project was recorded (`probe.kind: none`). Weg: der Gerätetest unten.
+- [!] Layer `firmware`: no test command recorded (unverändert).
+- [!] Darstellung des Video-Panels und der Jog-Sperre: kein Gerät, kein Viewport.
+- [!] Aus Re-Verifikation 1 weiter offen: ob `NativeModules.CacheFiles` unter der New Architecture auflöst, und welche Formate das konkrete Handy liefert.
+
+### Neuer Bug (bestehendes Verhalten, erstmals dokumentiert)
+
+#### BUG-67: Ein Kamerastart, der erst nach dem Unmount ankommt, startet noch eine Fahrt
+- **Severity:** Low (selten, Verhalten identisch an `fbfce85`, also nicht durch den Fix entstanden)
+- **Beleg:** Der Unmount löscht die Timer (`useVideoDrive.ts:433-439`), erhöht aber `runIdRef` nicht. Das späte `.then` läuft deshalb als aktueller Lauf weiter: Es setzt Tick und Vorlauf und sendet nach 2 s AUTO_DRIVE an das zuletzt bekannte Gerät. Die Aufnahme wird nie gestoppt. Lane-Probe P8: `autoDrive 1, stop 0, timers 3` nach dem Unmount.
+- **Steps to Reproduce (nicht am Gerät):** Fahrt mit Video auslösen und in „Startet“ die App per Zurück-Taste verlassen, während die JS-Runtime weiterläuft. Die Kamera antwortet danach noch.
+- **Priority:** Nice to have
+
+### Summary (Re-Verifikation 2)
+
+- **BUG-58 (High):** geschlossen im Code, belegt durch eine Gegenprobe mit Trennschärfe gegen die Vorversion.
+- **Acceptance Criteria (Diff-Bereich):** 7 AC und 3 EC im Code geprüft, alle PASS (AC-17 und AC-27 jetzt auch im Folge-Lauf). 0 am Gerät ausgeführt.
+- **Bugs:** 0 Critical, 0 High, 0 Medium offen. Offene Low-Bugs: BUG-49, 50, 51, 52, 54 (teilweise), 55, 56, 57, 59 bis 66 sowie neu BUG-67.
+- **Security:** 6/14 mit Beleg (alle PASS), 8 NOT VERIFIED (nicht anwendbar bzw. Firmware).
+- **Regression:** keine. Jog-Sperre und Wach-Sperre verhalten sich wieder 1:1.
+- **Production Ready:** **NOT READY — not verified.** Es gibt keine Critical- oder High-Bugs mehr, aber kein Laufzeit-AC wurde ausgeführt. Der einzige Weg zu READY ist der protokollierte Gerätetest. `features/INDEX.md` bleibt **In Review**.
+
+### Gerätetest (recorded human test, offen)
+
+Es gilt die Liste aus Re-Verifikation 1 (Abschnitt „Gerätetest“ weiter unten) zusammen mit der Liste aus Lauf 1 (Abschnitt „Gerätetest“ im Lauf 1). Neu dazu:
+
+- **BUG-58/AC-27** (nur wenn sich die Lage provozieren lässt, etwa wenn eine andere App die Kamera blockiert): Fahrt mit Video auslösen, „Kamera reagiert nicht“ abwarten, sofort erneut auslösen. Ist die App nach spätestens 5 s wieder bedienbar, und geht der Bildschirm danach normal aus?
+
+---
+
+## Re-Verifikation 1 (2026-10-02, nach `cbdc596`)
+
+**Scope dieses Laufs:** **Re-Verifikation.** Der letzte Report kam aus `44ec214`. Diff-Befehl: `git diff --stat 44ec214..HEAD`, HEAD `cbdc596` auf `feat/PROJ-3-videoaufnahme`. Geänderte Produktionsdateien:
 - `src/components/useVideoDrive.ts`: Start-Wächter, prepare(), Fehler-/Unerwartet-Ende-Pfade, Cache-Löschen
 - `src/components/useVideoCamera.ts`: prepare() mit Berechtigungen, Format-Abfrage, Stabilisierung `'standard'`, fps-Sicherheitsnetz
 - `src/components/videoFormats.ts`: `probeFormats`, `STABILIZATION_MODE`
@@ -12,12 +135,6 @@
 - `android/.../CacheFilesModule.kt`, `CacheFilesPackage.kt` (neu) und `MainApplication.kt`: natives Lösch-Modul samt Registrierung
 
 Weil der Diff natives App-Shell-Code (`MainApplication.kt`) berührt und mehr als drei Produktionsdateien umfasst, lief der volle Fan-out in voller Breite. Unverändert sind `firmware/`, `src/ble/`, `src/connection/`, `src/screens/`, `AutoDriveControls.tsx`, `TimelapseControls.tsx`, `package.json`, Lockfile und `AndroidManifest.xml` (`git diff --stat 44ec214..HEAD -- <Pfade>` leer).
-
-> Legende: `[x]` = in diesem Lauf geprüft (mit Beleg) · `[ ] BUG` = als fehlerhaft festgestellt · `[!] NOT VERIFIED` = in diesem Lauf nicht prüfbar (mit Grund)
->
-> **Wichtig:** Ein `[x]` heißt hier „im Code, in den Bibliotheksquellen und in den Unit-Tests erfüllt“. Am echten Handy und Slider wurde nichts ausgeführt.
-
-## Re-Verifikation 1 (2026-10-02, nach `cbdc596`)
 
 ### Automatisierte Tests (Step 5)
 
