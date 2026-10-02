@@ -1,17 +1,158 @@
 # QA Test Results
 
-**Tested:** 2026-10-02 (Re-Verifikation 3: gezielte Bestätigung von BUG-4 und des Spec-Teils von BUG-23 nach `/refine`, `859b83a`)
-**App URL:** hier nicht ausführbar (`probe.kind: none`, sowohl App-Ebene als auch Layer `firmware`). Laufzeitverhalten ist zuletzt im protokollierten Gerätetest vom 2026-10-02 bestätigt (Abschnitt „Gerätetest“ in Re-Verifikation 2).
+**Tested:** 2026-10-02 (Re-Verifikation 4: Fixes für BUG-68, BUG-69 und BUG-70 aus `2465c41` und `00fd14b`)
+**App URL:** hier nicht ausführbar (`probe.kind: none`, sowohl App-Ebene als auch Layer `firmware`). Der letzte protokollierte Gerätetest stammt vom 2026-10-02 (Abschnitt „Gerätetest“ in Re-Verifikation 2) und ist **älter als dieser Diff**.
 **Tester:** QA Engineer (AI). Eine unabhängige `qa-engineer`-Lane ohne Build-Kontext mit allen drei Scopes (Step 2 → 3 → 4), zusammengeführt vom Owner.
-**Scope:** **Gezielte Re-Verifikation.** Der letzte Report kam aus `debd2a5`. Diff-Befehl: `git diff --stat debd2a5..HEAD` → nur `features/PROJ-3-start-endpunkt-auto-fahrt/spec.md` (+2/−1: erste Zeile der Technical Requirements, neue Zeile im Decision Log). **Kein Produktionscode geändert** (`git diff --quiet debd2a5..HEAD -- src firmware docs/stacks`, exit 0).
+**Scope:** **Re-Verifikation, Breite = Diff.** Der letzte Report kam aus `ce63f1e`. Diff-Befehl: `git diff --stat ce63f1e..HEAD` (HEAD `00fd14b`). Geänderte Produktionsdateien:
+- `src/components/useVideoCamera.ts` (+25)
+- `src/components/useVideoDrive.ts` (+4/−2)
+- `src/components/videoFormats.ts` (+23)
 
-Kein voller Lauf trotz `/refine`: Die Verfeinerung änderte kein AC und kein EC, nur den Text der Technical Requirements, und zwar so, dass er das seit 2026-09-24 gebaute Verhalten beschreibt. Geprüft wurden deshalb BUG-4, der Spec-Teil von BUG-23, AC-6, AC-11 und AC-12 gegen den neuen Text, dazu Security und Regression des Diffs. Der Release-Build wurde nicht ausgeführt: `skipped — unchanged since 2026-10-02` (kein App-Code im Diff).
+Dazu die zugehörigen Tests, `design.md` und `features/INDEX.md`. Unverändert sind `firmware`, `src/ble`, `src/connection`, `src/screens`, `android`, `package*.json`, `useCameraCapture.ts`, `TimelapseControls.tsx`, `useTimelapseSequence.ts`, `AutoDriveControls.tsx`, `VideoPanel.tsx` und `useVideoSettings.ts` (`git diff --stat ce63f1e..HEAD -- <Pfade>` leer). Drei Produktionsdateien, kein geteilter Code → eine Lane. Release-Build: `skipped` (Lane ohne Build; `android/` und Abhängigkeiten unverändert).
 
 > Legende: `[x]` = in diesem Lauf geprüft (mit Beleg) · `[ ] BUG` = als fehlerhaft festgestellt · `[!] NOT VERIFIED` = in diesem Lauf nicht prüfbar (mit Grund)
 >
 > **Wichtig:** Ein `[x]` heißt hier „im Code, in den Bibliotheksquellen und in den Unit-Tests erfüllt“. Am echten Handy und Slider wurde nichts ausgeführt.
 
+## Re-Verifikation 4 (2026-10-02, nach `00fd14b`)
+
+### Automatisierte Tests (Step 5)
+
+- [x] `npm test` (einmal vom Owner vor der Lane, Log `scratchpad/suite-run-4.log`): 22 Suites, **347 passed, 0 failed**.
+- [!] Layer `firmware`: NOT VERIFIED, no test command recorded for layer firmware. `firmware/` ist im Diff unverändert.
+- E2E-Suite: keine vorhanden, nicht ausgeführt.
+
+### Status der offenen Bugs
+
+**BUG-68 (Medium, AC-25): [x] im Code geschlossen, am Gerät nicht bestätigt**
+- Abgelöste Messungen werden still ignoriert: `isFocusCancelled` (`useVideoCamera.ts:98-100`), angewandt in `:239-243`. Die geprüften Texte stimmen mit CameraX 1.7.0-alpha03 überein („Cancelled by another startFocusAndMetering()“, „Cancelled by cancelFocusAndMetering()“, `FocusMeteringControl.class` per `javap`). „Auto“ ruft `resetFocus` → `cancelFocusAndMetering` (`HybridCameraController.kt:185-191`).
+- Kein Stacktrace mehr in Meldungen: `describeError` gibt nur die erste Zeile weiter (`useVideoCamera.ts:89-92`, gleich in `useVideoDrive.ts:80-83`).
+- Eine gelungene Sperre räumt eine frühere „Fokus konnte nicht gesperrt werden“-Meldung ab (`useVideoCamera.ts:235-238`).
+- Rest (Low, kosmetisch): Bei echten nativen Fehlern bleibt der Java-Klassenname in der ersten Zeile stehen, z. B. „Fokus konnte nicht gesperrt werden: java.lang.IllegalStateException: Foo bar“ (Lane-Probe P4). Die neuen Tests nutzen Messages ohne Klassen-Präfix.
+- Ursache des zweiten Fokus-Aufrufs weiter ungeklärt. Der Fix hängt davon bewusst nicht ab (`design.md`).
+- [!] Ein Tipp am OnePlus Nord CE ohne Meldung: NOT VERIFIED, no way to run and probe this project was recorded.
+
+**BUG-70 (Medium, AC-23): [x] im Code geschlossen für die Konstellation des Galaxy S24**
+- `videoFormats.ts:55`, `:75-80`, `:86-88`: `dual/dual-wide/triple/quad` gelten als Weitwinkel. Die Typisierung passt zur Bibliothek (`CameraInfo+deviceType.kt:17-24`).
+- Test `videoFormats.test.ts:79` (S24): Weitwinkel = Kamera `0` (triple), Ultraweitwinkel = Kamera `2`. Die Auswahl erscheint ab zwei Objektiven (`VideoPanel.tsx:166`).
+- Die App setzt keinen Zoom (grep `zoom` in `src`: 0 Treffer), CameraX startet mit 1.0 = Hauptlinse der logischen Kamera.
+- Keine Duplikate, höchstens ein Gerät pro Objektivtyp (`:89-92`). Front-Multi-Kameras sind ausgeschlossen (`:72`).
+- **Nebenwirkung:** Meldet ein Gerät eine einzelne Weitwinkel-Kamera **und** eine logische Multi-Kamera, bietet die App die einzelne nicht mehr an (`videoFormats.ts:86-88`, Lane-Probe P9). Das ist laut Commit eine Nutzerentscheidung vom 2026-10-02. Ob das **Hauptgerät OnePlus Nord CE** so eine Kamera meldet, ist offen. Falls ja, nimmt dort jetzt eine andere Kamera auf als im Gerätetest, und AC-22 bis AC-25 müssen dort neu bestätigt werden.
+- [!] Auswahl am Galaxy S24, Verhalten am Nord CE: NOT VERIFIED, no way to run and probe this project was recorded.
+
+**BUG-69 (Low, AC-25): [ ] weiter offen, auf dem Standardobjektiv nur umgangen**
+- `lockAt` prüft weiter nur `supportsFocusMetering` (`useVideoCamera.ts:226-229`, nicht im Diff). Auf dem S24 trifft es jetzt die Ultraweitwinkel-Kamera, die durch den BUG-70-Fix auswählbar geworden ist (laut `design.md` ohne AF). `design.md` bestätigt: „Spec-Frage aus BUG-69, nicht entschieden“.
+
+### Acceptance Criteria (Code im Diff)
+
+- [x] **AC-15**: Nur der Text der Fehlermeldung hat sich geändert (`useVideoDrive.ts:215`), der Speicherpfad ist unverändert.
+- [x] **AC-17**: Der Stopp-Pfad nutzt `describeError` nicht und ist unverändert.
+- [x] **AC-18**: Startfehler `useVideoDrive.ts:362-368`, Recorder-Abbruch `:275`, BLE-Fehler beim Fahrt-Start `:298`, jeweils mit erster Zeile. Test `useVideoDrive.test.ts:311`. Kante siehe BUG-74.
+- [x] **AC-22**: Auf Multi-Geräten kommen die Formate jetzt von der logischen Kamera. Die Abfrage läuft mit der neuen ID neu (`useVideoCamera.ts:119-127`), die Logik ist unverändert. [!] Ob das S24 dort 1080p/30 meldet: NOT VERIFIED.
+- [x] **AC-23**: siehe BUG-70. Vertragslücke Tele per Zoom: siehe BUG-75. [!] Ob die logische Kamera intern die Linse wechselt (Makro, wenig Licht): NOT VERIFIED.
+- [x] **AC-24**: Code unverändert (`videoFormats.ts:180-182`). Auf Multi-Geräten entscheidet jetzt die logische Kamera, ob der Schalter erscheint. [!] Laufzeit NOT VERIFIED.
+- [x] **AC-25**: Sperre mit `adaptiveness: 'locked'`, `autoResetAfter: null` (`useVideoCamera.ts:234`, Test `useVideoCamera.test.ts:293`). Gegenproben der Lane: Tipp, Tipp → der zweite zählt (Test `:356`). Tipp, dann Unmount → 0 `console.error` (P8). Andere Meldungen als der Fokusfehler bleiben stehen (`:237`). Offen: BUG-69, BUG-72, BUG-73.
+- [x] **AC-26**: Gemerkt wird der Objektivtyp, keine Geräte-ID (`useVideoSettings.ts:35`, `:79`). Ein gemerktes „wide“ landet jetzt auf der logischen Kamera, ein nicht verfügbares „tele“ fällt auf „wide“ zurück (`effectiveLens`, `videoFormats.ts:100-106`, P9). Fokus-Sperre beim Objektivwechsel zurückgesetzt (`useVideoCamera.ts:186-190`).
+- [x] **AC-28**: unverändert, die Sperre liegt im Panel (`VideoPanel.tsx`, nicht im Diff).
+- [x] **EC-8**: Presets berühren keine Video-Einstellungen (grep `lens|videoSettings|useVideo` in `usePresets.ts` leer).
+- Alle anderen AC und EC (AC-1 bis AC-14, AC-16, AC-19 bis AC-21, AC-27, AC-29, EC-1 bis EC-7, EC-9, EC-10): unverändert seit Re-Verifikation 2 und dem Gerätetest vom 2026-10-02, **in diesem Lauf nicht neu geprüft** (der Diff berührt ihre Pfade nicht, nur den Meldungstext über `describeError`).
+- [!] Alle Laufzeitprüfungen der AC oben: NOT VERIFIED, no way to run and probe this project was recorded.
+
+### Security (Diff-Bereich)
+
+- [x] Keine Secrets, kein Netzwerk, kein Logging im Diff: `git diff ce63f1e..HEAD -U0 | grep "^+" | grep -ciE "api[_-]?key|secret|token|passw|bearer|BEGIN .*KEY|AKIA|sk_live|ghp_|console\.|fetch\(|http"` → 0.
+- [x] Keine neue Eingabestrecke: Tipp-Koordinaten unverändert über `VideoPanel.tsx:55` → `focusTo`, nativ geprüft (`HybridCameraController.kt:145-147`). Die Objektiv-Zuordnung verarbeitet nur Geräte-Metadaten. Abhängigkeiten und Manifest unverändert.
+- [x] Weniger Informationsabfluss: keine nativen Stacktraces mehr in Fokus-, Kamera- und Fahrt-Meldungen (`useVideoCamera.ts:89-92`, `useVideoDrive.ts:80-83`, Tests `useVideoCamera.test.ts:373`, `useVideoDrive.test.ts:311`).
+- [!] Authentication, Authorization, Injection gegen Endpoints, Rate Limiting, Brute Force/Enumeration, API-Responses, Credentials in der URL: NOT VERIFIED, nicht anwendbar (kein Login, kein Backend, keine Endpoints). Keine `[user]`-Tasks (`tasks.md`).
+- [!] Release-Bundle nach Secrets durchsuchen: NOT VERIFIED, in diesem Lauf nicht gebaut.
+
+**Security-Zusammenfassung:** 3 Prüfungen mit Beleg (alle PASS), 8 NOT VERIFIED (7 nicht anwendbar, Release-Bundle nicht gebaut).
+
+### Regression
+
+- [x] Suite 347/347 grün (`scratchpad/suite-run-4.log`), darunter die Suites von PROJ-1, 2, 4, 5 und 6.
+- [x] PROJ-5: nutzt `useCameraDevice('back')` (`useCameraCapture.ts:55`), weder `availableLenses` noch `useVideoCamera`. Dateien nicht im Diff.
+- [x] PROJ-1, PROJ-2, PROJ-6: einzige Berührung ist der Meldungstext bei einem BLE-Fehler beim Fahrt-Start (`useVideoDrive.ts:298`). Verbindungs-, Jog- und Schutz-Stopp-Pfade unverändert.
+- [x] PROJ-4: keine Kopplung an Objektiv oder Video-Einstellungen (EC-8 oben).
+- [x] Einziger Laufzeit-Verbraucher der geänderten Hooks: `RootScreen.tsx:72`.
+- [!] Laufzeit der Deployed-Features: NOT VERIFIED, no way to run and probe this project was recorded.
+
+### Step 6: Unit-Tests
+
+- Keine neuen Tests vom Owner. Die Fixes bringen eigene Tests mit, und die Lane hat per Einzeldatei bewiesen, dass sie rot werden können:
+  - `videoFormats.ts` auf `ce63f1e` zurückgesetzt → `videoFormats.test.ts`: 6 failed (`:44`, 4× `:70`, `:79`).
+  - `useVideoDrive.ts` zurückgesetzt → `useVideoDrive.test.ts`: 1 failed (`:311`).
+  - `useVideoCamera.ts` zurückgesetzt → `useVideoCamera.test.ts`: 3 failed (`:356`, `:373`, `:391`). Mutation „Abbruch-Guard entfernt“: nur `:356` rot. Mutation „Abräumen bei Erfolg entfernt“: nur `:391` rot.
+  - Danach zurückgesetzt, `git status --short` leer.
+- Die Lücken der Tests (Auto während einer laufenden Messung, erste Zeile mit Klassen-Präfix, abgebrochene Messung wegen inaktiver Kamera) sind die neuen Bugs unten. Tests dafür gehören zum Fix in `/build`.
+
+### E2E Tests
+
+- Status: **not run** (run `/e2e-tests` for critical flows)
+
+### Not Verified In This Run
+
+- [!] Alle Laufzeitprüfungen (AC-15, 17, 18, 22 bis 26 am Gerät, BUG-68 am Nord CE, BUG-70 am S24): no way to run and probe this project was recorded.
+- [!] Ob das OnePlus Nord CE eine logische Multi-Kamera meldet und dort jetzt eine andere Kamera als „Weitwinkel“ gilt. Prüfbar per `adb shell dumpsys media.camera`. Davon hängt ab, ob der Gerätetest vom 2026-10-02 für AC-22 bis AC-25 dort noch gilt.
+- [!] Formate und Stabilisierung der logischen Kamera des S24 (AC-22, AC-24), stabiler Verbleib auf der Hauptlinse (AC-23).
+- [!] Format der JS-Fehlermeldung von Nitro (Klassen-Präfix): abgeleitet aus dem Screenshot zu BUG-68, in der C++-Quelle nicht gefunden.
+- [!] Layer `firmware`: no test command recorded.
+- [!] Security: siehe oben.
+
+### Neue Bugs
+
+#### BUG-72: Ein Tipp bei nicht aktiver Kamera wird still verschluckt, ohne Sperre und ohne Hinweis (AC-25)
+- **Severity:** Low
+- **Beleg:** Der Regex in `useVideoCamera.ts:98-100` trifft jede `OperationCanceledException`, nicht nur abgelöste Messungen. CameraX wirft dieselbe Klasse auch mit „Camera is not active.“ und „Focus/metering operation cancelled.“ (`FocusMeteringControl.class`, `javap`). Lane-Probe P3/P3b: keine Meldung, keine Sperre. Vor dem Fix erschien eine Meldung. Ein echter Fehler mit einem `Caused by: …OperationCanceledException`-Frame würde ebenfalls verschluckt, weil die ganze Message geprüft wird.
+- **Steps to Reproduce (nicht ausgeführt):** „Video aufnehmen“ an, direkt nach einem Objektiv- oder Formatwechsel in die Vorschau tippen. Erwartet: Sperre oder Hinweis. Möglich: nichts passiert, eine alte Sperr-Markierung bleibt stehen.
+- **Priority:** Nice to have. Nur die zwei Abbruch-Texte für abgelöste Messungen erkennen statt der ganzen Klasse.
+
+#### BUG-73: „Fokus-Sperre wird von diesem Objektiv nicht unterstützt“ bleibt nach einer gelungenen Sperre auf einem anderen Objektiv stehen (AC-25)
+- **Severity:** Low
+- **Beleg:** Der Erfolgszweig räumt nur Meldungen mit `FOCUS_FAILED_PREFIX` ab (`useVideoCamera.ts:237`, Konstante `:86`), nicht `FOCUS_UNSUPPORTED_NOTICE` (`:84`, gesetzt in `:227`). Lane-Probe P7: Schloss und „nicht unterstützt“ gleichzeitig sichtbar. Erst durch den BUG-70-Fix erreichbar, weil auf dem S24 jetzt ein Objektiv ohne AF wählbar ist. Gleiche Familie wie BUG-61.
+- **Steps to Reproduce:** Galaxy S24 → „Ultraweitwinkel“ → tippen → „Weitwinkel“ → tippen.
+- **Priority:** Fix in next sprint, zusammen mit BUG-69.
+
+#### BUG-74: Fehlermeldung verliert den Grund, wenn die erste Zeile der nativen Message leer ist (AC-18)
+- **Severity:** Low (theoretisch, kein solcher Fehler bekannt)
+- **Beleg:** `useVideoCamera.ts:90-91`, `useVideoDrive.ts:81-82` nehmen `split('\n')[0]`. Lane-Probe P1: `'\nCamera is not ready'` wird zu „Unbekannter Fehler“. AC-18 verlangt eine Meldung „mit dem Grund“.
+- **Steps to Reproduce:** nur per Unit-Test nachstellbar (Rejection mit führendem Zeilenumbruch).
+- **Priority:** Nice to have. Erste nicht leere Zeile nehmen.
+
+#### BUG-75: „Logische Multi-Kamera = Weitwinkel, Tele nur per Zoom wird nicht angeboten“ steht nur in `design.md`, nicht in der Spec (AC-23, Doku-Drift)
+- **Severity:** Low
+- **Beleg:** Der Decision Log in `design.md` hält die Entscheidung fest. `spec.md` ist im Diff unverändert, AC-23 nennt weiter „Tele“ als Beispiel. Auf dem S24 (drei Linsen) bietet die App zwei an. Der letzte Report hatte dafür `/refine PROJ-3` (AC-23) angekündigt. Ebenfalls nicht in der Spec: dass eine einzelne Weitwinkel-Kamera neben einer logischen nicht mehr angeboten wird.
+- **Priority:** Fix in next sprint, per `/refine PROJ-3`.
+
+### Gerätetest (recorded human test, offen)
+
+Der Diff ändert Laufzeitverhalten von AC-18, AC-22 bis AC-26. Der Gerätetest vom 2026-10-02 lief vor dem Fix und kann diese AC für den neuen Stand nicht belegen. Offen sind:
+
+1. **Nord CE, BUG-68:** „Video aufnehmen“ an, einmal in die Vorschau tippen. Erscheint das Schloss ohne Fehlermeldung?
+2. **Nord CE, AC-23/AC-22:** Welche Objektive bietet die App jetzt an, gleich wie vorher? Nimmt „Weitwinkel“ mit 1080p/30 auf, wie vorher?
+3. **Nord CE, AC-25:** Tippen, „Auto“, erneut tippen, dann eine Fahrt mit Video. Halten Fokus und Helligkeit?
+4. **Galaxy S24, BUG-70/AC-23:** „Video aufnehmen“ an. Gibt es eine Auswahl Weitwinkel/Ultraweitwinkel? Zeigt die Vorschau jeweils das richtige Objektiv?
+5. **Galaxy S24, AC-25:** Auf „Weitwinkel“ tippen. Erscheint das Schloss, ohne Meldung?
+6. **Galaxy S24, AC-22/AC-24:** Wird 1080p/30 angeboten? Erscheint der Schalter „Stabilisierung“?
+7. **Beide, AC-26:** Objektiv wählen, App neu starten. Ist es noch gewählt?
+
+Optional für die Diagnose: `adb shell dumpsys media.camera` am Nord CE, damit klar ist, ob es eine logische Multi-Kamera meldet.
+
+### Summary (Re-Verifikation 4)
+
+- **BUG-68:** im Code geschlossen (Rot-Beweis per Revert), Gerät offen.
+- **BUG-70:** im Code geschlossen für das S24 (Rot-Beweis per Revert), Gerät offen. Nebenwirkung auf Geräten mit einzelner und logischer Weitwinkel-Kamera.
+- **BUG-69:** offen (Low, Spec-Frage).
+- **Neue Bugs:** 4 Low (BUG-72 bis BUG-75). 0 Critical, 0 High, 0 Medium.
+- **Security:** 3 mit Beleg (alle PASS), 8 NOT VERIFIED.
+- **Regression:** keine gefunden (347/347, keine Kopplung an Deployed-Features außer Meldungstexten).
+- **Production Ready:** **NOT READY — not verified.** Es gibt keine Critical-, High- oder Medium-Bugs mehr. Die geänderten Laufzeit-ACs (AC-18, AC-22 bis AC-26) sind aber seit dem Fix nicht ausgeführt worden, und der einzige Weg zu READY ist hier ein protokollierter Gerätetest (Liste oben). Der Status in `features/INDEX.md` bleibt **In Review**.
+
+---
+
 ## Re-Verifikation 3 (2026-10-02, nach `859b83a`)
+
+**Scope:** Gezielte Re-Verifikation. Diff-Befehl: `git diff --stat debd2a5..HEAD` → nur `spec.md` (+2/−1: erste Zeile der Technical Requirements, neue Zeile im Decision Log). Kein Produktionscode geändert (`git diff --quiet debd2a5..HEAD -- src firmware docs/stacks`, exit 0). Geprüft wurden BUG-4, der Spec-Teil von BUG-23, AC-6, AC-11 und AC-12 gegen den neuen Text, dazu Security und Regression des Diffs. Release-Build: `skipped — unchanged since 2026-10-02`.
 
 ### Automatisierte Tests (Step 5)
 
