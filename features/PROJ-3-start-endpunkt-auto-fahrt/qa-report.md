@@ -317,17 +317,7 @@ Alle Punkte sind im Code, in den Bibliotheksquellen und in den Tests geprüft. L
 
 ### Neue Bugs aus dem Fix
 
-#### BUG-58: Ein verspäteter Start eines abgebrochenen Laufs schaltet den Start-Wächter des nächsten Laufs ab, die App hängt dauerhaft (AC-27, AC-17)
-- **Severity:** High. Die Folge ist genau BUG-43, und der Auslöser ist naheliegend: Nach „Kamera reagiert nicht“ drückt man einfach nochmal Start.
-- **Beleg:** Der `.then` von `startRecording` löscht den gemeinsamen `startTimerRef` **vor** der runId-Prüfung (`useVideoDrive.ts:338-341` vor `:342`). Löst der Start von Lauf 1 nach dessen Timeout doch noch auf, löscht er den Wächter von Lauf 2. Jest-Gegenprobe (Owner nachgefahren): Lauf 2 bleibt in `starting`, nach Stopp in `saving`, `busy: true`, 0× `deactivate`.
-- **Steps to Reproduce:**
-  1. Eine Kamera, die über 5 s zum Starten braucht.
-  2. „Start → Ende“ drücken und die Meldung „Kamera reagiert nicht“ abwarten.
-  3. Sofort erneut „Start → Ende“ drücken.
-  4. Der erste Start kommt verspätet an, während der zweite noch hängt.
-  5. Erwartet: Lauf 2 endet spätestens nach 5 s mit einer Meldung.
-  6. Tatsächlich: Die App steht für immer in „Startet“ bzw. nach Stopp in „Speichert“. Jog und Fahrt bleiben gesperrt, der Bildschirm bleibt an, nur ein Neustart der App hilft.
-- **Priority:** Fix before deployment
+- BUG-58 (High) — behoben in `90987bf`, siehe „Previously Fixed“ in Lauf 1 unten.
 
 #### BUG-59: Zustand „Speichert“ hat keine Obergrenze mehr
 - **Severity:** Low
@@ -621,55 +611,19 @@ Ein Schritt je Laufzeit-AC. Antworten werden hier als `[x] … verified by the u
 
 ### Bugs Found
 
-##### BUG-42: Fahrt mit Video startet ohne Kamera- bzw. Mikrofon-Berechtigung (AC-20)
-- **Severity:** High
-- **Beleg:** Keine der drei Stellen prüft Berechtigungen: `autoDriveBaseEnabled` (`AutoDriveControls.tsx:397-409`), `handleDrive` (`:485-489`) und `useVideoDrive.start` (`useVideoDrive.ts:230-236`). Das Design verlangt die Prüfung im Übergang bereit → startet (`design.md`, Zustandstabelle, Zeile „bereit → startet“). Bei Ton an ohne Mikrofon ist `enableAudio` false (`useVideoCamera.ts:107`), die App nimmt also still ohne Ton auf.
-- **Steps to Reproduce:**
-  1. Mikrofon-Berechtigung der App in Android verweigern, „Video aufnehmen“ an, Ton an.
-  2. Am Startpunkt „Start → Ende“ drücken.
-  3. Erwartet: Hinweis, keine Fahrt.
-  4. Tatsächlich: Die Fahrt startet, das Video hat keinen Ton. Ohne Kamera-Berechtigung folgt BUG-43.
-- **Priority:** Fix before deployment
+#### Previously Fixed
 
-##### BUG-43: Phase „Startet“ ohne Zeitlimit, App hängt dauerhaft, Wach-Sperre bleibt an (AC-27, AC-17)
-- **Severity:** High
-- **Beleg:** Löst `startRecording` nie auf (z. B. weil kein `<Camera>` gerendert ist, wenn die Kamera-Berechtigung fehlt, `VideoPanel.tsx:64-73`), bleibt die Phase „startet“. Stopp setzt nur `stopRequested` und „saving“ (`useVideoDrive.ts:164-168`). Der Finalize-Timer wird erst mit einem vorhandenen Recording scharf gestellt (`:142-146`). `deactivate()` läuft nur in `finish()`. Die Gegenprobe zeigt nach Stopp und 60 s: Phase `saving`, `busy: true`, 0 Aufrufe von `deactivate`.
-- **Steps to Reproduce:**
-  1. Kamera-Berechtigung verweigern, „Video aufnehmen“ an.
-  2. „Start → Ende“, dann Stopp.
-  3. Erwartet: Abbruch mit Meldung, Bedienung wieder frei, Bildschirm darf sich sperren.
-  4. Tatsächlich (aus Code und Probe): Die App steht für immer auf „Speichert“, alles bleibt gesperrt, der Bildschirm bleibt an. Nur ein Neustart der App hilft.
-- **Priority:** Fix before deployment
+Behoben in `cbdc596` bzw. `90987bf`, re-verifiziert in Re-Verifikation 1 und 2 und im Gerätetest vom 2026-10-02.
 
-##### BUG-44: Teil-Take nach einem Aufnahmefehler wird nie gespeichert (AC-18), Unit-Test falsch grün
-- **Severity:** Medium
-- **Beleg:** VisionCamera ruft bei einem Finalize-Fehler nur `onRecordingError` auf und setzt `recording=null` (`HybridVideoRecorder.kt:68`, `:97`). Ein folgendes `stop()` wirft (`:114`), `onFinished` kommt nie. Die App wartet 10 s in „Speichert“ (`useVideoDrive.ts:143-146`) und speichert nichts, obwohl die Datei im Cache liegt. Der Test-Fake ruft nach einem Fehler trotzdem `onFinished` auf (`useVideoDrive.test.ts:57-59`).
-- **Steps to Reproduce:** Speicher fast vollmachen, eine lange Fahrt mit Video starten. Erwartet: Teil-Take in der Galerie. Tatsächlich: Fehlermeldung, kein Video.
-- **Priority:** Fix before deployment
-
-##### BUG-45: Unerwartetes „reguläres“ Aufnahme-Ende gilt als Erfolg, Motor fährt weiter (AC-18)
-- **Severity:** Medium
-- **Beleg:** VisionCamera meldet `ERROR_SOURCE_INACTIVE` (Kamera-Quelle weg) als normales Ende über `onFinished` (`HybridVideoRecorder.kt:82`). `handleFinished` prüft die Phase nicht (`useVideoDrive.ts:193-203`). Ergebnis: Vorlauf oder Fahrt endet, das Video wird gespeichert, die Phase springt auf „bereit“, es geht kein STOP raus, und es erscheint keine Fehlermeldung. Gegenprobe: `phase ready, error null, STOP sent 0, saves 1`. Ein Auslöser kommt aus der App selbst: `onCameraError` wechselt das Format (`useVideoCamera.ts:130-140`) und erzwingt damit eine Neukonfiguration mitten in der Aufnahme.
-- **Steps to Reproduce:** Während einer Fahrt mit Video die Kamera durch ein anderes Ereignis verlieren (z. B. eine andere App greift auf die Kamera zu). Erwartet: Halt und Meldung. Tatsächlich: Die Aufnahme endet still, der Schlitten fährt weiter, die Bedienung ist wieder frei.
-- **Priority:** Fix before deployment
-
-##### BUG-46: Stabilisierungs-Schalter immer sichtbar und ohne garantierte Wirkung (AC-24)
-- **Severity:** Medium
-- **Beleg:** `supportsStabilization` prüft `supportsVideoStabilizationMode('auto')` (`videoFormats.ts:130-132`), und das ist auf Android immer `true` (`HybridCameraDevice.kt:223-226`). „An“ sendet `'auto'` (`useVideoCamera.ts:116`), was Android nicht festlegt („might be enabled, might be disabled“, `HybridVideoOutput.kt:120-121`). Die Unit-Tests mocken das Gerät und sehen das nicht.
-- **Steps to Reproduce:** Auf einem Gerät ohne Videostabilisierung erscheint der Schalter trotzdem. Auf einem Gerät mit Stabilisierung unterscheiden sich Takes mit „an“ und „aus“ nicht zuverlässig.
-- **Priority:** Fix before deployment
-
-##### BUG-47: Format-Liste bietet nicht unterstützte Auflösung/fps-Kombinationen an, fps wird still angepasst (AC-22)
-- **Severity:** Medium
-- **Beleg:** `availableFormats` bildet das Kreuzprodukt aus Auflösungen und fps (`videoFormats.ts:104-108`). `supportsFPS` gilt aber pro Gerät, nicht pro Auflösung (`HybridCameraDevice.kt:219-221`). VisionCamera löst den fps-Wert still auf den nächstliegenden Bereich auf (`ConstraintResolver.kt:112-131`), der Fallback mit Hinweis greift also nie. Nebenbei (Low): Ist 1080p/30 nicht verfügbar, nimmt der Code `formats[0]` (die niedrigste Kombination, `videoFormats.ts:125`) statt des Gerätestandards.
-- **Steps to Reproduce:** „4K · 60 fps“ wählen, auf einem Handy, das 4K nur mit 30 fps kann. Erwartet: Die Kombination wird nicht angeboten. Tatsächlich: Sie wird angeboten, und das Video hat 30 fps.
-- **Priority:** Fix before deployment
-
-##### BUG-48: Temp-Videodateien bleiben dauerhaft im App-Cache liegen (AC-15/AC-18)
-- **Severity:** Medium
-- **Beleg:** Aufgenommen wird nach `File.createTempFile("VisionCamera_", ".mp4")` im Cache (`HybridVideoOutput.kt:153`, `createRecorder({})` in `useVideoCamera.ts:172`). `CameraRoll.save` kopiert und lässt die Quelle liegen (`CameraRollModule.java:198-199`). Im Code gibt es kein Löschen. `design.md:269` spricht nur von „kurzzeitig“ doppeltem Speicher. Folge: Jeder Take bleibt als zweite Kopie liegen (bei 4K mehrere hundert MB), was auf Dauer zum „Speicher voll“-Abbruch führt. Eine private Kopie bleibt auch nach dem Löschen in der Galerie bestehen.
-- **Steps to Reproduce:** Drei Takes in 4K, dann `adb shell run-as com.camerasliderapp ls -la cache/`. Erwartet: leer. Tatsächlich: `VisionCamera_*.mp4`.
-- **Priority:** Fix before deployment
+- **BUG-42** — Fahrt mit Video startet ohne Kamera- bzw. Mikrofon-Berechtigung (AC-20) — Severity: High
+- **BUG-43** — Phase „Startet“ ohne Zeitlimit, App hängt dauerhaft, Wach-Sperre bleibt an (AC-27, AC-17) — Severity: High
+- **BUG-44** — Teil-Take nach einem Aufnahmefehler wird nie gespeichert (AC-18) — Severity: Medium
+- **BUG-45** — Unerwartetes „reguläres“ Aufnahme-Ende gilt als Erfolg, Motor fährt weiter (AC-18) — Severity: Medium
+- **BUG-46** — Stabilisierungs-Schalter immer sichtbar und ohne garantierte Wirkung (AC-24) — Severity: Medium
+- **BUG-47** — Format-Liste bietet nicht unterstützte Auflösung/fps-Kombinationen an (AC-22) — Severity: Medium
+- **BUG-48** — Temp-Videodateien bleiben dauerhaft im App-Cache liegen (AC-15/AC-18) — Severity: Medium
+- **BUG-53** — Hintergrund während „Speichert“ meldet fälschlich „Aufnahme abgebrochen“ — Severity: Low
+- **BUG-58** — Verspäteter Start eines abgebrochenen Laufs schaltet den Start-Wächter des nächsten Laufs ab (AC-27, AC-17) — Severity: High
 
 ##### BUG-49: Kamera-Vorschau bleibt im Hintergrund aktiv
 - **Severity:** Low
@@ -690,11 +644,6 @@ Ein Schritt je Laufzeit-AC. Antworten werden hier als `[x] … verified by the u
 ##### BUG-52: Kein „Video gespeichert“ nach einem Verbindungsabbruch (AC-19)
 - **Severity:** Low
 - **Beleg:** Beim Wechsel auf `reconnecting` wird `AutoDriveControls` ausgehängt, und `lastSavedCountRef` wird beim Remount neu initialisiert (`AutoDriveControls.tsx:309-315`). Das Video wird trotzdem gespeichert, nur die Bestätigung fehlt.
-- **Priority:** Nice to have
-
-##### BUG-53: Hintergrund während „Speichert“ meldet fälschlich „Aufnahme abgebrochen“
-- **Severity:** Low
-- **Beleg:** `fail()` prüft nur auf „bereit“ (`useVideoDrive.ts:178-183`). Ein regulär beendeter Take, der gerade gespeichert wird, bekommt deshalb eine Fehlermeldung.
 - **Priority:** Nice to have
 
 ##### BUG-54: Finalize-Timeout verwirft eine später eintreffende Datei
@@ -824,12 +773,6 @@ Ein Schritt je Laufzeit-AC. Antworten werden hier als `[x] … verified by the u
 
 ### Nicht dokumentierte Befunde
 
-#### BUG-6 (Medium) — jeder BLE-Connect löscht Start/Ende, nicht nur der eigenen App
-`ble.cpp:74` ruft `motorClearPoints()` in `onConnect` für **jede** neue Verbindung auf, auch unverschlüsselt/ungebondet (`onConnect` feuert vor Pairing, vendort in `NimBLEServer.cpp:446-471`) und auch während die App bereits verbunden ist (Advertising läuft weiter, `ble.cpp:87`). Ein beliebiges fremdes Gerät in Reichweite kann so mitten in der Sitzung — auch während einer laufenden Fahrt — die gesetzten Punkte löschen. Die App sieht nur `hasStart=false` über das Notify, ohne Erklärung. Workaround: Punkte neu setzen.
-
-#### BUG-7 (Medium) — Bond-Verdrängung kann die App aussperren, auch für STOP
-Just-Works-Bonding nimmt jede Pairing-Anfrage ohne Rückfrage an (`ble.cpp:234,245`). Bei maximal 3 gespeicherten Bonds (`nimconfig.h:234`) wird bei Überlauf der älteste per `ble_gap_unpair_oldest_peer()` verdrängt (vendort in `ble_store_util.c:350-355`). Drei fremde Pairings verdrängen so den Bond der App; die Command-Characteristic verlangt `WRITE_ENC` (`ble.cpp:280-282`), wodurch alle App-Writes fehlschlagen — STOP eingeschlossen — bis der Nutzer die Kopplung manuell in den Android-Einstellungen entfernt. Ob Android danach automatisch neu pairt: `[!] NOT VERIFIED — no way to run and probe this project was recorded`.
-
 #### BUG-8 (Low) — AUTO_DRIVE-Richtungsbyte nicht streng validiert
 `ble.cpp:161-163`: jeder Wert ungleich `0x00` wird als „Ende→Start" gewertet, auch `0x02`–`0xFF`, statt nur `0x00`/`0x01` zu akzeptieren. Keine Sicherheitsfolge (Position/Distanz/Geschwindigkeit werden danach unabhängig geprüft), aber ungültige Eingabe wird angenommen statt verworfen. Dasselbe Muster besteht bereits bei JOG (PROJ-2, `ble.cpp:138-139`).
 
@@ -905,6 +848,22 @@ Gesamte Suite nach der Ergänzung erneut komplett gelaufen (Owner, Step 5-Nachtr
 - **BUG-5** — Disconnect-Stopp-Garantie (AC-10) durch unbeteiligtes Zweitgerät aushebelbar — Severity: Medium
 - **BUG-6** — Jeder BLE-Connect löscht Start-/Endpunkt, nicht nur ein Reconnect der eigenen App — Severity: Medium
 - **BUG-7** — Bond-Verdrängung (Just Works, max. 3 Bonds) kann die App aussperren, auch für STOP — Severity: Medium
+- **BUG-15** — DIR-Umkehr dreht die physische Richtung gespeicherter Presets (Regression PROJ-4) — Severity: High
+- **BUG-19** — Zu kurze Dauer ohne Verlassen des Felds sperrt die Auslöser stumm — Severity: Medium
+- **BUG-24** — Dauer eines geladenen Presets wird durch eine Zwischen-Distanz still überschrieben — Severity: High
+- **BUG-25** — Richtungs-Migration erkennt „alte Polarität“ nur am fehlenden `dirVersion` — Severity: Medium (erledigt: laut Nutzer keine betroffenen Presets, 2026-09-30)
+- **BUG-26** — Doku-Drift: `dirVersion`/Migration und AC-12 fehlten in Design und Datenmodell — Severity: Low
+- **BUG-27** — Restpfad von BUG-24: nur Endpunkt gesetzt, Preset-Dauer überschrieben — Severity: High
+- **BUG-28** — Teil-Regression von BUG-19: wachsende Distanz sperrt die Auslöser ohne Meldung — Severity: Medium
+- **BUG-29** — Von Hand geänderte Dauer bleibt nach dem Anwenden eines Presets zu kurz — Severity: Medium
+- **BUG-30** — Ende der Preset-Schutzphase per Timer/Fehler bewertet die Distanz nicht neu — Severity: Medium
+- **BUG-31** — Alter Timer von Preset A beendet die Schutzphase von Preset B — Severity: Low
+- **BUG-32** — 3-s-Timer der Schutzphase wird nie aufgeräumt — Severity: Low
+- **BUG-33** — Verwaister Schutzphasen-Timer überschreibt die Dauer eines neu geladenen Presets — Severity: High (entfallen mit `df41c8c`, Mechanismus ausgebaut)
+- **BUG-34** — Doppel-Tap auf „Als Start setzen“ hinterlässt verwaisten Timer — Severity: Low (entfallen mit `df41c8c`)
+- **BUG-35** — Korrektur im Fehlerpfad nutzt veraltete Distanz — Severity: Low (entfallen mit `df41c8c`)
+- **BUG-36** — Timer entsteht nach dem Unmount und wird nie abgebrochen — Severity: Low (entfallen mit `df41c8c`)
+- **BUG-37** — Timer-Korrektur greift während des Tippens — Severity: Low (entfallen mit `df41c8c`)
 
 Details und Fix-Verlauf: siehe „Re-Verifikation" unten.
 
@@ -1022,8 +981,8 @@ Nach dem Re-Verifikations-Zyklus (Firmware neu geflasht ab Commit `f188420`) hat
 - [x] **EC-4** — Code `motor.cpp:342-350, 495-509`; Laufzeit `[!]`
 
 ### Weitere Befunde
-- [ ] **BUG-15 (High, Regression PROJ-4): DIR-Umkehr `5feb442` dreht die physische Richtung gespeicherter Presets.** Ein Preset speichert `endIsAfterStart` in Zählrichtung (`usePresets.ts:28-35`, `AutoDriveControls.tsx:462-467`); `setDirectionPin(kDirPin, false)` (`motor.cpp:216`) kehrt um, welche physische Richtung „steigende Schritte" ist. Ohne Migration/Versionsfeld (`STORAGE_KEY` unverändert) legt „Als Start setzen" nach dem Laden eines **vor dem 2026-09-29 gespeicherten** Presets das Ende auf die Gegenseite; der Slider hat keine Endanschläge (`kMaxPlausibleDistanceSteps` prüft nur den Betrag). Workaround: alte Presets löschen und neu speichern. Innerhalb einer Sitzung sind Start/Ende/`moveTo`/Zeitraffer konsistent (`motor.cpp:409-418, 532-534`).
-- [ ] **BUG-19 (Medium, UE-1):** zu kurze Dauer ohne Blur (Default „10", Wert von vor dem Setzen neuer Punkte) deaktiviert die Auslöser stumm, Statuszeile zeigt „Bereit". Repro (Probe): Distanz 160000, Feld unberührt → `disabled=true`, keine Meldung. Betrifft jede Distanz über ~72.000 Steps (~450 mm). Workaround: Feld antippen und verlassen.
+- BUG-15 (High) — behoben, siehe „Previously Fixed“ oben.
+- BUG-19 (Medium) — behoben, siehe „Previously Fixed“ oben.
 - [ ] Low: **BUG-20** Fehlermeldung erscheint schon beim Tippen, nicht erst beim Verlassen des Felds (`AutoDriveControls.tsx:302-306`, AC-6-Wortlaut); **BUG-21** `motorSetStart/End` ohne `autoDriving`-Wache (`motor.cpp:365, 373`, nur theoretisches Zeitfenster) und `moveTo()`-Rückgabewert verworfen (`motor.cpp:492`, bereits BUG-14); **BUG-22** Sicherheits-Doku irreführend: `platformio.ini:27` nennt späteres Pairing „harmless", der BUG-7-Fix lehnt aber nur das Speichern des Bonds ab, der verschlüsselte Link kommt trotzdem zustande (`ble_sm.c:1027-1033`, Just-Works-Entscheidung unverändert); **BUG-23** Doku/Kommentar-Drift: `AutoDriveControls.tsx:92` („= 2000 steps" → 8000), `design.md:64-69` (Status 5 Byte statt 6), `spec.md` Technical Requirements (`speed = distance/duration` statt Rampen-Formel), `docs/stacks/firmware-esp32-tmc2209.md:79` (`setDirectionPin` ohne Polarität) und `:113-114` (Opcodes „noch nicht festgelegt"); App: Dauer ohne uint16-Obergrenze (`client.ts:294-297`, physisch unerreichbar) und `Number()` nimmt Hex/Exponent an.
 - **Bekannte Bugs unverändert, nicht verschlechtert:** BUG-8, BUG-12, BUG-13, BUG-14, BUG-6-Restfall.
 
@@ -1059,9 +1018,9 @@ Nach dem Re-Verifikations-Zyklus (Firmware neu geflasht ab Commit `f188420`) hat
 - [x] **AC-12** — Probe: leer → „12.3" (Distanz 90000), „abc" → „11.0" (80000); Distanz ändert sich nicht → getippte Zeit bleibt.
 
 ### Neue Bugs
-- [ ] **BUG-24 (High, Regression PROJ-4 AC-4/AC-5/EC-2; ausgelöst durch den BUG-19-Fix): Die Dauer eines geladenen Presets wird durch eine Zwischen-Distanz still überschrieben.** `handleSetStart` (`AutoDriveControls.tsx:396-410`) sendet SET_START und danach SET_END_FROM_DISTANCE; dazwischen meldet die Firmware per Notify (`main.cpp:56`, `ble.cpp:402-420`) eine Zwischen-Distanz (neuer Start gegen alten Endpunkt), auf die der neue Effekt (`:321-327`) korrigiert. Die spätere Preset-Distanz holt den Wert nicht zurück. Repro (Render-Probe): Bereich 0…100000, Preset „Schnell" (20000 Steps, 3.5 s) laden → „3.5"; „Als Start setzen" bei 50000 → Zwischen-Notify → „7.3"; End-Notify 20000 → bleibt „7.3"; „Start → Ende" sendet 7.3 statt 3.5. Tritt auf, wenn schon ein Endpunkt existiert und |alter Endpunkt − neuer Start| größer als die Preset-Distanz ist (häufig). Schlimmer Fall: Ziel-Distanz klein → Wert wird „zu lang", Fehlermeldung, Fahrt gesperrt. Workaround: Dauer nach dem Setzen neu eintippen. _Notify-Reihenfolge auf dem Gerät `[!]` — aus Code + Probe abgeleitet._
-- [ ] **BUG-25 (Medium, bedingt): Migration erkennt „alte Polarität" nur am fehlenden `dirVersion`.** Presets, die zwischen dem Flash der Firmware `5feb442` (2026-09-29 20:26) und der Installation eines App-Builds ab `a6b837d` (2026-09-30 00:18) gespeichert wurden, sind schon in neuer Polarität gespeichert und werden trotzdem gedreht (`usePresets.ts:56-64`); dasselbe, wenn die neue App ohne neu geflashte Firmware läuft. Ob solche Presets existieren, kann nur der Nutzer sagen.
-- [ ] **BUG-26 (Low, Doku-Drift):** `dirVersion`/Migration fehlen in `docs/data-model.md` und PROJ-4 `design.md`; AC-12 und der Distanz-Effekt fehlen in PROJ-3 `design.md`.
+- BUG-24 (High) — behoben, siehe „Previously Fixed“ oben.
+- BUG-25 (Medium) — erledigt, siehe „Previously Fixed“ oben.
+- BUG-26 (Low) — behoben, siehe „Previously Fixed“ oben.
 - [ ] Low, vorbestehend: `durationSeconds` als String im Speicher lässt `formatSeconds` werfen (`AutoDriveControls.tsx:624`, nur mit Zugriff auf den privaten App-Speicher); eine korrupte Preset-Liste (`[null, …]`) blockiert Speichern/Löschen (Toast statt Datenverlust).
 
 ### Security / Regression
@@ -1088,9 +1047,8 @@ Nach dem Re-Verifikations-Zyklus (Firmware neu geflasht ab Commit `f188420`) hat
 - [x] **Security** — Diff fügt nur `useRef` und eine reine Funktion hinzu, keine neuen Eingabepfade/Secrets (`git diff d105b00..HEAD`).
 
 ### Offene / neue Bugs
-- [ ] **BUG-27 (High) — Restpfad von BUG-24:** Ist vor dem Laden eines Presets **nur ein Endpunkt** gesetzt (kein Start), wird die Zwischen-Distanz nach „Als Start setzen" zur _ersten_ bekannten Distanz; die Korrektur überschreibt die Preset-Dauer. Repro (Probe C): Notify `hasEnd=true, hasStart=false` (bei 100000) → Preset „Schnell" laden („3.5") → „Als Start setzen" bei 50000 → Zwischen-Notify → „7.3" → End-Notify 20000 → bleibt „7.3"; „Start → Ende" sendet 7.3 statt 3.5. Schlimmer (Probe C2): Preset „Kurz" (2000 Steps, 1.0 s), Zwischen-Distanz 150000 → „19.8" → „Ungültige Dauer — erlaubt: 1.0–10.0 s", Fahrt gesperrt. Ursache: `AutoDriveControls.tsx:344` unterscheidet „erstmals bekannt" nicht von „Zwischen-Distanz während der Preset-Ableitung". Verletzt PROJ-4 AC-4/AC-5 und die AC-12-Zusicherung „Laden eines Presets überschreibt die Dauer nicht". Der neue Unit-Test (`AutoDriveControls.test.ts:206-213`) prüft nur die reine Funktion und wertet `(null, 160000) → true` als gewollt — deckt diesen Pfad daher nicht ab. Workaround: Dauer nach dem Setzen neu eintippen. _Notify-Reihenfolge auf dem Gerät `[!]` — aus Code (`motor.cpp:361-370, 599-606`, `main.cpp:56`, `ble.cpp:402-420`) und Probe abgeleitet._
-- [ ] **BUG-28 (Medium) — Teil-Regression von BUG-19 durch `fd34882`:** wird die Distanz nach dem ersten Bekanntwerden _größer_ und ist die unberührte Dauer dann zu kurz, sind die Auslöser ohne Meldung gesperrt (Probe E: Distanz 50000, Feld „10" gültig → „Als Ende setzen" → Distanz 160000 → bleibt „10", „Start → Ende" deaktiviert, keine Meldung; nach Blur „21.0"). Der präzisierte AC-12-Text widerspricht sich hier: „Spätere Änderungen der Distanz … überschreiben die Dauer nicht" vs. „die Auto-Fahrt-Auslöser bleiben nie stumm gesperrt wegen einer zu kurzen Dauer". Zu kurze Dauern zeigen keine Meldung, nur zu lange (`showDurationError`, `:327-331`) — Klärung per `/refine PROJ-3`.
-- [ ] **BUG-26 (Low)** weiterhin offen: `design.md` kennt AC-12 und den Distanz-Effekt nicht.
+- BUG-27 (High) — behoben, siehe „Previously Fixed“ oben.
+- BUG-28 (Medium) — behoben, siehe „Previously Fixed“ oben.
 - Weiterhin offen aus Nachtrag 2: **BUG-25** (Medium, bedingt: Presets aus dem Zeitfenster 2026-09-29 20:26 – 2026-09-30 00:18 würden von der Migration gedreht — der Nutzer muss klären, ob es solche gibt), BUG-17, BUG-20..23.
 - Beobachtung (harmlos): Wird die Distanz bekannt → null → wieder bekannt, läuft die Korrektur erneut (Probe F); ein Disconnect läuft nicht über diesen Weg, weil `RootScreen.tsx:93-122` die Komponente außerhalb von `connected` aushängt.
 
@@ -1121,10 +1079,10 @@ Nach dem Re-Verifikations-Zyklus (Firmware neu geflasht ab Commit `f188420`) hat
 - [x] **PROJ-4 AC-4, AC-5 (App-seitig), EC-2 (mit Einschränkung BUG-29), EC-3**; Security-Diff: keine neuen Eingabepfade/Secrets (`git diff a9a30a7..HEAD -- src`).
 
 ### Neue Bugs (durch den neuen Preset-Guard)
-- [ ] **BUG-29 (Medium) — AC-12 verletzt: eine von Hand geänderte Dauer bleibt nach dem Anwenden eines Presets zu kurz, Auslöser ohne Meldung gesperrt.** Probe H2: keine Punkte, Preset „Schnell" laden, „2" tippen und Feld verlassen, „Als Start setzen", Notify nur Start, Notify 20000 → Dauer bleibt „2", „Start → Ende" gesperrt, Statuszeile „Bereit"; H3 analog mit „3" bei Distanz 10000 → 20000 (Minimum 3.5). Ursache `AutoDriveControls.tsx:358-365`: beim Eintreffen der Preset-Distanz wird der Ref geleert, `shouldAutoCorrectOnDistanceChange` bekommt aber die vorher gelesene lokale Variable (≠ null) — das Eintreffen selbst korrigiert nie. Die eigene Preset-Dauer ist für ihre Distanz immer gültig (Probe: exaktes Minimum bleibt unverändert), eine „zu kurz"-Korrektur beim Eintreffen würde sie also nicht antasten. Workaround: Feld antippen und verlassen.
-- [ ] **BUG-30 (Medium, selten, Fehlerpfad):** endet der Guard durch den 3-s-Timer oder einen Schreibfehler, wird die aktuelle Distanz nicht neu bewertet (`:453-461`, Effekt hängt nur an `[knownDistanceSteps]`, `:370`). Probe G1: „Kurz" (1.0 s) bei Distanz 100000, „Als Start setzen", Zwischen-Notify 50000, End-Notify kommt nie (die Firmware verwirft SET_END_FROM_DISTANCE still, `firmware/src/motor.cpp:381-383`: Stepper läuft / autoDriving / !hasStart / zu große Distanz) → nach 3,1 s „1.0", Auslöser gesperrt, keine Meldung; G2b (`catch` löscht den Guard, korrigiert aber nicht) ebenso. Erst die nächste echte Distanzänderung korrigiert wieder. _Ob die Firmware SET_END_FROM_DISTANCE im Feld verwirft `[!]` — aus Code abgeleitet._
-- [ ] **BUG-31 (Low):** ein alter Timer von Preset A beendet den Guard von Preset B (Probe G6: A anwenden, nach 2,8 s „Kurz" laden und „Als Start setzen" → bei 3 s löscht A-Timer den Guard von B → Zwischen-Distanz 30000 korrigiert „1.0" zu „4.8"). Weder ID-Prüfung noch `clearTimeout` (`:453-455`); braucht Laden, Jog und Setzen innerhalb 3 s nach dem vorigen Apply.
-- [ ] **BUG-32 (Low):** der 3-s-`setTimeout` (`:453`) wird nie gespeichert/aufgeräumt; Jest meldet neu „did not exit one second after the test run" (in `suite6.log`, nicht in `suite.log`/`suite3–5.log`); in der App harmlos. Ursache von BUG-31.
+- BUG-29 (Medium) — behoben, siehe „Previously Fixed“ oben.
+- BUG-30 (Medium) — behoben, siehe „Previously Fixed“ oben.
+- BUG-31 (Low) — behoben, siehe „Previously Fixed“ oben.
+- BUG-32 (Low) — behoben, siehe „Previously Fixed“ oben.
 
 ### Weiterhin offen (unverändert seit Nachtrag 2/3)
 BUG-17, BUG-20..23 (Low). Beobachtung (Spec-konform): die App erhöht die Dauer bei langer Strecke selbst; verkürzt der Nutzer danach die Strecke, erscheint die AC-6-Meldung für einen Wert, den er nie eingegeben hat.
@@ -1148,11 +1106,11 @@ BUG-17, BUG-20..23 (Low). Beobachtung (Spec-konform): die App erhöht die Dauer 
 - [x] **AC-6, AC-11, AC-12 Kernfälle, PROJ-4 AC-5 (App-seitig), EC-2, EC-3** — u. a. Preset-eigene Dauer bleibt für „Schnell" 3.5, „Kurz" 1.0 (exaktes Minimum), „Lang" 40.0, 16000/3.0, 12345/2.6, 1414/0.9; lange Dauern werden nie überschrieben; StrictMode idempotent. PROJ-5 unverändert (Diff leer), Suite grün.
 
 ### Neue Bugs (durch `aa1ce58`)
-- [ ] **BUG-33 (High, Regression PROJ-4 AC-4, 3-s-Fenster):** ein noch laufender oder verwaister Guard-Timer der vorigen Anwendung überschreibt die Dauer eines danach geladenen, noch nicht angewendeten Presets; die Fahrt läuft ohne Meldung mit falscher Dauer. Repros: Distanz 20000, „Schnell" anwenden (gleiche Distanz, Effekt feuert nicht), nach 1 s „Kurz" laden („1.0") → bei 3 s „3.5"; Preset-Distanz trifft vor der Write-Antwort ein → Timer wird erst danach gesetzt und bleibt aktiv, „Kurz" nach 1,5 s laden → „3.5", „Start → Ende" sendet 3.5 statt 1.0; A-Distanz kommt nie an, B nach 1 s laden → „1.0" wird „8.5". Ursache: `handleLoadPreset` (`:517-523`) beendet den Guard nicht; der Timer entsteht erst nach dem `await` (`:485`), auch wenn `endPresetApply` schon lief. Ob Notify vor der Write-Antwort eintrifft, ist auf dem Gerät ein Race (`firmware/src/main.cpp:56` vs. `ble.cpp:209`) — `[!]`, aus Code abgeleitet.
-- [ ] **BUG-34 (Low):** Doppel-Tap auf „Als Start setzen" hinterlässt einen verwaisten Timer (`:485` überschreibt die Referenz ohne Abräumen), der später den Guard einer neuen Anwendung beendet („1.0" → „4.8").
-- [ ] **BUG-35 (Low):** Korrektur im Fehlerpfad nutzt eine veraltete Distanz — `endPresetApply` liest `previousKnownDistanceRef` (`:374`), der erst im Effekt gesetzt wird (`:384`). Zwischen-Notify 1500 im selben Tick wie der Schreibfehler → „13.5" statt „1.0", Meldung „erlaubt: 0.9–7.5 s", Auslöser gesperrt. Der Test „a failed SET_END_FROM_DISTANCE write also catches up" prüft nur `not.toBe('1.0')` und erkennt das nicht. Batching auf dem Gerät `[!]`.
-- [ ] **BUG-36 (Low):** Unmount während offenem SET_END_FROM_DISTANCE → der Timer entsteht nach dem Unmount und wird nie abgebrochen; widerspricht `design.md:124`. Kein `console.error`.
-- [ ] **BUG-37 (Low, UX):** die Timer-Korrektur greift während des Tippens („2" bei 2,9 s → bei 3 s „7.3" → weitertippen „7.35").
+- BUG-33 (High) — entfallen mit `df41c8c`, siehe „Previously Fixed“ oben.
+- BUG-34 (Low) — entfallen mit `df41c8c`, siehe „Previously Fixed“ oben.
+- BUG-35 (Low) — entfallen mit `df41c8c`, siehe „Previously Fixed“ oben.
+- BUG-36 (Low) — entfallen mit `df41c8c`, siehe „Previously Fixed“ oben.
+- BUG-37 (Low) — entfallen mit `df41c8c`, siehe „Previously Fixed“ oben.
 - Außerhalb Scope bemerkt (nicht neu): ein geladenes Preset bleibt nach dem Anwenden aktiv, jedes weitere „Als Start setzen" wendet es erneut an; ein kurzes Preset ist bei bekannter größerer Distanz bis zum Anwenden stumm gesperrt.
 
 ### Nicht verifiziert
