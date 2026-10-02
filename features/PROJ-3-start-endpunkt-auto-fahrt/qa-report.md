@@ -1,7 +1,7 @@
 # QA Test Results
 
-**Tested:** 2026-10-02 (Re-Verifikation 2 nach dem Fix-Commit `90987bf`)
-**App URL:** hier nicht ausführbar (`probe.kind: none`, sowohl App-Ebene als auch Layer `firmware`). **Jedes Laufzeit-AC ist `[!] NOT VERIFIED`, bis ein Mensch es am Gerät testet.**
+**Tested:** 2026-10-02 (Re-Verifikation 2 nach dem Fix-Commit `90987bf`, dazu der protokollierte Gerätetest auf dem OnePlus Nord CE)
+**App URL:** hier nicht ausführbar (`probe.kind: none`, sowohl App-Ebene als auch Layer `firmware`). Die Laufzeit-ACs hat der Nutzer im protokollierten Gerätetest (Abschnitt „Gerätetest“ in Re-Verifikation 2) am Gerät bestätigt.
 **Tester:** QA Engineer (AI). Eine unabhängige `qa-engineer`-Lane ohne Build-Kontext mit allen drei Scopes in der Reihenfolge Step 2 → 3 → 4, zusammengeführt vom Owner. Diese Session hat den Fix gebaut. Deshalb hat sie selbst nichts verifiziert, nur die Unit-Tests aus Step 6 ergänzt.
 **Scope:** **Re-Verifikation.** Der letzte Report kam aus `fbfce85`. Diff-Befehl: `git diff --stat fbfce85..HEAD`, HEAD `90987bf` auf `feat/PROJ-3-videoaufnahme`. Geänderte Produktionsdatei:
 - `src/components/useVideoDrive.ts` (+6/−4): Im `.then` von `startRecording` kommt die runId-Prüfung jetzt vor dem Löschen des Start-Wächters (BUG-58).
@@ -94,10 +94,10 @@ Alle Punkte sind im Code und in Jest geprüft. Laufzeit: `[!] NOT VERIFIED — n
 
 ### Not Verified In This Run
 
-- [!] Alle Laufzeit-ACs und -ECs am Gerät: no way to run and probe this project was recorded (`probe.kind: none`). Weg: der Gerätetest unten.
+- [!] Laufzeit durch die AI: no way to run and probe this project was recorded (`probe.kind: none`). Abgedeckt durch den protokollierten Gerätetest unten, mit Ausnahme von EC-1 bis EC-3.
 - [!] Layer `firmware`: no test command recorded (unverändert).
-- [!] Darstellung des Video-Panels und der Jog-Sperre: kein Gerät, kein Viewport.
-- [!] Aus Re-Verifikation 1 weiter offen: ob `NativeModules.CacheFiles` unter der New Architecture auflöst, und welche Formate das konkrete Handy liefert.
+- [!] Ursache von BUG-68 (woher der abgebrochene Fokus-Aufruf kommt): ohne `adb logcat` nicht geklärt.
+- [!] Zweites Handy des Nutzers: nur AC-23/AC-25 gemeldet, Modell nicht erfasst, Ursache von BUG-70 nicht diagnostiziert.
 
 ### Neuer Bug (bestehendes Verhalten, erstmals dokumentiert)
 
@@ -107,20 +107,80 @@ Alle Punkte sind im Code und in Jest geprüft. Laufzeit: `[!] NOT VERIFIED — n
 - **Steps to Reproduce (nicht am Gerät):** Fahrt mit Video auslösen und in „Startet“ die App per Zurück-Taste verlassen, während die JS-Runtime weiterläuft. Die Kamera antwortet danach noch.
 - **Priority:** Nice to have
 
+### Gerätetest (recorded human test, 2026-10-02)
+
+**Gerät:** OnePlus Nord CE (EB2103), Android 13. Beleg dafür: `adb devices -l` und `adb shell getprop ro.build.version.release`. Die installierte App stammt von 12:53 (`dumpsys package com.camerasliderapp`, `lastUpdateTime`) und ist damit jünger als die APK aus `90987bf` (11:37). **Firmware:** nicht neu geflasht, denn sie ist seit v1.4.0 (`9629317`) unverändert (`git diff --stat 9629317..HEAD -- firmware` leer). Der Nutzer hat die 24 Punkte der Liste durchgegangen und gemeldet: „alles ok“, außer beim Tippen in die Vorschau (AC-25). Dazu kommt ein Screenshot per `adb exec-out screencap`, und auf Nachfrage hat er die Angaben zu AC-25 präzisiert.
+
+- [x] AC-1/AC-2 (Punkte setzen): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] AC-3/AC-4 (Fahrt in beide Richtungen, Dauer): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] AC-5 (Stopp): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] AC-6/AC-11/AC-12 (Dauer-Validierung, Minimum übernehmen): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] AC-7/AC-8/AC-9 (Sperren ohne Punkte und während der Fahrt): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] AC-10/AC-19 (Bluetooth-Abbruch während einer Fahrt mit Video, Video in der Galerie): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] EC-4 (Fahrt ohne Video läuft im Hintergrund weiter): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] AC-13 (Schalter zeigt Vorschau und Einstellungen): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] AC-14/AC-16/AC-29 (Vor-/Nachlauf, REC-Anzeige, Videolänge): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] AC-15/BUG-48 („Video gespeichert“, Galerie, Cache wächst nicht mit). Damit ist auch belegt, dass `NativeModules.CacheFiles` unter der New Architecture auflöst: verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] AC-17 (Stopp in Vorlauf, Fahrt und Nachlauf, Teil-Takes): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] AC-18/EC-7 (Hintergrund in Vorlauf und Fahrt, fremde Kamera-App): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] AC-20 (Mikrofon bzw. Kamera verweigert: Hinweis, keine Fahrt): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] AC-21 (Ton an/aus): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] AC-22/AC-23/AC-24 (Formate, Objektive, Stabilisierungs-Schalter): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] **AC-25** (Fokus- und Belichtungssperre): Die Sperre greift. Das Schloss erscheint, Fokus und Helligkeit halten während der Fahrt, „Auto“ hebt die Sperre auf. verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02. **Aber:** Schon ein einzelner Tipp zeigt zusätzlich eine Fehlermeldung mit nativem Stacktrace, siehe **BUG-68**. Auf einem zweiten Handy (Modell nicht erfasst, laut Nutzer drei Rückkamera-Objektive, die App bietet aber keine Objektivwahl an) kommt „Fokus-Sperre wird von diesem Objektiv nicht unterstützt“, siehe **BUG-69**. Dass dort nur ein Objektiv angeboten wird, steht in **BUG-70**.
+- [x] AC-26 (Einstellungen über Neustart, Fokus-Sperre weg): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] AC-27 (Bildschirm bleibt an, danach normal aus): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] AC-28 (während der Fahrt nur Stopp bedienbar): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] EC-5 (Doppel-Tipp ergibt eine Fahrt und ein Video): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] EC-6 (Schutz-Stopp beendet und speichert die Aufnahme): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] EC-8 (Preset laden ändert die Video-Einstellungen nicht): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] EC-9/EC-10 (Zeitraffer gesperrt bei Video an, Zeitraffer mit 3 Fotos bei Video aus): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [x] BUG-58/AC-27 (erneut auslösen nach „Kamera reagiert nicht“): verified by the user on OnePlus Nord CE (EB2103, Android 13), 2026-10-02
+- [!] EC-1, EC-2, EC-3 (Distanz 0, AUTO_DRIVE während einer Fahrt, Punkte nach einem Reset): im Gerätetest dieses Laufs nicht abgefragt. Zuletzt am Gerät bestätigt im Archiv-Lauf vom 2026-09-30 (Nachtrag 9). Firmware und `AutoDriveControls.tsx` sind seitdem für diese Pfade unverändert.
+
+### Neue Bugs aus dem Gerätetest
+
+#### BUG-68: Einzelner Tipp in die Vorschau zeigt eine Fehlermeldung mit Stacktrace, obwohl die Sperre greift (AC-25)
+- **Severity:** Medium. Die Funktion arbeitet, aber die App meldet bei jeder Bedienung einen Fehler, der keiner ist, und füllt die Anzeige mit einem nativen Stacktrace.
+- **Beleg:**
+  - Screenshot vom OnePlus Nord CE: „Fokus konnte nicht gesperrt werden: androidx.camera.core.CameraControl$OperationCanceledException: Cancelled by another startFocusAndMetering()“, gefolgt von etwa 10 Stackframes.
+  - Die Meldung entsteht in `useVideoCamera.ts:224`. `describeError` gibt `err.message` ungekürzt weiter (`:86-88`), und diese Message enthält bei Nitro auf Android den nativen Stacktrace.
+  - Laut VisionCamera bricht jeder neue `focusTo` einen laufenden ab (`CameraController.nitro.ts:220-221`). Nativ landet das als `startFocusAndMetering` (`HybridCameraController.kt:140-170`).
+  - Bei einem einzelnen Tipp gibt es also einen zweiten, erfolgreichen Fokus-Aufruf. Das Schloss erscheint ja. Woher der erste, abgebrochene Aufruf kommt, ist nicht geklärt: aus der App selbst (`lockAt`, `:208-227`) oder intern aus CameraX/VisionCamera. Für die Ursache braucht es ein `adb logcat` beim Tippen.
+  - Weil die Meldung über `setNotice` läuft, bleibt sie stehen. Gleiche Familie wie BUG-61.
+- **Steps to Reproduce:** OnePlus Nord CE, „Video aufnehmen“ an, einmal in die Vorschau tippen. Erwartet: Schloss, keine Fehlermeldung. Tatsächlich: Schloss und Fehlermeldung mit Stacktrace.
+- **Priority:** Fix in next sprint. Ein abgebrochener Fokus-Aufruf ist kein Fehler für den Nutzer, und ein roher Stacktrace gehört nicht in die Oberfläche.
+
+#### BUG-69: Fokus-Sperre wird komplett verweigert, wenn das Objektiv keinen Autofokus messen kann, obwohl Belichtung sperrbar wäre (AC-25)
+- **Severity:** Low (Geräteeinschränkung, das Hauptgerät ist nicht betroffen)
+- **Beleg:**
+  - `lockAt` prüft nur `supportsFocusMetering` (`useVideoCamera.ts:214-217`). Das entspricht nur AF (`HybridCameraDevice.kt:121-122`, `FLAG_AF`).
+  - Belichtung und Weißabgleich (`supportsExposureMetering`/`supportsWhiteBalanceMetering`, `:123-126`) werden nicht berücksichtigt. `focusTo` würde ohne `modes` alle unterstützten Messarten nutzen (`HybridCameraController.kt:150`, `getAllSupportedMeteringModes`).
+  - AC-25 verlangt, Fokus **und** Belichtung zu sperren. Was bei fehlendem AF gelten soll, regelt die Spec nicht.
+- **Steps to Reproduce:** Zweites Handy des Nutzers (Modell nicht erfasst; die App bietet dort nur ein Objektiv an, siehe BUG-70), in die Vorschau tippen. Es erscheint „Fokus-Sperre wird von diesem Objektiv nicht unterstützt“, und es wird keine Sperre gesetzt.
+- **Priority:** Nice to have. Ob eine reine Belichtungssperre gewünscht ist, ist eine Spec-Frage (`/refine PROJ-3`).
+
+#### BUG-70: Handy mit drei Rückkamera-Objektiven bietet keine Objektivwahl an (AC-23)
+- **Severity:** Medium (vorläufig, Diagnose am Gerät offen). Das Hauptgerät ist nicht betroffen, dort wurden die Objektive angeboten.
+- **Beleg:**
+  - Der Nutzer meldet für das zweite Handy drei Rückkamera-Objektive, die App zeigt aber keine Objektivwahl.
+  - `availableLenses` (`videoFormats.ts:59-75`) wertet nur die einzeln gemeldeten Kameras aus `useCameraDevices()` (`useVideoCamera.ts:97`, `:105`) nach `device.type` aus (`videoFormats.ts:44-48`: `wide-angle`/`ultra-wide-angle`/`telephoto`).
+  - Zwei Ursachen sind möglich, am Gerät ist keine belegt:
+    1. Der Hersteller meldet die Objektive als **eine logische Multi-Kamera**. VisionCamera liefert die einzelnen Linsen dann als `physicalDevices` (`HybridCameraDevice.kt:100-102`, `isVirtualDevice` `:104-105`), und die App wertet die nicht aus.
+    2. Die einzeln gemeldeten Kameras haben einen anderen `type`, der nicht in der Zuordnung steht, und werden deshalb verworfen.
+  - Hängt vermutlich mit BUG-69 zusammen: Die eine angebotene Kamera meldet keine AF-Messung, was zu einer logischen oder Fixfokus-Kamera passen würde.
+  - AC-23 knüpft an „das Gerät stellt der App mehrere Rückkamera-Objektive zur Verfügung“ an. Ob Unterkameras einer logischen Kamera darunter fallen, ist zusammen mit der Open Question `spec.md:91` zu klären.
+- **Steps to Reproduce:** Zweites Handy, „Video aufnehmen“ an. Erwartet: Auswahl Weitwinkel/Ultraweitwinkel/Tele. Tatsächlich: keine Auswahl.
+- **Diagnose:** Handy per USB anschließen und `adb shell dumpsys media.camera` auslesen (Kamera-IDs, logische Multi-Kamera, Brennweiten, AF-Modi). Modell notieren.
+- **Priority:** Fix in next sprint, nach der Diagnose. Ist das Hardware-Verhalten des Herstellers, wird `/refine PROJ-3` (AC-23) nötig.
+
 ### Summary (Re-Verifikation 2)
 
-- **BUG-58 (High):** geschlossen im Code, belegt durch eine Gegenprobe mit Trennschärfe gegen die Vorversion.
-- **Acceptance Criteria (Diff-Bereich):** 7 AC und 3 EC im Code geprüft, alle PASS (AC-17 und AC-27 jetzt auch im Folge-Lauf). 0 am Gerät ausgeführt.
-- **Bugs:** 0 Critical, 0 High, 0 Medium offen. Offene Low-Bugs: BUG-49, 50, 51, 52, 54 (teilweise), 55, 56, 57, 59 bis 66 sowie neu BUG-67.
+- **BUG-58 (High):** geschlossen im Code (Gegenprobe mit Trennschärfe gegen die Vorversion) und am Gerät bestätigt.
+- **Acceptance Criteria:** Alle 29 AC und EC-4 bis EC-10 hat der Nutzer am OnePlus Nord CE am 2026-10-02 bestätigt. AC-25 ist funktional erfüllt, mit dem Medium-Befund BUG-68. EC-1 bis EC-3 sind in diesem Gerätetest nicht abgefragt worden, zuletzt am Gerät bestätigt am 2026-09-30, die Pfade sind seitdem unverändert.
+- **Bugs:** 0 Critical, 0 High. **2 Medium: BUG-68, BUG-70 (vorläufig).** Low: BUG-49, 50, 51, 52, 54 (teilweise), 55, 56, 57, 59 bis 67 und neu BUG-69.
 - **Security:** 6/14 mit Beleg (alle PASS), 8 NOT VERIFIED (nicht anwendbar bzw. Firmware).
-- **Regression:** keine. Jog-Sperre und Wach-Sperre verhalten sich wieder 1:1.
-- **Production Ready:** **NOT READY — not verified.** Es gibt keine Critical- oder High-Bugs mehr, aber kein Laufzeit-AC wurde ausgeführt. Der einzige Weg zu READY ist der protokollierte Gerätetest. `features/INDEX.md` bleibt **In Review**.
-
-### Gerätetest (recorded human test, offen)
-
-Es gilt die Liste aus Re-Verifikation 1 (Abschnitt „Gerätetest“ weiter unten) zusammen mit der Liste aus Lauf 1 (Abschnitt „Gerätetest“ im Lauf 1). Neu dazu:
-
-- **BUG-58/AC-27** (nur wenn sich die Lage provozieren lässt, etwa wenn eine andere App die Kamera blockiert): Fahrt mit Video auslösen, „Kamera reagiert nicht“ abwarten, sofort erneut auslösen. Ist die App nach spätestens 5 s wieder bedienbar, und geht der Bildschirm danach normal aus?
+- **Regression:** keine, im Code und im Gerätetest (Zeitraffer mit 3 Fotos, Jog, Presets).
+- **Production Ready:** **READY.** Es gibt keine Critical- oder High-Bugs, und die Laufzeit-ACs sind per protokolliertem Gerätetest ausgeführt. Weiter offen und **nicht verifiziert** sind: EC-1 bis EC-3 in diesem Lauf (siehe oben), die Firmware-Tests (kein Testbefehl für den Layer), das Firmware-Fuzzing und das zweite Handy, auf dem nur AC-23/AC-25 gemeldet wurden (BUG-69, BUG-70; Diagnose per `adb shell dumpsys media.camera` offen).
 
 ---
 
