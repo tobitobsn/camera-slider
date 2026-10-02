@@ -202,6 +202,7 @@ Alle Punkte sind im Code, in den Bibliotheksquellen und in den Tests geprüft. L
 - **Regression:** keine Regression an den Deployed-Features. Die Suites sind grün (332/332), der Release-Build läuft durch. Einschränkung: Jog bleibt gesperrt, solange BUG-58 oder BUG-59 greifen.
 - **Production Ready:** **NO.** Grund ist BUG-58 (High). Selbst ohne ihn wäre das Urteil nur „NOT READY — not verified“, solange der Gerätetest fehlt.
 - **Recommendation:** BUG-58 per `/build` fixen: den Start-Wächter erst nach der runId-Prüfung löschen bzw. pro Lauf führen. Sinnvoll zusammen mit BUG-59 (Obergrenze für „Speichert“). Danach `/qa` als Re-Verifikation und den Gerätetest.
+- **Priorisierung durch den Nutzer (2026-10-02):** Zuerst nur BUG-58 fixen. BUG-59 bis BUG-66 und die übrigen offenen Low-Bugs bleiben vorerst offen.
 
 ### Gerätetest (recorded human test, offen)
 
