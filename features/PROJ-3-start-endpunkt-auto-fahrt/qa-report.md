@@ -1,6 +1,112 @@
 # QA Test Results
 
-**Tested:** 2026-10-02 (Re-Verifikation 2 nach dem Fix-Commit `90987bf`, dazu der protokollierte Gerätetest auf dem OnePlus Nord CE)
+**Tested:** 2026-10-02 (Re-Verifikation 3: gezielte Bestätigung von BUG-4 und des Spec-Teils von BUG-23 nach `/refine`, `859b83a`)
+**App URL:** hier nicht ausführbar (`probe.kind: none`, sowohl App-Ebene als auch Layer `firmware`). Laufzeitverhalten ist zuletzt im protokollierten Gerätetest vom 2026-10-02 bestätigt (Abschnitt „Gerätetest“ in Re-Verifikation 2).
+**Tester:** QA Engineer (AI). Eine unabhängige `qa-engineer`-Lane ohne Build-Kontext mit allen drei Scopes (Step 2 → 3 → 4), zusammengeführt vom Owner.
+**Scope:** **Gezielte Re-Verifikation.** Der letzte Report kam aus `debd2a5`. Diff-Befehl: `git diff --stat debd2a5..HEAD` → nur `features/PROJ-3-start-endpunkt-auto-fahrt/spec.md` (+2/−1: erste Zeile der Technical Requirements, neue Zeile im Decision Log). **Kein Produktionscode geändert** (`git diff --quiet debd2a5..HEAD -- src firmware docs/stacks`, exit 0).
+
+Kein voller Lauf trotz `/refine`: Die Verfeinerung änderte kein AC und kein EC, nur den Text der Technical Requirements, und zwar so, dass er das seit 2026-09-24 gebaute Verhalten beschreibt. Geprüft wurden deshalb BUG-4, der Spec-Teil von BUG-23, AC-6, AC-11 und AC-12 gegen den neuen Text, dazu Security und Regression des Diffs. Der Release-Build wurde nicht ausgeführt: `skipped — unchanged since 2026-10-02` (kein App-Code im Diff).
+
+> Legende: `[x]` = in diesem Lauf geprüft (mit Beleg) · `[ ] BUG` = als fehlerhaft festgestellt · `[!] NOT VERIFIED` = in diesem Lauf nicht prüfbar (mit Grund)
+>
+> **Wichtig:** Ein `[x]` heißt hier „im Code, in den Bibliotheksquellen und in den Unit-Tests erfüllt“. Am echten Handy und Slider wurde nichts ausgeführt.
+
+## Re-Verifikation 3 (2026-10-02, nach `859b83a`)
+
+### Automatisierte Tests (Step 5)
+
+- [x] `npm test` (einmal vom Owner vor der Lane, Log `scratchpad/suite-run-3.log`): 22 Suites, **337 passed, 0 failed**.
+- [!] Layer `firmware`: NOT VERIFIED, no test command recorded for layer firmware. `firmware/` ist im Diff unverändert.
+- E2E-Suite: keine vorhanden, nicht ausgeführt.
+
+### BUG-4 (Low, AC-6)
+
+- [x] **Geschlossen im Code.**
+  - Die Meldung „erlaubt: min–max“ rundet die Untergrenze auf und die Obergrenze ab: `AutoDriveControls.tsx:617-620` (`ceilToDeciseconds`/`floorToDeciseconds`, `:168-170`/`:177-179`).
+  - Die App prüft den auf 0,1 s gerundeten Wert, den auch die Firmware bekommt (`:336-348`, `roundToDeciseconds` `:138-140`).
+  - Damit ist die Ursache aus BUG-4 (Anzeige ungerundet, Prüfung gerundet) beseitigt. Behoben wurde sie zusammen mit BUG-16.
+- [x] **Gegenprobe der Lane** (`scratchpad/probe3/zzProbe3.test.ts` mit den echten Exporten aus `AutoDriveControls.tsx`, Firmware-Rechnung in float32 mit und ohne FMA nachgebaut, alle Distanzen 1–300000 Steps):
+  - Das Report-Beispiel 50100 Steps zeigt heute „7.3–250.5 s“. Beide Grenzen nehmen App und Firmware an, 7.2 und 250.6 lehnt die App ab.
+  - Bei Distanzen ab 35 Steps zeigt die App in 0 Fällen eine Grenze an, die sie selbst ablehnt, und in 0 Fällen lehnt die Firmware einen Wert ab, den die App annimmt.
+  - Trennschärfe: Mit der alten `toFixed(1)`-Anzeige wären es 174436 von 299966 Distanzen gewesen.
+- [x] Abgesichert durch den bestehenden Test „BUG-16: the range shown in the error message consists of drivable bounds“ (`AutoDriveControls.test.ts:199`), grün im Suite-Lauf.
+- Abgrenzung: BUG-17 (Low) bleibt offen. Bei 28 Distanzen (1–14 und 21–34 Steps) gibt es im 0,1-s-Raster gar keine gültige Dauer. Das ist ein eigenes Problem, kein Rundungsfehler wie bei BUG-4.
+
+### BUG-23 (Low, Doku-Drift)
+
+- [x] **Spec-Teil geschlossen:** `spec.md:81` stimmt mit App und Firmware überein:
+  - Formel `Dauer = Distanz/v + v/Beschleunigung`: App `AutoDriveControls.tsx:73-95`, Firmware `motor.cpp:478-496`, beide mit der kleineren Wurzel. Probe: d/v + v/a ergibt die Dauer exakt zurück.
+  - Gleiche Beschleunigung wie beim Jog: der einzige Aufruf `setAcceleration(kAcceleration)` (`motor.cpp:236`, `:28` = 8000), Spiegelwert `AutoDriveControls.tsx:49`.
+  - Grenzen 200–8000 für die Reisegeschwindigkeit: App `:41-42`, `:347-348`, Firmware `motor.cpp:32-33`, `:497-498`.
+  - Mindestdauer bei kurzen Strecken `2·√(d/a)`: App `:106-114`, Firmware lehnt bei negativer Diskriminante ab (`motor.cpp:481`).
+- [x] Stack-Pack-Teil `setDirectionPin` ohne Polarität: inzwischen geschlossen (`docs/stacks/firmware-esp32-tmc2209.md:79` mit `dirHighCountsUp=false`).
+- [ ] **Weiter offen**, BUG-23 bleibt deshalb Low und offen:
+  - Kommentar „= 2000 steps“ in `AutoDriveControls.tsx:101` (richtig wäre 8000)
+  - `design.md:67-70` beschreibt den Status mit 5 Byte, tatsächlich sind es 10 (`ble.cpp:44`, `client.ts:456-465`)
+  - `docs/stacks/firmware-esp32-tmc2209.md:113-114` „Weitere Opcodes … noch NICHT festgelegt“
+  - `parseDurationSeconds` nimmt Hex und Exponent an (`Number()`, `AutoDriveControls.tsx:148-155`, Probe: „0x10“ → 16)
+  - die Dauer wird still auf uint16 geklemmt (`client.ts:318-321`, physisch unerreichbar)
+
+### Acceptance Criteria (gegen den neuen Spec-Text)
+
+- [x] **AC-6**: Kein Widerspruch. „Unter 200 Steps/s“ meint jetzt eindeutig die Reisegeschwindigkeit nach der Rampenformel (`showDurationError`, `AutoDriveControls.tsx:357-361`). Eine zu lange Dauer bleibt stehen (`:213-217`). BUG-20 (Meldung schon beim Tippen) bleibt unverändert offen.
+- [x] **AC-11**: Kein Widerspruch. Leer, unlesbar, ohne Lösung oder v > 8000 führt zum Eintragen der Mindestdauer (`:199-218`). Der Wert ist gleich der angezeigten Untergrenze (Probe, alle 300000 Distanzen) und gültig außer bei den 28 Distanzen aus BUG-17.
+- [x] **AC-12**: Kein Widerspruch. Das Spec-Beispiel „Minimum 13.5 s“ passt jetzt zur Formel (d = 100000 → 100000/8000 + 1 = 13,5, Probe). Mit der alten Formel wären es 12,5 gewesen. Der neue Text beseitigt also einen bisherigen Widerspruch zwischen AC-12 und den Technical Requirements.
+- [!] AC-3/AC-4 (Ankunft nach Dauer, Rampe am echten Motor): NOT VERIFIED, no way to run and probe this project was recorded. Zuletzt im Gerätetest vom 2026-10-02 bestätigt.
+- Alle anderen AC und EC: unverändert seit Re-Verifikation 2 und dem Gerätetest vom 2026-10-02, in diesem Lauf nicht neu geprüft (der Diff berührt keinen Code).
+
+### Security (Diff-Bereich)
+
+- [x] Keine Secrets im Diff: `git diff debd2a5..HEAD` enthält nur zwei Spec-Zeilen.
+- [x] Keine neue Eingabestrecke: Code unverändert (`git diff --quiet … -- src firmware`, exit 0). Die Firmware prüft unabhängig von der App (`motor.cpp:428-429`, `:481`, `:497-498`). Probe: 0 Fälle „App nimmt an, Firmware lehnt ab“.
+- [!] Authentication, Authorization, Rate Limiting, Brute Force/Enumeration, API-Responses, Credentials in der URL: NOT VERIFIED, nicht anwendbar (kein Login, kein Backend, keine Endpoints, Diff nur Doku).
+- [!] Release-Bundle nach Secrets durchsuchen: NOT VERIFIED, in diesem Lauf nicht gebaut (Code unverändert).
+
+**Security-Zusammenfassung:** 2 Prüfungen mit Beleg (beide PASS), 7 NOT VERIFIED (6 nicht anwendbar, Release-Bundle nicht gebaut).
+
+### Regression
+
+- [x] Kein Code geändert (`git diff --stat debd2a5..HEAD`: nur `spec.md`). Suite grün (337/337), darunter `AutoDriveControls.test.ts` und `.render.test.ts` sowie die Suites der Deployed-Features PROJ-1, 2, 4, 5 und 6.
+- [!] Laufzeit der Deployed-Features: NOT VERIFIED, no way to run and probe this project was recorded.
+
+### Step 6: Unit-Tests (Owner)
+
+- Keine neuen Tests: Der Diff enthält keine Logik. Die Garantie hinter BUG-4 ist durch den bestehenden Test `AutoDriveControls.test.ts:199` abgedeckt. Die Gegenprobe der Lane war eine Wegwerf-Probe und liegt nicht im Repo.
+
+### E2E Tests
+
+- Status: **not run** (run `/e2e-tests` for critical flows)
+
+### Not Verified In This Run
+
+- [!] Ankunft nach eingegebener Dauer und Rampe am echten Motor, Darstellung der Meldungen: no way to run and probe this project was recorded.
+- [!] Layer `firmware`: no test command recorded.
+- [!] FMA-Verhalten des echten ESP32-Compilers: beide Varianten simuliert (0 Abweichungen), am Chip nicht geprüft.
+- [!] Security: siehe oben (nicht anwendbar bzw. Bundle nicht gebaut).
+
+### Neuer Bug
+
+#### BUG-71: Spec verspricht „genau“ die Dauer, der Motor bekommt die Geschwindigkeit auf ganze Hz gerundet (AC-3/AC-4, Technical Requirements)
+- **Severity:** Low (bekannte, akzeptierte Abweichung, im Gerätetest unauffällig. Neu ist nur der strengere Wortlaut der Spec.)
+- **Beleg:** `spec.md:81` sagt, Beschleunigen, Fahren und Bremsen ergeben „zusammen **genau** die Dauer“. Die Firmware rechnet v exakt, setzt aber `setSpeedInHz(static_cast<uint32_t>(speedHz + 0.5f))` (`motor.cpp:506`). Probe: höchstens 0,25 % Abweichung, schlimmster Fall 300000 Steps / 1496,3 s → 200 Hz statt 200,498 → Ankunft ca. 3,7 s zu spät. Dazu kommt die Rundung der Eingabe auf 0,1 s (`client.ts:318-321`).
+- **Steps to Reproduce:** Strecke von 300000 Steps, Dauer 1496.3 s. Rechnerische Fahrzeit 1500,0 s.
+- **Priority:** Nice to have. Entweder die Toleranz in der Spec nennen (`/refine PROJ-3`) oder `setSpeedInMilliHz()` verwenden (`/build`).
+
+### Summary (Re-Verifikation 3)
+
+- **BUG-4:** geschlossen, im Code belegt durch eine Gegenprobe über 300000 Distanzen mit Trennschärfe gegen die alte Anzeige.
+- **BUG-23:** Spec-Teil und Stack-Pack-Polarität geschlossen. Fünf kleine Doku-Reste offen, Low.
+- **AC-6, AC-11, AC-12:** kein Widerspruch zum neuen Spec-Text. AC-12 ist dadurch sogar widerspruchsfrei geworden.
+- **Neue Bugs:** 1 Low (BUG-71). 0 Critical, 0 High, 0 Medium neu.
+- **Security:** 2/9 mit Beleg (beide PASS), 7 NOT VERIFIED.
+- **Regression:** keine (kein Code geändert, Suite 337/337).
+- **Production Ready:** **READY** (unverändert). Keine Critical- oder High-Bugs. Die Laufzeit-ACs sind zuletzt im protokollierten Gerätetest vom 2026-10-02 ausgeführt, seitdem hat sich kein Code geändert. Offen und nicht verifiziert in diesem Lauf: Ankunft nach Dauer am Motor, Firmware-Tests, das FMA-Verhalten auf dem Chip. Der Status in `features/INDEX.md` bleibt **Deployed**: Das Feature ist live, dieser Lauf hat nur Bug-Status und Spec-Text bestätigt.
+
+---
+
+## Re-Verifikation 2 (2026-10-02, nach `90987bf`)
+
+**Tested (dieser Lauf):** 2026-10-02 (Re-Verifikation 2 nach dem Fix-Commit `90987bf`, dazu der protokollierte Gerätetest auf dem OnePlus Nord CE)
 **App URL:** hier nicht ausführbar (`probe.kind: none`, sowohl App-Ebene als auch Layer `firmware`). Die Laufzeit-ACs hat der Nutzer im protokollierten Gerätetest (Abschnitt „Gerätetest“ in Re-Verifikation 2) am Gerät bestätigt.
 **Tester:** QA Engineer (AI). Eine unabhängige `qa-engineer`-Lane ohne Build-Kontext mit allen drei Scopes in der Reihenfolge Step 2 → 3 → 4, zusammengeführt vom Owner. Diese Session hat den Fix gebaut. Deshalb hat sie selbst nichts verifiziert, nur die Unit-Tests aus Step 6 ergänzt.
 **Scope:** **Re-Verifikation.** Der letzte Report kam aus `fbfce85`. Diff-Befehl: `git diff --stat fbfce85..HEAD`, HEAD `90987bf` auf `feat/PROJ-3-videoaufnahme`. Geänderte Produktionsdatei:
@@ -8,11 +114,6 @@
 
 Sonst sind nur Tests (`useVideoDrive.test.ts`, `cacheFiles.test.ts`, letzterer nur Typisierung) und eine Notiz in `design.md` geändert. Eine Produktionsdatei, kein geteilter Code → eine Lane.
 
-> Legende: `[x]` = in diesem Lauf geprüft (mit Beleg) · `[ ] BUG` = als fehlerhaft festgestellt · `[!] NOT VERIFIED` = in diesem Lauf nicht prüfbar (mit Grund)
->
-> **Wichtig:** Ein `[x]` heißt hier „im Code, in den Bibliotheksquellen und in den Unit-Tests erfüllt“. Am echten Handy und Slider wurde nichts ausgeführt.
-
-## Re-Verifikation 2 (2026-10-02, nach `90987bf`)
 
 ### Automatisierte Tests (Step 5)
 
