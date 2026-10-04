@@ -166,6 +166,26 @@ Optional für die Diagnose: `adb shell dumpsys media.camera` am Nord CE, damit k
 
 **Stand des Urteils:** weiterhin **NOT READY — not verified**. BUG-68 wurde am Nord CE beobachtet und muss dort mit dem aktuellen Build bestätigt werden (Punkte 1 und 3). `features/INDEX.md` bleibt **In Review**.
 
+**Nord CE mit aktuellem Build (2026-10-04):** Die aktuelle Release-APK ist installiert (`adb -s 345ef3cb install -r …` → „Success“, `lastUpdateTime=2026-10-04 12:08:50`).
+
+- [ ] **Punkt 3, AC-25: BUG.** Der Nutzer meldet: Nur die Helligkeit bleibt fest, der Fokus bleibt trotz Schloss auf Auto. Siehe **BUG-76**.
+- [!] Punkt 1, **BUG-68** (Tipp ohne Fehlermeldung): noch nicht beantwortet.
+
+#### BUG-76: Am Nord CE bleibt der Fokus trotz Schloss auf Dauer-Autofokus, nur die Belichtung ist gesperrt (AC-25)
+- **Severity:** High. AC-25 ist auf dem Hauptgerät nicht erfüllt, denn der Fokus wird nicht festgehalten und kann während der Fahrt pumpen. Das Schloss zeigt eine Sperre an, die es für den Fokus nicht gibt. In der App gibt es keinen Workaround.
+- **Beleg (live am Gerät, `adb -s 345ef3cb shell dumpsys media.camera`, 6 Stichproben hintereinander, alle gleich, Rohdaten `scratchpad/nordce-live.txt`):**
+  - „Last request sent“ (das, was die App über CameraX anfordert): `afMode=AUTO`, `afTrigger=IDLE`, `aeLock=ON`. Das ist die Fokus-Sperre, wie CameraX sie umsetzt: Messung am Tipp-Punkt (`afRegions` 2241/926–2933/1446), danach AF-Modus AUTO ohne neuen Trigger, also ein fester Fokus.
+  - „Latest received frame“ (was die Kamera tatsächlich macht): `afMode=CONTINUOUS_VIDEO`, `afState=PASSIVE_FOCUSED`, `aeLock=ON`, `aeState=LOCKED`.
+  - Die Kamera-HAL des OnePlus übernimmt also die Belichtungssperre, ersetzt den angeforderten AF-Modus AUTO aber durch Dauer-Autofokus. `captureIntent` ist dabei `VIDEO_RECORD`.
+  - App und Bibliothek fordern die Sperre korrekt an: `useVideoCamera.ts:234` (`adaptiveness: 'locked'`, `autoResetAfter: null`) → `HybridCameraController.kt:150-169` (`setLockingMode`, `disableAutoCancel`). Der Fehler liegt zwischen CameraX und der Hersteller-HAL. Im Diff dieses Laufs ist dieser Pfad nicht geändert.
+  - `awbLock=OFF`: Der Weißabgleich wird nur über Regionen gemessen, nicht gesperrt. Er ist nicht Teil von AC-25, das nur Fokus und Belichtung verlangt.
+- **Verhältnis zum Gerätetest vom 2026-10-02:** Dort hatte der Nutzer „Fokus und Helligkeit halten“ gemeldet. Der Fokus-Pfad ist seitdem unverändert. Der damalige Haken für AC-25 am Nord CE gilt damit als widerlegt, nicht als Regression des Fixes.
+- **Steps to Reproduce:** Nord CE, „Video aufnehmen“ an, auf ein nahes Motiv tippen (Schloss erscheint), dann die Kamera auf ein fernes Motiv richten. Erwartet: Der Fokus bleibt auf der nahen Distanz. Tatsächlich: Er stellt neu scharf.
+- **Mögliche Richtung (für `/architecture`, nicht geprüft):** Nach dem Messen die gemessene Fokus-Distanz auslesen und manuell fest setzen (`AF_MODE_OFF` + `LENS_FOCUS_DISTANCE`, per Camera2-Interop). Ob VisionCamera dafür einen Weg bietet, ist offen. Gerät hat `MANUAL_SENSOR`.
+- **Priority:** Fix before deployment.
+
+**Urteil nach diesem Nachtrag:** **NOT READY.** Es gibt einen offenen High-Bug (BUG-76). `features/INDEX.md` bleibt **In Review**.
+
 ---
 
 ## Re-Verifikation 3 (2026-10-02, nach `859b83a`)
