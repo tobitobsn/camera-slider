@@ -441,17 +441,6 @@ Alle Punkte sind im Code und in Jest geprüft. Laufzeit: `[!] NOT VERIFIED — n
 
 ### Neue Bugs aus dem Gerätetest
 
-#### BUG-68: Einzelner Tipp in die Vorschau zeigt eine Fehlermeldung mit Stacktrace, obwohl die Sperre greift (AC-25)
-- **Severity:** Medium. Die Funktion arbeitet, aber die App meldet bei jeder Bedienung einen Fehler, der keiner ist, und füllt die Anzeige mit einem nativen Stacktrace.
-- **Beleg:**
-  - Screenshot vom OnePlus Nord CE: „Fokus konnte nicht gesperrt werden: androidx.camera.core.CameraControl$OperationCanceledException: Cancelled by another startFocusAndMetering()“, gefolgt von etwa 10 Stackframes.
-  - Die Meldung entsteht in `useVideoCamera.ts:224`. `describeError` gibt `err.message` ungekürzt weiter (`:86-88`), und diese Message enthält bei Nitro auf Android den nativen Stacktrace.
-  - Laut VisionCamera bricht jeder neue `focusTo` einen laufenden ab (`CameraController.nitro.ts:220-221`). Nativ landet das als `startFocusAndMetering` (`HybridCameraController.kt:140-170`).
-  - Bei einem einzelnen Tipp gibt es also einen zweiten, erfolgreichen Fokus-Aufruf. Das Schloss erscheint ja. Woher der erste, abgebrochene Aufruf kommt, ist nicht geklärt: aus der App selbst (`lockAt`, `:208-227`) oder intern aus CameraX/VisionCamera. Für die Ursache braucht es ein `adb logcat` beim Tippen.
-  - Weil die Meldung über `setNotice` läuft, bleibt sie stehen. Gleiche Familie wie BUG-61.
-- **Steps to Reproduce:** OnePlus Nord CE, „Video aufnehmen“ an, einmal in die Vorschau tippen. Erwartet: Schloss, keine Fehlermeldung. Tatsächlich: Schloss und Fehlermeldung mit Stacktrace.
-- **Priority:** Fix in next sprint. Ein abgebrochener Fokus-Aufruf ist kein Fehler für den Nutzer, und ein roher Stacktrace gehört nicht in die Oberfläche.
-
 #### BUG-69: Fokus-Sperre wird komplett verweigert, wenn das Objektiv keinen Autofokus messen kann, obwohl Belichtung sperrbar wäre (AC-25)
 - **Severity:** Low (Geräteeinschränkung, das Hauptgerät ist nicht betroffen)
 - **Beleg:**
@@ -460,20 +449,6 @@ Alle Punkte sind im Code und in Jest geprüft. Laufzeit: `[!] NOT VERIFIED — n
   - AC-25 verlangt, Fokus **und** Belichtung zu sperren. Was bei fehlendem AF gelten soll, regelt die Spec nicht.
 - **Steps to Reproduce:** Zweites Handy des Nutzers (Modell nicht erfasst; die App bietet dort nur ein Objektiv an, siehe BUG-70), in die Vorschau tippen. Es erscheint „Fokus-Sperre wird von diesem Objektiv nicht unterstützt“, und es wird keine Sperre gesetzt.
 - **Priority:** Nice to have. Ob eine reine Belichtungssperre gewünscht ist, ist eine Spec-Frage (`/refine PROJ-3`).
-
-#### BUG-70: Handy mit drei Rückkamera-Objektiven bietet keine Objektivwahl an (AC-23)
-- **Severity:** Medium (vorläufig, Diagnose am Gerät offen). Das Hauptgerät ist nicht betroffen, dort wurden die Objektive angeboten.
-- **Beleg:**
-  - Der Nutzer meldet für das zweite Handy drei Rückkamera-Objektive, die App zeigt aber keine Objektivwahl.
-  - `availableLenses` (`videoFormats.ts:59-75`) wertet nur die einzeln gemeldeten Kameras aus `useCameraDevices()` (`useVideoCamera.ts:97`, `:105`) nach `device.type` aus (`videoFormats.ts:44-48`: `wide-angle`/`ultra-wide-angle`/`telephoto`).
-  - Zwei Ursachen sind möglich, am Gerät ist keine belegt:
-    1. Der Hersteller meldet die Objektive als **eine logische Multi-Kamera**. VisionCamera liefert die einzelnen Linsen dann als `physicalDevices` (`HybridCameraDevice.kt:100-102`, `isVirtualDevice` `:104-105`), und die App wertet die nicht aus.
-    2. Die einzeln gemeldeten Kameras haben einen anderen `type`, der nicht in der Zuordnung steht, und werden deshalb verworfen.
-  - Hängt vermutlich mit BUG-69 zusammen: Die eine angebotene Kamera meldet keine AF-Messung, was zu einer logischen oder Fixfokus-Kamera passen würde.
-  - AC-23 knüpft an „das Gerät stellt der App mehrere Rückkamera-Objektive zur Verfügung“ an. Ob Unterkameras einer logischen Kamera darunter fallen, ist zusammen mit der Open Question `spec.md:91` zu klären.
-- **Steps to Reproduce:** Zweites Handy, „Video aufnehmen“ an. Erwartet: Auswahl Weitwinkel/Ultraweitwinkel/Tele. Tatsächlich: keine Auswahl.
-- **Diagnose:** Handy per USB anschließen und `adb shell dumpsys media.camera` auslesen (Kamera-IDs, logische Multi-Kamera, Brennweiten, AF-Modi). Modell notieren.
-- **Priority:** Fix in next sprint, nach der Diagnose. Ist das Hardware-Verhalten des Herstellers, wird `/refine PROJ-3` (AC-23) nötig.
 
 ### Summary (Re-Verifikation 2)
 
@@ -926,6 +901,8 @@ Behoben in `cbdc596` bzw. `90987bf`, re-verifiziert in Re-Verifikation 1 und 2 u
 - **BUG-48** — Temp-Videodateien bleiben dauerhaft im App-Cache liegen (AC-15/AC-18) — Severity: Medium
 - **BUG-53** — Hintergrund während „Speichert“ meldet fälschlich „Aufnahme abgebrochen“ — Severity: Low
 - **BUG-58** — Verspäteter Start eines abgebrochenen Laufs schaltet den Start-Wächter des nächsten Laufs ab (AC-27, AC-17) — Severity: High
+- **BUG-68** — Einzelner Tipp in die Vorschau zeigt eine Fehlermeldung mit Stacktrace, obwohl die Sperre greift (AC-25) — Severity: Medium (behoben in `00fd14b`, re-verifiziert in Re-Verifikation 4 und am Galaxy S24 am 2026-10-04; am OnePlus Nord CE nicht bestätigt)
+- **BUG-70** — Handy mit drei Rückkamera-Objektiven bietet keine Objektivwahl an (AC-23) — Severity: Medium (behoben in `2465c41`, re-verifiziert in Re-Verifikation 4 und am Galaxy S24 am 2026-10-04)
 
 ##### BUG-49: Kamera-Vorschau bleibt im Hintergrund aktiv
 - **Severity:** Low
@@ -1147,6 +1124,7 @@ Gesamte Suite nach der Ergänzung erneut komplett gelaufen (Owner, Step 5-Nachtr
 - **BUG-1** — JOG während laufender Auto-Fahrt hebelt Watchdog UND Auto-Fahrt-Ankunftserkennung aus — Severity: High
 - **BUG-2** — Auto-Fahrt kommt wegen ignorierter Beschleunigungsrampe später an als die eingegebene Dauer — Severity: Medium
 - **BUG-3** — App validiert die Dauer ungerundet, Firmware gerundet — Grenzwerte scheitern stillschweigend — Severity: Medium
+- **BUG-4** — Angezeigter Dauer-Bereich in der Fehlermeldung ist an den Grenzen widersprüchlich — Severity: Low (geschlossen laut Re-Verifikation 3, behoben zusammen mit BUG-16)
 - **BUG-5** — Disconnect-Stopp-Garantie (AC-10) durch unbeteiligtes Zweitgerät aushebelbar — Severity: Medium
 - **BUG-6** — Jeder BLE-Connect löscht Start-/Endpunkt, nicht nur ein Reconnect der eigenen App — Severity: Medium
 - **BUG-7** — Bond-Verdrängung (Just Works, max. 3 Bonds) kann die App aussperren, auch für STOP — Severity: Medium
@@ -1168,11 +1146,6 @@ Gesamte Suite nach der Ergänzung erneut komplett gelaufen (Owner, Step 5-Nachtr
 - **BUG-37** — Timer-Korrektur greift während des Tippens — Severity: Low (entfallen mit `df41c8c`)
 
 Details und Fix-Verlauf: siehe „Re-Verifikation" unten.
-
-### BUG-4: Angezeigter Dauer-Bereich in der Fehlermeldung ist an den Grenzen widersprüchlich
-- **Severity:** Low
-- **Steps to Reproduce:** Distanz 50100 Steps, ungültige Dauer eingeben → Meldung „erlaubt: 12.5–250.5 s" erscheint, obwohl genau 12,5 s (wegen BUG-3) tatsächlich abgelehnt wird.
-- **Priority:** Nice to have (hängt an BUG-3s Fix)
 
 ### BUG-8: AUTO_DRIVE-Richtungsbyte nicht streng validiert
 - **Severity:** Low
