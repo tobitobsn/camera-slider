@@ -148,6 +148,24 @@ Optional für die Diagnose: `adb shell dumpsys media.camera` am Nord CE, damit k
 - **Regression:** keine gefunden (347/347, keine Kopplung an Deployed-Features außer Meldungstexten).
 - **Production Ready:** **NOT READY — not verified.** Es gibt keine Critical-, High- oder Medium-Bugs mehr. Die geänderten Laufzeit-ACs (AC-18, AC-22 bis AC-26) sind aber seit dem Fix nicht ausgeführt worden, und der einzige Weg zu READY ist hier ein protokollierter Gerätetest (Liste oben). Der Status in `features/INDEX.md` bleibt **In Review**.
 
+### Nachtrag Gerätetest (2026-10-04)
+
+**Galaxy S24 (SM-S921B):** Der Nutzer meldet „alles ok, nur das Ultraweitwinkel unterstützt keine Fokussperre“. Installationsstand: Beim adb-Check am 2026-10-02 lief noch der Build von 12:56, also vor den Fixes. Beim Test war das Gerät nicht mehr angeschlossen, `lastUpdateTime` ist deshalb nicht neu ausgelesen. Dass die Objektivwahl erscheint, gibt es aber erst seit dem Fix `2465c41`. Damit lief beim Test ein Build mit dem Fix.
+
+- [x] Punkt 4, **BUG-70/AC-23** (Auswahl Weitwinkel/Ultraweitwinkel, Vorschau zeigt das richtige Objektiv): verified by the user on Galaxy S24 (SM-S921B), 2026-10-04. **BUG-70 ist damit am Gerät geschlossen.**
+- [x] Punkt 5, **AC-25** (Tippen auf „Weitwinkel“: Schloss ohne Meldung): verified by the user on Galaxy S24 (SM-S921B), 2026-10-04.
+- [x] Punkt 6, **AC-22/AC-24** (1080p/30 angeboten, Schalter „Stabilisierung“ erscheint): verified by the user on Galaxy S24 (SM-S921B), 2026-10-04.
+- [x] Punkt 7, **AC-26** (Objektiv über einen Neustart gemerkt): verified by the user on Galaxy S24 (SM-S921B), 2026-10-04.
+- [ ] **BUG-69 am Gerät bestätigt:** Auf „Ultraweitwinkel“ gibt es keine Fokus-Sperre, also auch keine Belichtungssperre. Das entspricht dem erwarteten Verhalten aus BUG-69 (Low, Spec-Frage offen). Ob der Hinweis danach auf „Weitwinkel“ neben dem Schloss stehen bleibt (BUG-73), wurde nicht abgefragt.
+
+**OnePlus Nord CE (EB2103):** Diagnose per `adb -s 345ef3cb shell dumpsys media.camera` (Ausgabe `scratchpad/nordce-camera.txt`).
+
+- [x] **Nebenwirkung von BUG-70 betrifft das Nord CE nicht.** „Number of camera devices: 7“, davon „Number of normal camera devices: 3“. Normale Kameras: 0 (hinten, 4,73 mm, AF), 1 (vorne), 2 (hinten, 1,66 mm, ohne AF). Die Kameras mit `LOGICAL_MULTI_CAMERA` tragen alle zusätzlich `SYSTEM_CAMERA` (Zeilen 5068, 6694, 8304). Solche Kameras sind für normale Apps nicht sichtbar. Damit bleibt die Zuordnung dort Weitwinkel = Kamera 0 und Ultraweitwinkel = Kamera 2, wie im Gerätetest vom 2026-10-02.
+- [!] Punkt 1, **BUG-68** (ein Tipp ohne Fehlermeldung) und Punkt 3, **AC-25** (Sperre hält während der Fahrt): noch nicht getestet. Die installierte App stammt von 2026-10-02 13:51:45 (`dumpsys package com.camerasliderapp`). Das ist nach `2465c41` (13:50), aber **vor** `00fd14b` (13:54), dem Fix für BUG-68. Für den Test muss erst die aktuelle Release-APK installiert werden.
+- Punkt 2 (gleiche Objektive, gleiches Format): durch die Diagnose oben gedeckt, die Zuordnung ist unverändert. Am Gerät nicht neu abgefragt.
+
+**Stand des Urteils:** weiterhin **NOT READY — not verified**. BUG-68 wurde am Nord CE beobachtet und muss dort mit dem aktuellen Build bestätigt werden (Punkte 1 und 3). `features/INDEX.md` bleibt **In Review**.
+
 ---
 
 ## Re-Verifikation 3 (2026-10-02, nach `859b83a`)
