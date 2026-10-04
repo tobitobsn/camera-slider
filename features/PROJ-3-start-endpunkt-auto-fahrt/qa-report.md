@@ -172,7 +172,7 @@ Optional für die Diagnose: `adb shell dumpsys media.camera` am Nord CE, damit k
 - [!] Punkt 1, **BUG-68** (Tipp ohne Fehlermeldung): noch nicht beantwortet.
 
 #### BUG-76: Am Nord CE bleibt der Fokus trotz Schloss auf Dauer-Autofokus, nur die Belichtung ist gesperrt (AC-25)
-- **Severity:** High. AC-25 ist auf dem Hauptgerät nicht erfüllt, denn der Fokus wird nicht festgehalten und kann während der Fahrt pumpen. Das Schloss zeigt eine Sperre an, die es für den Fokus nicht gibt. In der App gibt es keinen Workaround.
+- **Severity:** Low (am 2026-10-04 von High herabgestuft). Am Nord CE ist AC-25 nicht erfüllt, und das Schloss zeigt eine Fokus-Sperre an, die es nicht gibt. Der Nutzer hat aber festgelegt, dass für die Video-Funktionen das Galaxy S24 maßgeblich ist („wichtiger wäre, dass am s24 alles ok ist“), und dort greift die Sperre (Nachtrag unten). Damit ist BUG-76 eine Einschränkung nur des Nord CE, die von dessen Kamera-HAL ausgeht.
 - **Beleg (live am Gerät, `adb -s 345ef3cb shell dumpsys media.camera`, 6 Stichproben hintereinander, alle gleich, Rohdaten `scratchpad/nordce-live.txt`):**
   - „Last request sent“ (das, was die App über CameraX anfordert): `afMode=AUTO`, `afTrigger=IDLE`, `aeLock=ON`. Das ist die Fokus-Sperre, wie CameraX sie umsetzt: Messung am Tipp-Punkt (`afRegions` 2241/926–2933/1446), danach AF-Modus AUTO ohne neuen Trigger, also ein fester Fokus.
   - „Latest received frame“ (was die Kamera tatsächlich macht): `afMode=CONTINUOUS_VIDEO`, `afState=PASSIVE_FOCUSED`, `aeLock=ON`, `aeState=LOCKED`.
@@ -182,9 +182,31 @@ Optional für die Diagnose: `adb shell dumpsys media.camera` am Nord CE, damit k
 - **Verhältnis zum Gerätetest vom 2026-10-02:** Dort hatte der Nutzer „Fokus und Helligkeit halten“ gemeldet. Der Fokus-Pfad ist seitdem unverändert. Der damalige Haken für AC-25 am Nord CE gilt damit als widerlegt, nicht als Regression des Fixes.
 - **Steps to Reproduce:** Nord CE, „Video aufnehmen“ an, auf ein nahes Motiv tippen (Schloss erscheint), dann die Kamera auf ein fernes Motiv richten. Erwartet: Der Fokus bleibt auf der nahen Distanz. Tatsächlich: Er stellt neu scharf.
 - **Mögliche Richtung (für `/architecture`, nicht geprüft):** Nach dem Messen die gemessene Fokus-Distanz auslesen und manuell fest setzen (`AF_MODE_OFF` + `LENS_FOCUS_DISTANCE`, per Camera2-Interop). Ob VisionCamera dafür einen Weg bietet, ist offen. Gerät hat `MANUAL_SENSOR`.
-- **Priority:** Fix before deployment.
+- **Priority:** Nice to have. Wenn das Nord CE wieder wichtig wird: zuerst `/architecture` (manueller Fokus nach der Messung).
 
-**Urteil nach diesem Nachtrag:** **NOT READY.** Es gibt einen offenen High-Bug (BUG-76). `features/INDEX.md` bleibt **In Review**.
+**Urteil nach diesem Nachtrag:** ~~NOT READY wegen High-Bug BUG-76~~, überholt durch den Nachtrag zum S24 unten.
+
+**Galaxy S24 mit aktuellem Build (2026-10-04):** App installiert am 2026-10-04 11:51:50, also nach beiden Fixes (`adb -s R3CX50M6JPK shell dumpsys package com.camerasliderapp`, `lastUpdateTime`). Android 16.
+
+- [x] **AC-25 (Fokus und Belichtung bleiben gesperrt), auch während der Fahrt:** verified by the user on Galaxy S24 (SM-S921B, Android 16), 2026-10-04, mit der Meldung „beim s24 wird beides gelockt“. **Live-Beleg** nach einem Tipp auf „Weitwinkel“ (`adb -s R3CX50M6JPK shell dumpsys media.camera`, 5 Stichproben, alle gleich, Rohdaten `scratchpad/s24-locked.txt`):
+  - Anforderung: `afMode=AUTO`, `afTrigger=IDLE`, `aeLock=ON`.
+  - Tatsächlicher Zustand der Kamera: `afMode=AUTO`, `afState=FOCUSED_LOCKED`, `aeState=LOCKED`.
+  - Gegenprobe vor dem Tipp (ohne Sperre): `afMode=CONTINUOUS_VIDEO`, `aeLock=OFF`, `aeState=SEARCHING` (`scratchpad/s24-live.txt`). Die Sperre ist also der Tipp, nicht der Grundzustand.
+  - Anders als am Nord CE übernimmt die Kamera-HAL des S24 die angeforderte Sperre.
+
+### Urteil Re-Verifikation 4 (final, 2026-10-04)
+
+- **Production Ready: READY.** Es gibt keine Critical- und keine High-Bugs. Die im Diff geänderten Laufzeit-ACs sind per protokolliertem Gerätetest am maßgeblichen Gerät Galaxy S24 ausgeführt: AC-22, AC-23, AC-24, AC-25, AC-26 und BUG-68 über Punkt 5 (Schloss ohne Meldung).
+- **Geschlossen:** BUG-68 (Medium) und BUG-70 (Medium).
+- **Offen, alle Low:** BUG-69 (am S24 bestätigt: Ultraweitwinkel ohne Fokus-Sperre), BUG-72 bis BUG-75 und BUG-76 (nur Nord CE). Dazu die älteren Low-Bugs aus den Vorläufen.
+- **Nicht verifiziert:**
+  - BUG-68 am Nord CE (Punkt 1 unbeantwortet)
+  - AC-18 am Gerät (nur der Meldungstext hat sich geändert, im Code geprüft)
+  - BUG-73 am Gerät
+  - Layer `firmware` (kein Testbefehl)
+  - Release-Bundle-Scan
+  - die nicht anwendbaren Web-Security-Checks
+- `features/INDEX.md`: **Approved**.
 
 ---
 
