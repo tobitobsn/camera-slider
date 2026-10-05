@@ -1,97 +1,94 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# Camera Slider
 
-# Getting Started
+Selbstgebauter, motorisierter Kamera-Slider mit Android-App. Die App steuert den Slider per Bluetooth Low Energy (BLE) über ein ESP32. Es gibt kein Backend und keine Cloud, alle Daten bleiben lokal auf dem Handy.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+**Funktionen:** BLE-Verbindung, manuelle Steuerung (Jog), Start-/Endpunkt mit Auto-Fahrt (optional mit Videoaufnahme), Presets, Zeitraffer-Modus und Akkuanzeige. Den aktuellen Stand jedes Features zeigt [`features/INDEX.md`](features/INDEX.md).
 
-## Step 1: Start Metro
+## Hardware
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+| Teil | Details |
+|------|---------|
+| Controller | ESP32 (`esp32dev`) |
+| Treiber | BIGTREETECH TMC2209 V1.3 (Step/Dir + UART) |
+| Motor | 42BYGHM809 (0,9°/Schritt, 1,7 A/Phase) |
+| Akku | 3S Li-Ion (3× 18650, 9,0–12,6 V) |
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+**Pinbelegung (ESP32):**
 
-```sh
-# Using npm
-npm start
+| Signal | GPIO |
+|--------|------|
+| STEP | 25 |
+| DIR | 26 |
+| EN | 27 |
+| TMC2209 UART RX / TX | 17 / 16 |
+| Akkuspannung (Teiler 104 kΩ / 22 kΩ, 100 nF) | 34 (ADC1) |
+| BOOT-Taste (Bond-Reset) | 0 |
 
-# OR using Yarn
-yarn start
+## Repo-Struktur
+
+```
+App.tsx, src/        React-Native-App (TypeScript)
+  ble/               BLE-Client (react-native-ble-plx)
+  connection/        Verbindungszustand (Provider + Reducer)
+  components/        UI-Bausteine und Hooks (Jog, Auto-Fahrt, Video, Presets, Zeitraffer, Akku)
+  screens/           RootScreen
+firmware/            ESP32-Firmware (PlatformIO, Arduino-Framework)
+  src/               main, ble, motor, battery
+features/            Feature-Specs (spec, design, tasks, qa-report)
+docs/                PRD, Datenmodell, Design-System, Stack-Guides
 ```
 
-## Step 2: Build and run your app
+## App
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
+Voraussetzung ist eine eingerichtete [React-Native-Android-Umgebung](https://reactnative.dev/docs/set-up-your-environment). Als Package-Manager dient npm.
 
 ```sh
-# Using npm
-npm run android
-
-# OR using Yarn
-yarn android
+npm install
+npm start                    # Metro starten
+npx react-native run-android # in zweitem Terminal: auf Gerät/Emulator installieren
 ```
 
-### iOS
+Für BLE und die Kamera braucht es ein echtes Gerät, der Emulator reicht nicht.
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+**Tests und Lint:**
 
 ```sh
-bundle install
+npm test
+npm run lint
 ```
 
-Then, and every time you update your native dependencies, run:
+**Release-APK bauen:**
 
 ```sh
-bundle exec pod install
+cd android && ./gradlew assembleRelease
 ```
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+Die APK liegt danach unter `android/app/build/outputs/apk/release/app-release.apk` und wird direkt aufs Handy installiert. Einen Play-Store-Eintrag gibt es nicht.
+
+iOS ist derzeit kein Ziel (siehe [`docs/PRD.md`](docs/PRD.md)). Der Ordner `ios/` stammt nur aus dem Template.
+
+## Firmware
+
+Voraussetzung ist [PlatformIO](https://platformio.org/). Die Bibliotheken TMCStepper, FastAccelStepper und NimBLE-Arduino installiert PlatformIO automatisch.
 
 ```sh
-# Using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
+cd firmware
+pio run -e esp32dev -t upload   # bauen und flashen
+pio device monitor              # serielle Ausgabe (115200 Baud)
 ```
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+Das Gerät meldet sich als **`CameraSlider`**. Die App findet es beim Start über die Service-UUID und verbindet sich automatisch.
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+**BLE-Kopplung zurücksetzen:** Die Firmware speichert genau eine Kopplung. Um ein anderes Handy zu koppeln, das ESP32 normal einschalten und **innerhalb von 2 Sekunden** die BOOT-Taste drücken. Danach sind alle gespeicherten Kopplungen gelöscht. Wichtig: Die Taste nicht schon *beim* Einschalten gedrückt halten, sonst startet das ESP32 in den Download-Modus.
 
-## Step 3: Modify your app
+> App und Firmware teilen sich ein BLE-Protokoll. Bei Änderungen am Protokoll müssen beide gemeinsam ausgeliefert werden (siehe Deployments in [`features/INDEX.md`](features/INDEX.md)).
 
-Now that you have successfully run the app, let's make changes!
+## Dokumentation und Workflow
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+Das Projekt nutzt das AI Engineering Kit, einen Spec-getriebenen Workflow (`/write-spec → /architecture → /tasks → /build → /qa → /deploy`). Einstiegspunkte sind:
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
-
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+- [`docs/PRD.md`](docs/PRD.md): Vision, Constraints, Non-Goals
+- [`features/INDEX.md`](features/INDEX.md): alle Features, Status, Releases
+- [`docs/data-model.md`](docs/data-model.md): lokal gespeicherte Daten
+- [`docs/stacks/framework-react-native.md`](docs/stacks/framework-react-native.md) und [`docs/stacks/firmware-esp32-tmc2209.md`](docs/stacks/firmware-esp32-tmc2209.md): technische Leitfäden
+- [`CLAUDE.md`](CLAUDE.md): Projektkonventionen
