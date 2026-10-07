@@ -5,6 +5,8 @@ import Slider from '@react-native-community/slider';
 import { sendJogCommand, sendStopCommand, type JogDirection } from '../ble/client';
 import { useConnection } from '../connection/ConnectionProvider';
 import { colors, minTouchTarget, radius, spacing, typography } from '../theme/colors';
+import { HoldSwitchRow } from './HoldSwitchRow';
+import { useHoldSetting } from './useHoldSetting';
 import { useJogState, type JogStatus } from './useJogState';
 
 const JOG_REPEAT_INTERVAL_MS = 300;
@@ -72,6 +74,15 @@ type JogControlsProps = {
    * with.
    */
   onJoggingChange?: (jogging: boolean) => void;
+  /**
+   * PROJ-2 AC-10: the slider's reported "hold at standstill" setting; null
+   * (firmware without the setting) hides the switch. Deliberately separate
+   * from `disabled`: the switch stays operable during an auto-drive or a
+   * timelapse — the change applies at the next standstill (EC-6).
+   */
+  holdAtStandstill?: boolean | null;
+  /** EC-7: the slider is locked after a protective stop (PROJ-6) — switch not operable. */
+  holdLocked?: boolean;
 };
 
 /**
@@ -92,8 +103,14 @@ type JogControlsProps = {
  * once per "was jogging, now isn't" transition, and never on mount since the
  * initial status is always 'idle'.
  */
-export function JogControls({ disabled = false, onJoggingChange }: JogControlsProps) {
+export function JogControls({
+  disabled = false,
+  onJoggingChange,
+  holdAtStandstill = null,
+  holdLocked = false,
+}: JogControlsProps) {
   const { device } = useConnection();
+  const hold = useHoldSetting(device, holdAtStandstill);
   const { status, pressForward, releaseForward, pressBackward, releaseBackward } =
     useJogState();
 
@@ -151,6 +168,15 @@ export function JogControls({ disabled = false, onJoggingChange }: JogControlsPr
           thumbTintColor={colors.primary}
         />
       </View>
+
+      {hold.value !== null && (
+        <HoldSwitchRow
+          value={hold.value}
+          disabled={holdLocked}
+          onValueChange={hold.toggle}
+          sendFailed={hold.sendFailed}
+        />
+      )}
 
       <View style={styles.buttonRow}>
         <Pressable

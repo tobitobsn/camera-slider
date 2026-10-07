@@ -43,9 +43,9 @@
 
 <!-- Firmware-BLE (auf T9), Firmware-main (auf T9) und App-Schalterlogik (auf T10+T11) berühren je eigene Dateien → alle [P]. -->
 
-- [ ] T12 [P]  Firmware: Opcode `0x08` SET_HOLD (genau 2 Byte, Wert `0x00`/`0x01`, sonst ignorieren) → `motorSetHold()`; Status-Payload von 10 auf 11 Byte (Byte 10 Bit 0 = `holdAtStandstill`, Bits 1–7 = 0), `gLastStatusPayload` mitwachsen lassen  · files: firmware/src/ble.cpp  · → AC-10, AC-11, EC-9
-- [ ] T13 [P]  Firmware: `loop()` ruft `motorHoldCheck()` auf  · files: firmware/src/main.cpp  · → AC-10, EC-6
-- [ ] T14 [P]  App: Hook `useHoldSetting` (vorgemerkter Wert bis zum passenden Status, bei Sendefehler zurück + Fehler, Fehler weg beim nächsten Erfolg) + Unit-Tests; `JogControls` rendert `HoldSwitchRow` unter dem Geschwindigkeitsregler, eigene Props (`holdAtStandstill`, `holdLocked`) statt `disabled`, Zeile ausgeblendet bei `null`  · files: src/components/useHoldSetting.ts, src/components/useHoldSetting.test.ts, src/components/JogControls.tsx  · → AC-10, EC-6, EC-9
+- [x] T12 [P]  Firmware: Opcode `0x08` SET_HOLD (genau 2 Byte, Wert `0x00`/`0x01`, sonst ignorieren) → `motorSetHold()`; Status-Payload von 10 auf 11 Byte (Byte 10 Bit 0 = `holdAtStandstill`, Bits 1–7 = 0), `gLastStatusPayload` mitwachsen lassen  · files: firmware/src/ble.cpp  · → AC-10, AC-11, EC-9
+- [x] T13 [P]  Firmware: `loop()` ruft `motorHoldCheck()` auf  · files: firmware/src/main.cpp  · → AC-10, EC-6
+- [x] T14 [P]  App: Hook `useHoldSetting` (vorgemerkter Wert bis zum passenden Status, bei Sendefehler zurück + Fehler, Fehler weg beim nächsten Erfolg) + Unit-Tests; `JogControls` rendert `HoldSwitchRow` unter dem Geschwindigkeitsregler, eigene Props (`holdAtStandstill`, `holdLocked`) statt `disabled`, Zeile ausgeblendet bei `null`  · files: src/components/useHoldSetting.ts, src/components/useHoldSetting.test.ts, src/components/JogControls.tsx  · → AC-10, EC-6, EC-9
 
 ## Level 6 — Einbindung (Halten im Stillstand)
 

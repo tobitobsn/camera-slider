@@ -28,6 +28,7 @@ constexpr uint8_t kOpcodeAutoDrive = 0x04;  // <opcode> <direction> <durationDec
 constexpr uint8_t kOpcodeStop = 0x05;       // <opcode> — 1 byte total
 constexpr uint8_t kOpcodeSetEndFromDistance = 0x06;  // <opcode> <direction> <distanceSteps LE u32> — 6 bytes total
 constexpr uint8_t kOpcodeTimelapseMove = 0x07;  // <opcode> <direction> <distanceSteps LE u32> — 6 bytes total
+constexpr uint8_t kOpcodeSetHold = 0x08;   // <opcode> <0x00 off | 0x01 on> — 2 bytes total (PROJ-2, 2026-10-07)
 
 volatile bool gConnected = false;
 
@@ -37,14 +38,14 @@ volatile bool gConnected = false;
 // gConnected above — file-scope state in this anonymous namespace.
 NimBLECharacteristic* gStatusChar = nullptr;
 
-// Last 10-byte Status-Characteristic payload actually sent (see
+// Last 11-byte Status-Characteristic payload actually sent (see
 // bleNotifyStatusIfChanged()), so repeated identical polls from loop()
 // don't spam notify(). Zero-initialized; the very first differing status
 // (including right after boot) will therefore always notify.
-uint8_t gLastStatusPayload[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+uint8_t gLastStatusPayload[11] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 bool gHasSentStatus = false;
 
-// Packs a MotorStatus snapshot into the 10-byte wire payload design.md
+// Packs a MotorStatus snapshot into the 11-byte wire payload design.md
 // specifies: byte 0 is the flags bitfield (bit0 hasStart, bit1 hasEnd,
 // bit2 atStart, bit3 atEnd, bit4 driving, bit5 timelapseMoving, PROJ-6:
 // bit6 locked, bit7 moving), bytes 1-4
@@ -54,7 +55,7 @@ bool gHasSentStatus = false;
 // hasStart && hasEnd are both true (matches src/ble/client.ts's
 // parseStatusPayload()).
 void packStatusPayload(const MotorStatus& status, uint16_t batteryMillivolts,
-                       uint8_t shutdownSeconds, uint8_t out[10]) {
+                       uint8_t shutdownSeconds, uint8_t out[11]) {
   uint8_t flags = 0;
   if (status.hasStart) flags |= 0x01;
   if (status.hasEnd) flags |= 0x02;
@@ -79,6 +80,9 @@ void packStatusPayload(const MotorStatus& status, uint16_t batteryMillivolts,
   // 2 measurement fault) and seconds until the slider switches itself off.
   out[8] = status.locked ? status.lockReason : 0;
   out[9] = shutdownSeconds;
+  // PROJ-2 (2026-10-07, design.md "Grenze App ↔ Firmware"): settings flags —
+  // bit 0 holdAtStandstill, bits 1-7 reserved (0).
+  out[10] = status.holdAtStandstill ? 0x01 : 0x00;
 }
 
 class ServerCallbacks : public NimBLEServerCallbacks {
@@ -238,6 +242,16 @@ class CommandCharacteristicCallbacks : public NimBLECharacteristicCallbacks {
         motorTimelapseMoveTo(endIsAfterStart, distanceSteps);
         break;
       }
+      case kOpcodeSetHold: {
+        // PROJ-2 AC-10: exactly 2 bytes and a value of 0x00/0x01 — anything
+        // else is ignored. motorSetHold() only records the request (and
+        // ignores it while locked, EC-7); motorHoldCheck() applies it.
+        if (len != 2 || value[1] > 0x01) {
+          return;
+        }
+        motorSetHold(value[1] == 0x01);
+        break;
+      }
       default:
         // No other opcodes are defined (PROJ-3's three opcodes plus PROJ-4's
         // SET_END_FROM_DISTANCE and PROJ-5's TIMELAPSE_MOVE (0x07) above
@@ -267,7 +281,7 @@ class StatusCharacteristicCallbacks : public NimBLECharacteristicCallbacks {
       return;  // unsubscribed, or an indicate-only subscribe — nothing to send
     }
     const MotorStatus status = motorGetStatus();
-    uint8_t payload[10];
+    uint8_t payload[11];
     packStatusPayload(status, batteryDisplayMillivolts(), batteryShutdownSeconds(), payload);
     pCharacteristic->setValue(payload, sizeof(payload));
     pCharacteristic->notify();
@@ -418,7 +432,7 @@ void bleNotifyStatusIfChanged() {
   }
 
   const MotorStatus status = motorGetStatus();
-  uint8_t payload[10];
+  uint8_t payload[11];
   packStatusPayload(status, batteryDisplayMillivolts(), batteryShutdownSeconds(), payload);
 
   if (gHasSentStatus && memcmp(payload, gLastStatusPayload, sizeof(payload)) == 0) {

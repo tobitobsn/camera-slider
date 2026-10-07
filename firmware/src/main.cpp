@@ -58,5 +58,9 @@ void loop() {
   // PROJ-6: measurement, protective stop and lockout race guard — before
   // the notify so a fresh display value or lock goes out in the same pass.
   batteryUpdate();
+  // PROJ-2 (2026-10-07): applies a pending "hold at standstill" request —
+  // after batteryUpdate() so a lock set in this pass is already seen (EC-7),
+  // before the notify so the new setting goes out in the same pass.
+  motorHoldCheck();
   bleNotifyStatusIfChanged();
 }
