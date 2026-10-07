@@ -86,17 +86,128 @@ Nutzt die in PROJ-1 bereits angelegte Command-Characteristic (`6e400002-…`, bi
 
 ## Datenmodell
 
-**Kein neues persistentes Datenmodell** — `docs/data-model.md` bleibt unverändert. Der Jog-Zustand (welche Taste gehalten wird, aktueller Geschwindigkeits-Reglerwert) ist reiner, nicht persistierter React-State innerhalb von `JogControls` — verschwindet bewusst beim Verlassen des Bildschirms/der Verbindung, es gibt nichts, das über eine Session hinaus gespeichert werden müsste (Presets kommen erst mit PROJ-4).
+_Stand bis 2026-10-07; seit der Erweiterung „Halten im Stillstand“ gibt es einen persistenten Wert auf dem Slider, siehe dort._ **Kein neues persistentes Datenmodell** — `docs/data-model.md` bleibt unverändert. Der Jog-Zustand (welche Taste gehalten wird, aktueller Geschwindigkeits-Reglerwert) ist reiner, nicht persistierter React-State innerhalb von `JogControls` — verschwindet bewusst beim Verlassen des Bildschirms/der Verbindung, es gibt nichts, das über eine Session hinaus gespeichert werden müsste (Presets kommen erst mit PROJ-4).
 
 ## Erweiterung der App-BLE-Grenze (`src/ble/client.ts`, `ConnectionProvider`)
 
 - **`src/ble/client.ts`** bekommt zwei neue Exporte: `sendJogCommand(device, direction, speedPercent)` und `sendStopCommand(device)`, beide schreiben auf die (bereits als Konstante vorhandene) Command-Characteristic-UUID. Rein additiv, ändert nichts an den bestehenden Exporten.
 - **`ConnectionProvider`** exponiert im Context-Wert zusätzlich das verbundene `Device`-Objekt (`device: Device | null`, `null` außer im Zustand `connected`) — bisher hielt `ConnectionProvider` das Device nur intern (`deviceRef`), ohne es nach außen zu geben. `JogControls` braucht diese Referenz, um Befehle zu senden. **Rein additiv am Context-Wert** (bestehende Felder `state`/`requestScan` unverändert, keine PROJ-1-Acceptance-Criteria betroffen) — trotzdem hier explizit benannt, weil es eine Datei berührt, die PROJ-1 gehört.
 
+## Erweiterung 2026-10-07: Halten im Stillstand (AC-8 bis AC-12, EC-6 bis EC-9)
+
+**Ausgangslage:** `motorSetup()` schaltet `setAutoEnable(true)`. FastAccelStepper bestromt den Treiber dadurch nur während einer Fahrt und zieht EN danach wieder auf HIGH. Im Stillstand hält nur das Rastmoment, und auf geneigter Schiene reicht das nicht. Das gilt für jede Bewegungsart, also für Jog, Auto-Fahrt (PROJ-3) und Zeitraffer-Schritte (PROJ-5). Deshalb sitzt die Lösung zentral in `motor.cpp` und nicht bei einer einzelnen Bewegungsart.
+
+Das Feature spannt beide Layer. Die Grenze dazwischen bilden ein neuer Opcode auf der Command-Characteristic und ein neues Byte im Status-Payload.
+
+### Firmware (`firmware/`)
+
+```
+firmware/src/motor.h / motor.cpp (erweitert)
++-- motorSetup()
+|   +-- Haltestrom: rms_current(1700 mA, Haltefaktor `kHoldCurrentFraction` = 0,6) → IHOLD = 60 % von IRUN (ca. 1,0 A)
+|   +-- TPOWERDOWN = 20 (Haltestrom greift ca. 0,4 s nach dem letzten Schritt)
+|   +-- IHOLDDELAY = 8 (Strom sinkt in kleinen Stufen statt auf einen Schlag → kein Ruck)
+|   +-- liest die gespeicherte Einstellung aus dem Flash (NVS); fehlt sie → „an"
+|   +-- Einstellung an:  Auto-Enable AUS, Treiber bleibt aber vorerst stromlos (AC-12)
+|   +-- Einstellung aus: Auto-Enable AN (Verhalten wie bisher)
++-- motorSetHold(an/aus)        — NEU, vom BLE-Task aufgerufen; merkt nur den Wunsch vor
++-- motorHoldCheck()            — NEU, aus loop(); wendet einen vorgemerkten Wunsch an
++-- motorGetStatus()            — liefert zusätzlich holdAtStandstill (den gespeicherten Wunsch)
++-- Bewegungsstart (motorJog, motorAutoDrive, motorTimelapseMoveTo)
+    +-- ist die Einstellung an → Treiber vor dem Start einschalten (enableOutputs);
+        danach bleibt er an, auch nach dem Stopp
++-- motorLockout() (PROJ-6, unverändert): Auto-Enable aus, EN HIGH, toff 0 — hat Vorrang
+
+firmware/src/ble.cpp (erweitert)
++-- Opcode 0x08 SET_HOLD → motorSetHold()
++-- Status-Payload wächst von 10 auf 11 Byte (Byte 10 = Einstellungs-Flags)
+
+firmware/src/main.cpp (erweitert)
++-- loop() ruft zusätzlich motorHoldCheck() auf
+```
+
+**Ablauf von `motorHoldCheck()`**, der einzigen Stelle, an der sich der Haltemodus ändert:
+1. Ist der Slider gesperrt (PROJ-6), passiert nichts. Der Treiber bleibt aus (EC-7).
+2. Gibt es keinen vorgemerkten Wunsch, passiert nichts.
+3. Läuft der Motor gerade, bleibt der Wunsch vorgemerkt und wird beim ersten Durchlauf im Stillstand angewendet (EC-6).
+4. Sonst wird der Wunsch im Flash gespeichert (nur wenn er sich vom gespeicherten Wert unterscheidet) und sofort angewendet (AC-10):
+   - **an:** Auto-Enable aus, Treiber ein. Der Motor hält ab jetzt, auch wenn er seit dem Einschalten noch nicht gefahren ist. Der Nutzer hat es ausdrücklich verlangt.
+   - **aus:** Auto-Enable an, Treiber aus. Der Motor ist sofort stromlos (AC-9).
+
+**Warum ein vorgemerkter Wunsch statt direkter Ausführung im BLE-Callback:** UART-Zugriffe auf den TMC2209 und das Setzen von EN laufen schon heute im `loop()`-Task (PROJ-6-Sperre aus `battery.cpp`). Dasselbe gilt für das Schreiben in den Flash, das einige Millisekunden blockiert. Bleiben alle Hardware- und Flash-Zugriffe in einem Task, kann die Sperre nie mitten in ein halbes Umschalten fallen. Den Wunsch übergibt der BLE-Task über ein `volatile`-Flag, wie bei den übrigen Flags in `motor.cpp`.
+
+**Verhalten im Einzelnen:**
+
+| Situation | Einstellung an | Einstellung aus |
+|---|---|---|
+| Nach dem Einschalten, vor der ersten Fahrt | stromlos (AC-12) | stromlos |
+| Während einer Fahrt | voller Fahrstrom 1,7 A | voller Fahrstrom 1,7 A |
+| Nach dem Stopp (Jog, Auto-Fahrt, Zeitraffer-Schritt) | nach ca. 0,4 s sanft auf 60 % (AC-8) | stromlos (AC-9) |
+| Verbindungsabbruch im Stillstand | hält weiter (EC-8) — `onDisconnect` ruft nur `motorStop()`, das den Treiber nicht abschaltet | stromlos |
+| Verbindungsabbruch während Jog | Motor stoppt (AC-5) und hält danach | Motor stoppt, danach stromlos |
+| Sperre nach Schutz-Stopp (PROJ-6) | stromlos (EC-7) | stromlos |
+| Neustart | gespeicherter Wert gilt (AC-11), erst ab der ersten Fahrt bestromt | gespeicherter Wert gilt |
+
+**Speicherung:** ESP32-Flash über die `Preferences`-Bibliothek des Arduino-ESP32-Cores (NVS). Namespace `slider`, Schlüssel `hold`, ein Wahrheitswert. Fehlt der Schlüssel (Auslieferungszustand, nach einem Flash-Löschen), gilt „an" (AC-12). Geschrieben wird nur bei einer tatsächlichen Änderung. Bei einigen Umschaltungen pro Drehtag spielt der Flash-Verschleiß keine Rolle.
+
+### Grenze App ↔ Firmware
+
+**Neuer Befehl** auf der Command-Characteristic:
+
+| Opcode | Name | Payload | Bedeutung |
+|---|---|---|---|
+| `0x08` | SET_HOLD | 1 Byte: `0x01` = Halten an, `0x00` = aus | Einstellung ändern. Jeder andere Payload-Wert und jede falsche Länge (≠ 2 Byte) werden ignoriert. Gesendet wird als Write mit Antwort, wie alle Befehle. Während der Sperre (PROJ-6) wird der Befehl ignoriert und nicht vorgemerkt, sonst würde er nach einer gar nicht stattfindenden Entsperrung greifen. |
+
+**Status-Payload: 10 → 11 Byte.** Byte 10 ist ein neues Einstellungs-Flagfeld, weil alle 8 Bits von Byte 0 belegt sind. Bit 0 = `holdAtStandstill` (gespeicherter bzw. vorgemerkter Wunsch), Bits 1–7 sind reserviert und `0`. Die App liest diesen Wert. Ändert er sich, sendet die Firmware über den bestehenden Diff-Check in `bleNotifyStatusIfChanged()` ohnehin ein Notify. Beim Verbinden liefert Notify-on-Subscribe den aktuellen Stand (AC-10, EC-9).
+
+`holdAtStandstill` meldet den **Wunsch** und nicht, ob der Treiber gerade bestromt ist. Der Schalter zeigt damit die Einstellung des Nutzers. Ob der Motor im Moment tatsächlich Strom hat (z. B. vor der ersten Fahrt nach dem Einschalten), zeigt die App bewusst nicht an.
+
+### App (`src/`)
+
+```
+RootScreen (unverändert in der Struktur)
++-- JogControls (erweitert, bekommt zwei neue Props von RootScreen)
+    +-- SpeedSlider
+    +-- HoldSwitchRow (NEU, direkt unter dem Regler)
+    |   +-- Text „Motor hält im Stillstand"
+    |   +-- Switch (gleicher Stil wie „Video aufnehmen" in AutoDriveControls)
+    |   +-- Fehlerzeile „Einstellung konnte nicht übertragen werden" (nur nach einem Sendefehler)
+    +-- DirectionButtonRow (unverändert)
+    +-- StatusLine (unverändert)
+```
+
+- **`src/ble/client.ts`:** neuer Export `sendSetHoldCommand(device, enabled)`. `SliderStatus` bekommt das Feld `holdAtStandstill` (an / aus / `null`). `parseStatusPayload()` liest Byte 10 nur, wenn das Payload mindestens 11 Byte lang ist, sonst `null`.
+- **`HoldSwitchRow`** (neue Datei `src/components/HoldSwitchRow.tsx`) ist rein darstellend. Props: der gemeldete Wert, „nicht bedienbar" und ein Umschalt-Callback.
+- **Was der Schalter zeigt:**
+  - Normalfall: den zuletzt gemeldeten Wert `status.holdAtStandstill`.
+  - Während ein Umschalten unterwegs ist (Befehl gesendet, noch kein Status mit dem neuen Wert): den gewünschten Wert, damit der Schalter nicht kurz zurückspringt.
+  - Schlägt das Senden fehl: zurück auf den gemeldeten Wert, dazu die Fehlerzeile. Sie verschwindet beim nächsten erfolgreichen Umschalten.
+  - Nach dem Wiederverbinden ist `JogControls` frisch gemountet. Ein vorgemerkter Wert aus der alten Verbindung existiert nicht mehr, es gilt nur der gemeldete (EC-9).
+- **Wann der Schalter fehlt oder gesperrt ist:**
+  - `holdAtStandstill` ist `null` (ältere Firmware ohne Byte 10): Die Zeile wird nicht angezeigt. So bietet die App keinen Schalter an, den der Slider nicht versteht.
+  - Gesperrt (PROJ-6, `status.batteryLocked`): Der Schalter ist nicht bedienbar (EC-7).
+  - Bei laufender Auto-Fahrt oder Zeitraffer-Sequenz bleibt er **bedienbar**, obwohl die übrigen Jog-Elemente dann gesperrt sind. Die Änderung greift erst nach dem Stopp (EC-6). Deshalb bekommt er ein eigenes Prop und nicht das bestehende `disabled`.
+- **`RootScreen`** reicht `status.holdAtStandstill` und `status.batteryLocked` aus seinem bestehenden `useSliderStatus(device)`-Aufruf an `JogControls` durch. Es gibt keinen zusätzlichen Status-Abonnenten.
+
+### Datenmodell (Detail)
+
+Ein einzelner Wert **auf dem Slider**, nicht auf dem Handy:
+- `hold` — Wahrheitswert, Pflicht, Default `an`, gespeichert im ESP32-NVS (Namespace `slider`).
+- Zugriff: Nur der gebondete, verbundene Client kann den Wert über SET_HOLD ändern. Die Command-Characteristic verlangt seit PROJ-1/PROJ-2 eine verschlüsselte, gebondete Verbindung. Lesen geht über das Status-Notify.
+- Wird nie gelöscht. Ein Flash-Löschen setzt ihn auf den Default zurück.
+
+`docs/data-model.md` führt ihn bereits als Entität „Slider-Einstellung ‚Halten im Stillstand‘" (seit dem Refine vom 2026-10-07).
+
+### Gegencheck Plattform (mobile, kein Backend)
+
+Gilt weiter: Eingabeprüfung an der Grenze (SET_HOLD prüft Länge und Wert in der Firmware), Zugriff nur über die gebondete, verschlüsselte Characteristic, keine Secrets.
+Entfällt, weil es auf dieser Plattform kein Gegenstück gibt: Rate-Limiting (kein Credential), HTTP-Header, Routen-Schutz.
+
 ## Abhängigkeiten
 
 - `@react-native-community/slider` — Geschwindigkeitsregler; React Native selbst liefert seit Version 0.60 keinen Slider mehr im Core
 - Firmware: keine neuen Bibliotheken — `TMCStepper` und `FastAccelStepper` stehen bereits seit PROJ-1 in `platformio.ini`, wurden aber noch nicht genutzt
+- Halten im Stillstand (2026-10-07): keine neuen Pakete. `Preferences` (NVS) gehört zum Arduino-ESP32-Core, der Switch kommt aus React Native selbst.
 
 ## Settings the user makes
 
@@ -123,7 +234,14 @@ _Keine — kein Backend, kein Provider-Dashboard betroffen._
 | BUG-16/BUG-20 (2026-09-30): `motorStop()` ruft `forceStop()` nur, wenn der Stepper läuft; zusätzlich setzt `motorJog()` ein veraltetes `jogRunning` zurück, wenn der Stepper steht (Sicherheitsnetz) | `forceStop()` im Stillstand setzt in FastAccelStepper ein Immediate-Stop-Flag, das nur eine laufende Rampe löscht — der nächste Jog-Start endete ohne Schritt, und jedes Loslassen setzte das Flag erneut (Dauerausfall bis Reboot). Die zuvor angenommene Ursache („`moveTo()` überschreibt laufenden Jog") ist im Code nicht erreichbar, weil `motorAutoDrive()`/`motorTimelapseMoveTo()` bei laufendem Stepper ablehnen. Hängt an der Bibliotheksversion (`FastAccelStepper @ ^0.31.1`) |
 | DIR-Polarität invertiert: `setDirectionPin(kDirPin, false)` (2026-09-29) | Vorwärts/Rückwärts war physisch vertauscht; eine Stelle ändert nur den Pin-Pegel, Zählrichtung und logische Positionen bleiben — konsistent für Jog, Auto-Fahrt und Zeitraffer. Gespeicherte Presets werden per `dirVersion` migriert (PROJ-4 design.md) |
 | `lastJogMillis` wird vor dem Start des Laufs gesetzt (BUG-23) | Der Watchdog (anderer Task) sieht sonst in einem kurzen Fenster einen frisch gestarteten Lauf mit altem Zeitstempel |
+| Halten im Stillstand über den TMC2209-Haltestrom (IHOLD = 60 % von IRUN, TPOWERDOWN 20, IHOLDDELAY 8) statt Treiber dauerhaft mit vollem Strom (2026-10-07) | Der Treiber senkt den Strom im Stillstand selbst, und ein sanftes IHOLDDELAY verhindert einen Ruck beim Übergang. **Alternative:** voller Strom im Stillstand (einfacher, maximales Haltemoment). **Trade-off:** ca. 40 % weniger Haltemoment als bei vollem Strom. Dafür deutlich weniger Wärme und Akkuverbrauch, und laut Stack-Pack bleibt der Dauerstrom mit ca. 1,0 A unter der Wärmegrenze von 1,4 A ohne Luftstrom. Der Wert ist eine Konstante und wird im Hardwaretest bestätigt. |
+| Haltemodus über Auto-Enable steuern: an → Auto-Enable aus, Treiber wird bei Bewegungsstart eingeschaltet und bleibt an; aus → Auto-Enable an wie bisher (2026-10-07) | Nur ein Schalter im Code entscheidet, und PROJ-6s Sperre (Auto-Enable aus + `disableOutputs()` + `toff(0)`) bleibt unverändert gültig. **Alternative:** Auto-Enable immer an und `setDelayToDisable()` hochsetzen. **Trade-off der Alternative:** maximal ca. 65 s Verzögerung, also kein dauerhaftes Halten, das passt nicht. Nachteil der gewählten Lösung: Jeder Bewegungsstart muss den Treiber selbst einschalten (drei Stellen in `motor.cpp`). |
+| Umschalten nur im `loop()`-Task (`motorHoldCheck()`), der BLE-Callback merkt nur vor (2026-10-07) | Die Garantie hinter EC-6 und EC-7: Hardware- und Flash-Zugriffe liegen in einem Task mit der PROJ-6-Sperre. Damit wird nie während einer Fahrt umgeschaltet und nie ein gesperrter Treiber wieder eingeschaltet. **Alternative:** direkt im BLE-Callback umschalten. **Trade-off:** bis zu einem `loop()`-Durchlauf Verzögerung (Millisekunden). |
+| Einstellung im ESP32-NVS (`Preferences`), Default an (2026-10-07) | Folgt aus AC-11 und AC-12: Sie muss ohne App und nach einem Neustart gelten. **Alternative:** in der App speichern (AsyncStorage) und beim Verbinden senden. **Trade-off:** Der Wert gehört dann zu einem Handy statt zum Slider. Bei einem Single-Owner-Gerät ist das egal. |
+| Status-Payload um Byte 10 (Einstellungs-Flags) erweitert statt eines eigenen Lese-Befehls (2026-10-07) | Der bestehende Notify mit Diff-Check und Notify-on-Subscribe liefert den Wert ohne neuen Mechanismus. Byte 0 ist voll, deshalb ein neues Byte mit Reserve-Bits. **Alternative:** eigene Read-Characteristic. **Trade-off:** App und Firmware müssen zusammen ausgeliefert werden. Eine ältere App ignoriert Byte 10 (Längenprüfung nur nach unten), eine neue App blendet den Schalter bei älterer Firmware aus. |
+| Schalter bleibt während Auto-Fahrt/Zeitraffer bedienbar, eigenes Prop statt `disabled` (2026-10-07) | Folgt aus EC-6: Umschalten während einer Fahrt ist erlaubt und greift beim Stopp. **Alternative:** mit der übrigen Jog-Steuerung sperren (einfacher). **Trade-off:** eine Prop mehr an `JogControls`. |
 
 ## Offene Fragen
 
+- [ ] Aus `spec.md` übernommen: Reicht 60 % Haltestrom auf der schrägsten Aufstellung, wie warm werden Motor/Treiber, wie viel Akkulaufzeit kostet dauerhaftes Halten? → Hardwaretest; `kHoldCurrentFraction` ggf. anpassen
 - [ ] Aus `spec.md` übernommen: Exakte Geschwindigkeitsbereiche (mm/s) stehen erst nach der mechanischen Kalibrierung fest — die 200–8000-Steps/s-Konstante ist ein vorläufiger, aber funktionsfähiger Platzhalter.
