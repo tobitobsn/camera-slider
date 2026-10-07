@@ -49,8 +49,8 @@
 
 ## Level 6 — Einbindung (Halten im Stillstand)
 
-- [ ] T15 [P]  `RootScreen` reicht `status.holdAtStandstill` und `status.batteryLocked` aus dem bestehenden `useSliderStatus(device)` an `JogControls` durch  · files: src/screens/RootScreen.tsx  · → AC-10, EC-7
-- [ ] T16 [P]  Stack-Pack nachziehen: Haltemodus statt festem `setAutoEnable(true)`, IHOLD/TPOWERDOWN/IHOLDDELAY, NVS-Schlüssel `slider`/`hold`  · files: docs/stacks/firmware-esp32-tmc2209.md  · → AC-8, AC-11
+- [x] T15 [P]  `RootScreen` reicht `status.holdAtStandstill` und `status.batteryLocked` aus dem bestehenden `useSliderStatus(device)` an `JogControls` durch  · files: src/screens/RootScreen.tsx  · → AC-10, EC-7
+- [x] T16 [P]  Stack-Pack nachziehen: Haltemodus statt festem `setAutoEnable(true)`, IHOLD/TPOWERDOWN/IHOLDDELAY, NVS-Schlüssel `slider`/`hold`  · files: docs/stacks/firmware-esp32-tmc2209.md  · → AC-8, AC-11
 
 ## Parallelisierung
 

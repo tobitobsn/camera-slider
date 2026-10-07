@@ -56,14 +56,16 @@ void setupDriver() {
   Serial2.begin(115200, SERIAL_8N1, /*RX=*/17, /*TX=*/16);
   driver.begin();
   driver.toff(4);
-  driver.rms_current(1700);       // 1,7 A Phasenstrom lt. Datenblatt 42BYGHM809
+  driver.rms_current(1700, 0.6);  // 1,7 A Phasenstrom lt. Datenblatt 42BYGHM809; Haltestrom IHOLD = 60 % (PROJ-2 AC-8)
+  driver.TPOWERDOWN(20);          // Haltestrom greift ca. 0,4 s nach dem letzten Schritt
+  driver.iholddelay(8);           // Strom sinkt stufenweise auf IHOLD → kein Ruck beim Übergang
   driver.microsteps(16);          // 400 Vollschritte × 16 = 6400 Schritte/Umdrehung
   driver.pwm_autoscale(true);     // StealthChop — lautloser Lauf im unteren Geschwindigkeitsbereich
   driver.en_spreadCycle(false);
 }
 ```
 
-`rms_current()` setzt den **RMS**-Strom, nicht den Spitzenstrom — 1700 mA entspricht dem Datenblattwert des 42BYGHM809. Höher als nötig einstellen heizt den Treiber unnötig auf (Kühlkörper ist im Lieferumfang, aber Dauerlast bei >1,4 A RMS ohne Luftstrom im Gehäuse prüfen).
+`rms_current()` setzt den **RMS**-Strom, nicht den Spitzenstrom — 1700 mA entspricht dem Datenblattwert des 42BYGHM809. Höher als nötig einstellen heizt den Treiber unnötig auf (Kühlkörper ist im Lieferumfang, aber Dauerlast bei >1,4 A RMS ohne Luftstrom im Gehäuse prüfen). Der zweite Parameter ist der Haltefaktor: Im Stillstand senkt der TMC2209 den Strom selbst auf diesen Anteil (60 % ≈ 1,0 A, unter der 1,4-A-Grenze für Dauerlast) — wirksam nur, solange der Treiber im Stillstand eingeschaltet bleibt (siehe „Halten im Stillstand“).
 
 ## Bewegungssteuerung (FastAccelStepper)
 
@@ -78,7 +80,9 @@ void setupMotion() {
   stepper = engine.stepperConnectToPin(25);   // STEP-Pin
   stepper->setDirectionPin(26, /*dirHighCountsUp=*/false); // Polarität je nach Verkabelung; hier invertiert
   stepper->setEnablePin(27, /*low_active_out=*/true);
-  stepper->setAutoEnable(true);               // schaltet EN nur während einer Fahrt scharf
+  // Auto-Enable hängt am Haltemodus (siehe „Halten im Stillstand“ unten):
+  // aus → setAutoEnable(true), EN nur während einer Fahrt scharf;
+  // an  → setAutoEnable(false), EN wird beim Fahrtstart gesetzt und bleibt.
   stepper->setSpeedInHz(8000);                // Schritte/Sekunde, aus gewünschter mm/s + Spindelsteigung ableiten
   stepper->setAcceleration(8000);
 }
@@ -129,10 +133,21 @@ steps_per_mm = (Vollschritte_pro_Umdrehung × Mikroschritte) / (Zähnezahl_Rieme
 
 Der konkrete Wert ist eine Kalibrierungs-Konstante in der Firmware, kein Architektur-Thema — wird gemessen (Sollstrecke fahren, tatsächliche Strecke messen, Wert korrigieren), sobald die Mechanik steht.
 
+## Halten im Stillstand (PROJ-2, seit 2026-10-07)
+
+Auf geneigter Schiene reicht das Rastmoment eines stromlosen Motors nicht — der Schlitten rutscht. Deshalb gibt es einen Haltemodus, in der App schaltbar und auf dem ESP32 gespeichert:
+
+- **Speicherort:** NVS über `Preferences` (Arduino-ESP32-Core), Namespace `slider`, Schlüssel `hold` (bool). Fehlt der Schlüssel, gilt **an**.
+- **An:** `setAutoEnable(false)`. Jeder Bewegungsstart (Jog, Auto-Fahrt, Zeitraffer-Schritt) ruft `enableOutputs()`, danach bleibt der Treiber an und der TMC2209 hält mit IHOLD. Nach dem Boot bleibt EN trotzdem HIGH bis zur ersten Fahrt.
+- **Aus:** `setAutoEnable(true)` — stromlos im Stillstand wie früher.
+- **Umschalten nur im `loop()`-Task und nur im Stillstand** (`motorHoldCheck()`), im selben Task wie die Akku-Sperre (PROJ-6), die immer Vorrang hat.
+- **Falle in FastAccelStepper:** Die Engine schaltet ab, sobald ihr interner `_auto_disable_delay_counter` (gesetzt von der letzten Fahrt mit Auto-Enable) abgelaufen ist — `needAutoDisable()` prüft dabei nicht, ob Auto-Enable noch an ist. Nur `disableOutputs()` setzt den Zähler zurück. Beim Umschalten auf „an“ daher: `setAutoEnable(false)` → `disableOutputs()` → `enableOutputs()`.
+- Opcode `0x08` SET_HOLD (`0x00`/`0x01`), gemeldet in Byte 10 Bit 0 des Status-Payloads.
+
 ## Sicherheit
 
 - `EN`-Pin HIGH (Treiber aus) im Fehlerfall und beim Boot, bevor der erste Befehl kommt — ein stromloser Motor ist der sichere Default
-- Kein Dauerstrom im Stillstand nötig (haltendes Moment optional über `pwm_autoscale`), sonst Wärmeentwicklung unnötig hoch
+- Dauerstrom im Stillstand nur mit reduziertem Haltestrom (IHOLD 60 %) und nur, wenn der Haltemodus an ist (siehe „Halten im Stillstand“) — die Akku-Sperre schaltet den Treiber unabhängig davon stromlos
 - BLE-Verbindungsabbruch während einer Fahrt → `onDisconnect`-Callback stoppt die Bewegung sofort (kein "weiterfahren ins Blaue", wenn die App die Verbindung verliert)
 - Zusätzlich, unabhängig vom Verbindungsstatus: der JOG-Watchdog (siehe „BLE-Kommandoschicht" oben) stoppt auch dann, wenn die Verbindung formal besteht, aber die App aus anderem Grund (Absturz, Hintergrund, Paketverlust) über 1s kein Kommando mehr sendet
 - **BLE-Pairing (seit PROJ-2-QA, BUG-3) — Schutzwirkung ehrlich eingeordnet:** Die Command-Characteristic verlangt einen verschlüsselten (gebondeten) Link — „Just Works" (`NimBLEDevice::setSecurityAuth(true, false, true)`: Bonding ja, MITM/Passkey nein, Secure Connections ja) plus `WRITE_ENC` auf der Characteristic. Grund: Sobald die Characteristic den Motor tatsächlich steuert (PROJ-2) und der Slider laut Spec keine Endanschläge hat, könnte ein unauthentifizierter Write vom Handy eines Fremden den Schlitten von der Schiene fahren. „Just Works" statt PIN/Passkey, weil das Board keinen Bildschirm und keine Tastatur hat — löst PROJ-1s ursprüngliche „kein Bonding nötig"-Entscheidung ab, die galt, bevor die Characteristic etwas bewirkte. Das Advertising läuft nach einem erfolgreichen Connect weiter (nicht nur nach Disconnect, BUG-4). **Wichtig, per Re-Verifikation der QA korrigiert:** „Just Works" verlangt zwar einen Pairing-Schritt vor dem ersten Schreiben, bestätigt diesen Schritt aber ohne jede Rückfrage — ein fremdes Gerät muss sich also nicht nur verbinden, sondern kann genauso automatisch mitpairen (kein Passkey, keine Bestätigung, funktioniert z. B. mit nRF Connect ohne Interaktion) und schreibt danach genauso wie die App. Der Schutz wehrt **naive/generische Zugriffe ab** (ein Tool, das gar keinen Pairing-Handshake macht, scheitert), **nicht einen gezielten Angreifer** mit einem BLE-fähigen Gerät und etwas Geduld. Echter Schutz vor einem gezielten Angreifer bräuchte einen festen Passkey (MITM-Schutz) — bewusst nicht umgesetzt, siehe `qa-report.md` BUG-3.

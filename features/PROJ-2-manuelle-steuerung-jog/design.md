@@ -245,3 +245,9 @@ _Keine — kein Backend, kein Provider-Dashboard betroffen._
 
 - [ ] Aus `spec.md` übernommen: Reicht 60 % Haltestrom auf der schrägsten Aufstellung, wie warm werden Motor/Treiber, wie viel Akkulaufzeit kostet dauerhaftes Halten? → Hardwaretest; `kHoldCurrentFraction` ggf. anpassen
 - [ ] Aus `spec.md` übernommen: Exakte Geschwindigkeitsbereiche (mm/s) stehen erst nach der mechanischen Kalibrierung fest — die 200–8000-Steps/s-Konstante ist ein vorläufiger, aber funktionsfähiger Platzhalter.
+
+## Umsetzungsnotizen — Halten im Stillstand (Build 2026-10-07)
+
+- **FastAccelStepper-Falle, im Design nicht vorhergesehen:** Die Engine schaltet den Treiber ab, sobald ihr `_auto_disable_delay_counter` (gesetzt von der letzten Fahrt mit Auto-Enable) abgelaufen ist. `needAutoDisable()` prüft dabei nicht, ob Auto-Enable noch an ist. Ein Umschalten von „aus“ auf „an“ kurz nach einer Fahrt hätte den Treiber also trotzdem abgeschaltet. Deshalb läuft `motorHoldCheck()` beim Einschalten in dieser Reihenfolge: `setAutoEnable(false)` → `disableOutputs()` (setzt den Zähler zurück, wenige Mikrosekunden stromlos) → `enableOutputs()`. Steht auch im Stack-Pack.
+- **Sperre (EC-7) zusätzlich abgesichert:** Ist der Slider gesperrt, schaltet `motorHoldCheck()` den Treiber in jedem `loop()`-Durchlauf im Stillstand erneut ab. Das deckt den Fall ab, dass ein Fahrtbefehl seine Sperrprüfung kurz vor der Sperre passiert und den Treiber eingeschaltet hat.
+- **Ergänzung in der App:** `useHoldSetting` verwirft einen vorgemerkten Wert spätestens 1,5 s nach einem erfolgreichen Senden (`HOLD_PENDING_TIMEOUT_MS`), auch wenn kein passender Status kam. So bleibt der Schalter nicht auf einem Wert hängen, den der Slider ignoriert hat (z. B. Sperre im selben Moment).
