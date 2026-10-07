@@ -1,5 +1,281 @@
 # QA-Testergebnisse
 
+**Getestet:** 2026-10-07
+**App-URL:** nicht ausführbar hier (`probe.kind: none`, Top-Level und Layer `firmware`). Jedes Laufzeit-AC ist unten `[!] NOT VERIFIED`, bis ein menschlicher Test protokolliert ist.
+**Tester:** 3 unabhängige `qa-engineer`-Subagenten (Acceptance / Security / Regression), jeweils in frischem Kontext ohne Kenntnis des Builds. Diese Session hat sie zusammengeführt, Code-Belege der Bugs stichprobenartig nachgeprüft und Step 6 (Unit-Tests) gemacht.
+**Scope:** vollständig. PROJ-2 kommt aus `/refine` (Commit `85c650e`, „Halten im Stillstand“), der Vertrag hat sich geändert, deshalb keine Re-Verifikation. Geprüft sind alle 12 AC und 9 EC. Schwerpunkt sind die neuen AC-8 bis AC-12 und EC-6 bis EC-9. Untersuchter Diff: `git diff 85c650e..HEAD` (21 Dateien, u. a. `firmware/src/motor.cpp`, `firmware/src/ble.cpp`, `firmware/src/main.cpp`, `src/ble/client.ts`, `src/components/useHoldSetting.ts`, `src/components/HoldSwitchRow.tsx`, `src/components/JogControls.tsx`, `src/screens/RootScreen.tsx`).
+
+> Legende: `[x]` in diesem Lauf verifiziert (Beleg erforderlich) · `[ ] BUG` als fehlerhaft verifiziert · `[!] NOT VERIFIED` in diesem Lauf nicht prüfbar (Grund erforderlich)
+>
+> **Wichtig:** Ein `[x]` bedeutet hier „im Code bzw. per Test belegt“. Das Verhalten am echten Slider ist für **jedes** AC zusätzlich `[!] NOT VERIFIED — no way to run and probe this project was recorded`. Das gilt, bis der menschliche Hardware-Test unten protokolliert ist.
+
+## Testläufe (einmal vor dem Fan-out, vom Owner)
+
+- [x] App-Suite: `npm test` → 24 Suites, 363 Tests, alle grün (Log `scratchpad/test-run.log`, Exit 0)
+- [x] Typprüfung: `npx tsc --noEmit -p tsconfig.json` → Exit 0
+- [x] Firmware-Compile: `pio run -e esp32dev` → SUCCESS (RAM 12,5 %, Flash 50,5 %). Die Regressions-Lane hat zusätzlich in ein frisches Build-Verzeichnis kompiliert (`PLATFORMIO_BUILD_DIR=… pio run -e esp32dev`) → SUCCESS, alle 4 `src`-Dateien neu übersetzt. Einzige Warnung ist ein vorbestehendes, veraltetes `NimBLEService::start()` in `ble.cpp:416`.
+- [!] Firmware-Tests: NOT VERIFIED — no test command recorded for layer firmware (`layers[0].commands.test: null`)
+- [x] Nach Step 6 nur die betroffenen Dateien: `npx jest src/components/useHoldSetting.test.ts src/ble/client.test.ts src/components/HoldSwitchRow.render.test.ts` → 3 Suites, 55 Tests grün
+
+## Acceptance-Criteria-Status
+
+#### AC-1 — Taste halten → Slider fährt
+- [x] Code/Test: JOG wird sofort und dann alle 300 ms gesendet (`src/components/JogControls.tsx:131-147`). Zustandsmaschine getestet in `useJogState.test.ts`. Firmware `motor.cpp:284-375`. Bei Halten an wird der Treiber vorher bestromt (`motor.cpp:317`).
+- [!] Laufzeit: NOT VERIFIED — no way to run and probe this project was recorded
+
+#### AC-2 — Loslassen → sofortiger Stopp
+- [x] Code/Test: Das Effect-Cleanup stoppt das Intervall und sendet STOP (`JogControls.tsx:143-146`). Firmware `forceStop()` in `motor.cpp:395-397`. Test `useJogState.test.ts` „jogging_forward + RELEASE_FORWARD -> idle“.
+- [!] Laufzeit: NOT VERIFIED — no way to run and probe this project was recorded
+
+#### AC-3 — Geschwindigkeit live
+- [x] Code: Die Geschwindigkeit geht über `speedRef` mit dem nächsten 300-ms-Heartbeat raus (`JogControls.tsx:124-139`). Firmware `setSpeedInHz` (`motor.cpp:314, 332-339`). „Sofort“ heißt hier bis zu 300 ms, wie im Design festgelegt.
+- [!] Laufzeit: NOT VERIFIED — no way to run and probe this project was recorded
+
+#### AC-4 — Beide Tasten → Stopp
+- [x] Test: Zustand `blocked` getestet in `useJogState.test.ts:45-51, 99-155`
+- [!] Laufzeit: NOT VERIFIED — no way to run and probe this project was recorded
+
+#### AC-5 — Disconnect während Jog → Firmware stoppt
+- [x] Code: `onDisconnect` ruft bei verschlüsselter Verbindung `motorStop()` (`firmware/src/ble.cpp:142-144`). Die App zeigt das PROJ-1-Banner in `reconnecting` (`src/screens/RootScreen.tsx:203-211`).
+- [!] Laufzeit: NOT VERIFIED — no way to run and probe this project was recorded
+
+#### AC-6 — Dead-man's-switch ~1 s
+- [x] Code: Watchdog mit 1000 ms (`motor.cpp:417-436`), aufgerufen in `loop()`. `lastJogMillis` wird vor dem Start gesetzt (`motor.cpp:308`).
+- [!] Laufzeit: NOT VERIFIED — no way to run and probe this project was recorded
+
+#### AC-7 — Nicht verbunden → nicht bedienbar
+- [x] Code: `JogControls` wird nur in `connected` gerendert (`RootScreen.tsx:121-200`) und liefert ohne `device` null (`JogControls.tsx:149-151`). Der Platzhalter hat `pointerEvents="none"` (`RootScreen.tsx:206-209`).
+- [!] Laufzeit: NOT VERIFIED — no way to run and probe this project was recorded
+
+#### AC-8 — Halten an → Motor bleibt mit reduziertem Strom bestromt
+- [x] Code: `rms_current(1700, 0.6)` setzt IHOLD = 60 % (`motor.cpp:32, 256`, TMCStepper `TMCStepper.cpp:38-42`). Dazu `TPOWERDOWN(20)` und `iholddelay(8)` (`motor.cpp:257-258`). Halten an = `setAutoEnable(false)` (`motor.cpp:281`). Alle drei Bewegungsstarts bestromen: Jog `:317`, Auto-Fahrt `:571`, Zeitraffer `:635`. `motorStop()` schaltet nicht ab (`motor.cpp:377-415`).
+- [!] Hardware: NOT VERIFIED — ob 60 % den Schlitten auf geneigter Schiene halten und ob der Übergang ruckfrei ist, zeigt nur der Hardwaretest (Open Question in `spec.md`)
+- Siehe BUG-79 (Race beim Einschalten)
+
+#### AC-9 — Halten aus → stromlos
+- [x] Code: `setAutoEnable(true)` (`motor.cpp:281, 805`). FastAccelStepper schaltet direkt nach dem Stopp ab (`_off_delay_count` = 1, `FastAccelStepper.cpp:485-494`). Beim Umschalten im Stillstand sofort `disableOutputs()` (`motor.cpp:806`).
+- [!] Laufzeit: NOT VERIFIED — no way to run and probe this project was recorded
+
+#### AC-10 — Schalter unter dem Geschwindigkeitsregler, zeigt den Slider-Zustand, wirkt sofort
+- [x] Code/Test: `HoldSwitchRow` steht in `JogControls.tsx:172-179` direkt nach dem Regler. Label in `HoldSwitchRow.tsx:6`. Der Wert kommt aus Status-Byte 10 (`src/ble/client.ts:495`). Opcode 0x08 in `ble.cpp:245-254`. `motorHoldCheck()` wendet den Wunsch im nächsten `loop()` an (`motor.cpp:766-813`). Tests: `HoldSwitchRow.render.test.ts`, `client.test.ts:241-256, 311-335`, `useHoldSetting.test.ts`.
+- [!] Darstellung/Laufzeit: NOT VERIFIED — kein Viewport, kein Gerät
+- Siehe BUG-78 (Schalter während eines Video-Takes bedienbar) und BUG-77 (Anzeige bei schnellem Umschalten)
+
+#### AC-11 — Einstellung bleibt über Abbruch/Neustart auf dem Slider
+- [x] Code: NVS `slider`/`hold` wird beim Boot gelesen (`motor.cpp:279-281`) und beim Anwenden geschrieben, nur wenn sich der Wert ändert (`:789-791`). `onDisconnect` lässt den Wert in Ruhe (`ble.cpp:122-151`).
+- [!] Neustart am Gerät: NOT VERIFIED — no way to run and probe this project was recorded
+- Siehe BUG-80 (Schreibergebnis ungeprüft, Wunsch vor dem Speichern gemeldet) und BUG-81 (Fremdgerät, Flash-Verschleiß)
+
+#### AC-12 — Auslieferungszustand: an, aber erst mit der ersten Fahrt bestromt
+- [x] Code: Default `getBool(..., true)` (`motor.cpp:280`). EN steht beim Boot auf HIGH (`motor.cpp:245-246`). `setAutoEnable(false)` fasst den Pin nicht an (`FastAccelStepper.cpp:596-601`). Bestromt wird erst über `energizeIfHolding()` (`motor.cpp:221-225`).
+- [!] Laufzeit: NOT VERIFIED — no way to run and probe this project was recorded
+
+## Edge-Cases-Status
+
+#### EC-1 — Finger aus dem Button gezogen = Loslassen
+- [x] Code: `Pressable onPressOut` (`JogControls.tsx:182-207`), Retention-Offset 40 px (`JogControls.tsx:28`, bewusst wegen BUG-17)
+- [!] Touch am Gerät: NOT VERIFIED — kein Gerät
+
+#### EC-2 — Beide Tasten, keine Richtung hat Vorrang
+- [x] Test: `useJogState.test.ts:45-56`. `directionFor(blocked) = null` (`JogControls.tsx:131-134`).
+
+#### EC-3 — Abbruch während Jog → Firmware stoppt
+- [x] Code (Garantie): `ble.cpp:142-144`
+- [!] Laufzeit: NOT VERIFIED — no way to run and probe this project was recorded
+
+#### EC-4 — Kein Halte-Signal trotz bestehender Verbindung → Stopp
+- [x] Code (Garantie): Watchdog `motor.cpp:417-436`, unabhängig vom Verbindungsstatus
+- [!] Laufzeit: NOT VERIFIED — no way to run and probe this project was recorded
+
+#### EC-5 — Nach Reconnect gestoppter Ausgangszustand
+- [x] Code: Unmount/Remount über den Zweig `reconnecting` (`RootScreen.tsx:203-211`), Startzustand `idle`
+- [!] Laufzeit: NOT VERIFIED — no way to run and probe this project was recorded
+
+#### EC-6 — Umschalten während einer Fahrt → gilt ab dem nächsten Stopp
+- [x] Code (Garantie): Der BLE-Callback merkt den Wunsch nur vor (`motor.cpp:759-764`). `motorHoldCheck()` lässt ihn liegen, solange `isRunning()` gilt (`motor.cpp:785-787`).
+- [ ] BUG-78: Im Vor- und Nachlauf eines Video-Takes sowie in den Pausen zwischen Zeitraffer-Schritten steht der Motor. Ein Umschalten wirkt dort sofort, mitten in der für den Nutzer laufenden Fahrt.
+
+#### EC-7 — Schutz-Sperre: stromlos, Schalter nicht bedienbar
+- [x] Code/Test (Garantie): `motorSetHold()` ignoriert den Befehl bei Sperre (`motor.cpp:759-762`). `motorHoldCheck()` verwirft Wünsche und schaltet im Stillstand erneut ab (`:770-780`), im selben `loop()`-Task wie `motorLockout()` (`main.cpp:60, 64`). `motorLockout()` setzt zusätzlich `toff(0)` (`motor.cpp:735`). App: `holdLocked = batteryLocked` (`RootScreen.tsx:167`). Test `HoldSwitchRow.render.test.ts` „is not operable while disabled (EC-7)“.
+- [!] Laufzeit: NOT VERIFIED — no way to run and probe this project was recorded
+
+#### EC-8 — Abbruch im Stillstand → Motor hält weiter
+- [x] Code (Garantie): `onDisconnect` ruft nur `motorStop()` (`ble.cpp:142-144`). Das schaltet im Stillstand nicht ab (`motor.cpp:395-414`). Auch das STOP nach dem Reconnect (`ConnectionProvider.tsx:161`) schaltet nicht ab.
+- [!] Laufzeit: NOT VERIFIED — no way to run and probe this project was recorded
+
+#### EC-9 — Ausbleibende Bestätigung → nach Reconnect gilt der gemeldete Zustand
+- [x] Code/Test: `useSliderStatus` setzt bei `device = null` auf `holdAtStandstill: null` zurück (`useSliderStatus.ts:56-60`). Der Remount verwirft `pending`. Der Wert kommt per Notify-on-Subscribe (`ble.cpp:276-288`). Tests `useHoldSetting.test.ts`, darunter neu: „never keeps the failed request, even when the slider reports no value (EC-9)“.
+- [!] Laufzeit: NOT VERIFIED — no way to run and probe this project was recorded
+
+### Design-Garantien gegen den Code (alle vorhanden)
+- [x] Umschalten nur im `loop()`-Task (`motor.cpp:759-813`, `main.cpp` `loop()`)
+- [x] SET_HOLD mit Länge ≠ 2 oder Wert > 1 wird ignoriert (`ble.cpp:249`, vom Owner nachgeprüft)
+- [x] Flash-Schreiben nur bei echter Änderung (`motor.cpp:789`)
+- [x] Payload 11 Byte, Byte 10 Bit 0 (`ble.cpp:85`). Der Diff-Check deckt 11 Byte ab (`ble.cpp:435-448`).
+- [x] Der Parser liest Byte 10 nur bei ≥ 11 Byte. Bei 10 Byte → `null`, Schalter ausgeblendet (`client.ts:495`, `JogControls.tsx:172`, `client.test.ts:326`).
+- [x] Pending-Fallback 1,5 s (`useHoldSetting.ts:11, 40-51`)
+- [x] FAS-Falle mit dem Auto-Disable-Zähler abgefangen (`motor.cpp:800-803`, `FastAccelStepper.cpp:723-726`)
+
+## Security-Audit-Ergebnisse
+
+Die Angriffsfläche ist die BLE-GATT-Schnittstelle des ESP32 (kein HTTP, kein Login). **Verifiziert: 5 · NOT VERIFIED: 5.**
+
+- [x] Schreibschutz: Die Command-Characteristic verlangt Verschlüsselung (`WRITE_ENC`, `ble.cpp:404-406`). SET_HOLD läuft darüber. Einschränkung siehe BUG-81: Just-Works-Verschlüsselung ist für jedes Gerät erreichbar.
+- [x] Eingabevalidierung: Zu kurze, zu lange und ungültige SET_HOLD-Writes werden ignoriert (`ble.cpp:249-252`), leere Writes verworfen (`ble.cpp:160`). Kein Lesen außerhalb der Puffergrenzen.
+- [x] App-Parser: Byte 10 nur bei Länge ≥ 11, reservierte Bits ausmaskiert (`client.ts:495`). Kein Lesen außerhalb der Grenzen.
+- [x] Sperre nicht umgehbar: SET_HOLD wird während der PROJ-6-Sperre ignoriert, der Treiber bleibt stromlos (`motor.cpp:759-780, 735`).
+- [x] Keine Secrets: Suche über `src`, `firmware/src`, `android/app/src` und die Strings des Release-Bundles (`index.android.bundle`) nach Key-Mustern → keine Treffer. `ios/.xcode.env` gemäß Regel nicht gelesen.
+- [!] Rate limiting: NOT VERIFIED — nicht implementiert. Für SET_HOLD hat das Folgen, siehe BUG-81.
+- [!] Brute force / Enumeration / Massen-Signup: NOT VERIFIED — nicht anwendbar, keine Credentials und keine Konten. Pairing ist Just Works ohne Passkey.
+- [!] Credentials in der URL: NOT VERIFIED — nicht anwendbar, keine Formulare oder URLs
+- [!] Fuzzing/Flut gegen die echte GATT-Schnittstelle: NOT VERIFIED — no way to run and probe this project was recorded
+- [!] `[user]`-Tasks: keine in `tasks.md`, nichts zu prüfen
+
+## Regression (Deployed-Nachbarn)
+
+- [x] **PROJ-1:** `ConnectionProvider` und `connectionReducer` sind nicht im Diff, ihre Tests sind grün. Bytes 0–9 des Status sind unverändert (`ble.cpp:58-85`). Disconnect-Stopp unverändert (`ble.cpp:142-144`).
+- [x] **PROJ-3:** `motorAutoDrive` bestromt vor `moveTo` (`motor.cpp:571`). Stopp und Abbruch unverändert, Suite grün. **Aber:** BUG-78 widerspricht AC-9/AC-28.
+- [x] **PROJ-4:** Preset-Code nicht im Diff, `usePresets.test.ts` grün, `motorSetEndFromDistance` unverändert
+- [x] **PROJ-5:** `motorTimelapseMoveTo` bestromt (`motor.cpp:635`). Gegenseitiger Ausschluss und Suite grün.
+- [x] **PROJ-6:** `motorLockout` unverändert (`motor.cpp:714-736`). `holdLocked` hängt an `batteryLocked`. Die 10-Byte-Payload wird weiter geparst (`client.test.ts`). Siehe BUG-83.
+- [!] Laufzeit aller Nachbarn: NOT VERIFIED — no way to run and probe this project was recorded
+
+## Unit-Tests (Step 6)
+
+`src/components/useHoldSetting.test.ts`, drei neue Tests:
+1. Der Wunschwert bleibt stehen, solange die Übertragung noch läuft, auch über die 1,5-s-Wartezeit hinaus.
+2. Kommt vor der Bestätigung noch ein Status mit dem alten Wert, springt der Schalter nicht zurück.
+3. Nach einem Sendefehler bleibt kein alter Wunschwert stehen, auch wenn der Slider `null` meldet (EC-9).
+
+Rot-Prüfung durchgeführt:
+- Die Guards im Hook wurden gebrochen: Timer unabhängig vom Sendeerfolg, Pending bei jedem Status löschen, Pending bei Sendefehler nicht löschen. Ergebnis: Test 1 und 2 rot, zusammen mit 2 bestehenden Tests.
+- Der dritte Guard wurde einzeln gebrochen, weil eine andere Mutation ihn maskiert hatte. Dabei fiel auf, dass Test 3 in seiner ersten Fassung grün blieb. Er wurde deshalb umgeschrieben und ist danach rot geworden.
+- Danach wurde alles wiederhergestellt, Ergebnis 9/9 grün. Der Hook ist unverändert (`git status`: nur die Testdatei geändert).
+
+Zusätzlich mit einer Wegwerf-Probe (gelöscht) BUG-77 reproduziert, siehe unten.
+
+## E2E-Tests
+
+- Status: **nicht gelaufen** (`/e2e-tests` für kritische Flows; bei probe `none` ohnehin nur am Gerät sinnvoll)
+
+## Menschlicher Hardware-Test (offen)
+
+Ohne diesen Test kann das Feature nicht Approved werden. Pro Punkt ein Schritt:
+
+1. **AC-12:** Slider frisch einschalten, ohne zu fahren. Lässt sich der Schlitten von Hand verschieben (stromlos)?
+2. **AC-8:** Schiene schräg aufstellen, schwerste Kamera drauf, Halten an, kurz joggen und loslassen. Bleibt der Schlitten stehen? Gibt es beim Stopp einen Ruck?
+3. **AC-9:** Halten aus, joggen, loslassen. Ist der Motor stromlos (Schlitten von Hand verschiebbar)?
+4. **AC-10:** Im Stillstand den Schalter umlegen. Wirkt es sofort (hält bzw. lässt los)?
+5. **AC-11:** Auf „aus“ stellen, Slider aus- und wieder einschalten, App neu verbinden. Zeigt der Schalter „aus“?
+6. **EC-6:** Während einer Jog-Fahrt umschalten. Fährt der Motor unverändert weiter, und gilt die Einstellung erst nach dem Stopp?
+7. **EC-8:** Halten an, im Stillstand Bluetooth am Handy ausschalten. Hält der Motor weiter?
+8. **Wärme/Akku (Open Questions):** 15–30 min halten lassen. Wie warm werden Motor und Treiber? Wie stark sinkt der Akkustand?
+9. **PROJ-5:** Zeitraffer auf schräger Schiene mit Halten an. Verschiebt sich das Bild kurz nach jedem Schritt (Stromabsenkung beginnt ca. 0,4 s nach dem Stopp)?
+10. **PROJ-3:** Fahrt mit Video und Ton, Halten an. Ist der Haltestrom auf der Tonspur hörbar (Pfeifen/Brummen)?
+11. **AC-1–AC-7 (Kurz-Regression):** Jog vor/zurück, loslassen, beide Tasten, Bluetooth aus während der Fahrt. Alles wie bisher?
+
+## Nicht verifiziert in diesem Lauf
+
+- [!] Laufzeitverhalten aller AC-1–12 und EC-1–9 — no way to run and probe this project was recorded (`probe.kind: none`, App und Firmware)
+- [!] Hardwarewerte: Haltemoment bei 60 %, Ruckfreiheit, Wärme, Akkulaufzeit — Open Questions der Spec, nur am Gerät
+- [!] Darstellung des Schalters, Touch-Verhalten (EC-1) — kein Viewport, kein Gerät
+- [!] Firmware-Tests — no test command recorded for layer firmware
+- [!] Fuzzing/Flut gegen die GATT-Schnittstelle, Fremdgerät-Szenarien — kein Gerät
+- [!] Rate limiting — nicht implementiert (siehe BUG-81)
+- [!] Seiteneffekte auf PROJ-3 (Ton), PROJ-5 (Bildverschiebung), PROJ-6 (Spannungsmessung) — nur am Gerät messbar
+
+## Bugs Found
+
+#### BUG-78: Halte-Schalter während eines Video-Takes (Vor-/Nachlauf) und in Zeitraffer-Pausen bedienbar, wirkt dort sofort
+- **Severity:** Medium
+- **Betroffen:** PROJ-2 EC-6, PROJ-3 AC-9 und AC-28 (Deployed). Die PROJ-2-Spec behauptet „deren Specs ändern sich dadurch nicht“.
+- **Steps to Reproduce:**
+  1. Halten an, schräge Schiene, „Video aufnehmen“ an, Auto-Fahrt auslösen
+  2. Im 2-s-Vorlauf (`useVideoDrive.ts:70`, `PREROLL_MS`) den Schalter auf „aus“ stellen
+  3. Erwartet: Laut PROJ-3 AC-9/AC-28 ist während der Fahrt nur der Stopp-Button bedienbar. Laut PROJ-2 EC-6 gilt die Änderung erst nach dem Stopp.
+  4. Tatsächlich: Der Schalter ist bedienbar (`RootScreen.tsx:164-167`, `holdLocked` nur `batteryLocked`). Die Firmware sieht `isRunning() == false` und schaltet im nächsten `loop()` sofort stromlos (`motor.cpp:785-807`). Der Schlitten kann mitten im aufgenommenen Take wegrutschen; bei „an“ ist ein Ruck möglich. Dasselbe passiert in den Pausen zwischen Zeitraffer-Schritten.
+- **Ursache:** Entscheidung im Design („Schalter bleibt während Auto-Fahrt/Zeitraffer bedienbar“, `design.md:189, 242`). Sie geht davon aus, dass die Firmware die Fahrt erkennt, aber Vor-/Nachlauf und Zeitraffer-Pausen meldet die Firmware nicht als Fahrt.
+- **Lösungsrichtungen:** (a) Schalter wie die übrigen Bedienelemente sperren, sobald `disabled` gilt (einfachste Variante, Alternative aus dem Design), dann EC-6 per `/refine` anpassen. (b) Bedienbar lassen, aber App-seitig bis zum Ende von Take/Sequenz aufschieben. (c) PROJ-3 AC-9/AC-28 per `/refine` lockern. Entscheidet der Nutzer.
+- **Priority:** Vor dem Deploy beheben
+
+#### BUG-77: Schnelles Mehrfach-Umschalten — veraltete Antworten bestimmen die Anzeige
+- **Severity:** Low
+- **Steps to Reproduce (per Wegwerf-Test reproduziert):** `reported = false`, toggle(true) → Sendung A hängt; toggle(false), toggle(true). Dann scheitert A verspätet. Ergebnis der Probe: vorher `value = true`, danach `value = false` mit `sendFailed = true`, obwohl die neueste Sendung noch läuft. Ursache: `useHoldSetting.ts:57-72` ordnet Antworten keiner Anfrage zu.
+- Verwandt (Acceptance-Lane): Wer schnell aus und wieder an schaltet, löscht den Pending-Wert sofort (`useHoldSetting.ts:33-38`). Kommen beide Befehle in getrennten `loop()`-Durchläufen an, wird der Motor kurz stromlos geschaltet; auf schräger Schiene ist ein minimales Rutschen möglich.
+- Am Ende stimmt der Zustand, weil der gemeldete Wert korrigiert.
+- **Priority:** Nice to have
+
+#### BUG-79: Race beim Einschalten von „Halten“ gegen einen gleichzeitigen Fahrtstart
+- **Severity:** Low
+- **Beschreibung:**
+  - `motorHoldCheck()` prüft `isRunning()` (`motor.cpp:785`) und führt dann `setAutoEnable(false)` → `disableOutputs()` → `enableOutputs()` aus (`:800-803`). Das ist nicht atomar gegenüber einem Start aus dem NimBLE-Task.
+  - Startet in diesem Fenster eine Fahrt (mit noch `holdApplied == false`, also ohne `energizeIfHolding`), zieht `disableOutputs()` EN mitten im Lauf hoch, denn ohne Auto-Enable verweigert es nicht mehr (`FastAccelStepper.cpp:700`).
+  - Folge: Schritte gehen verloren und die Position weicht ab (PROJ-3 AC-8). Das Fenster liegt im Mikrosekunden-Bereich. Der Zweig „aus“ ist robust.
+- **Priority:** Nice to have
+
+#### BUG-80: Die Persistenz der Einstellung ist nicht abgesichert
+- **Severity:** Low
+- **Beschreibung:**
+  - (1) Die Rückgabewerte von `prefs.putBool()` (`motor.cpp:790`) und `prefs.begin()` (`:279`) werden ignoriert. Trotzdem wird `holdApplied` gesetzt und gemeldet. Bei einem NVS-Fehler gilt nach dem Neustart still der alte Wert.
+  - (2) Ein Wunsch während einer Fahrt wird sofort als Status gemeldet (`motor.cpp:682-684`), gespeichert aber erst beim nächsten Stillstand. Wird der Slider vor dem Fahrtende ausgeschaltet, gilt der alte Wert, obwohl die App den neuen gezeigt hat.
+  - Beides berührt AC-11 am Rand.
+- **Priority:** Nice to have
+
+#### BUG-81: Fremdgerät kann die Einstellung dauerhaft ändern und den Flash ungebremst beschreiben
+- **Severity:** Low (Erweiterung des bereits akzeptierten Restrisikos „Pairing steht jedem offen“, `design.md:229`)
+- **Beschreibung:**
+  - NimBLE verschlüsselt den Link auch dann, wenn das Speichern des Bonds abgelehnt wird (`ble_sm.c:615, 619, 1027-1037`). Damit ist `WRITE_ENC` für jedes Gerät in Reichweite erfüllt.
+  - Neu gegenüber dem bisherigen Risiko: Die Einstellung überlebt einen Neustart. Auf schräger Schiene rutscht die Kamera dann nach dem nächsten Stopp weg.
+  - Es gibt keine Drosselung. Abwechselnd `08 01`/`08 00` per Write-without-response löst pro `loop()` einen NVS-Commit aus (`motor.cpp:789-791`). Grob 10⁷–10⁸ Writes bis zum Flash-Verschleiß, das wären Tage Dauerangriff. Dieselbe Partition hält die Bonds.
+  - Wiederholtes `08 01` erzeugt außerdem jedes Mal einen kurzen stromlosen Impuls (`motor.cpp:800-803`).
+- **Steps to Reproduce (nicht ausgeführt, kein Gerät):** Zweites Handy mit nRF Connect → Just Works → Write `08 00` auf `6e400002-…` → Neustart → Status-Byte 10 = `0x00`
+- **Priority:** Nice to have
+
+#### BUG-82: Ein Umschaltwunsch kann zwischen zwei Tasks verloren gehen
+- **Severity:** Low
+- **Beschreibung:** `if (holdRequest == request) holdRequest = -1;` (`motor.cpp:810-812`) ist nicht atomar. Ein `motorSetHold()` aus dem NimBLE-Task genau dazwischen wird überschrieben. Die App fällt nach 1,5 s auf den gemeldeten Wert zurück, EC-9 bleibt gewahrt, aber das Umschalten wird still verworfen. Das Fenster ist wenige Instruktionen breit.
+- **Priority:** Nice to have
+
+#### BUG-83: Die Akku-Messung „im Stillstand“ ist mit Halten an jetzt eine Messung unter Last
+- **Severity:** Low (unbekannte Größe, geschätzt einige 10 mV)
+- **Beschreibung:**
+  - PROJ-6 misst nur im Stillstand, weil die Spannung unter Last sinkt (`battery.cpp:173-178`). Im Werkszustand fließen im Stillstand jetzt ca. 1 A Haltestrom.
+  - Folgen: Die Anzeige liest niedriger, und die 9,3-V-Schwelle greift früher (konservative Richtung). `kCalibrationFactor` wurde am 2026-09-30 ohne Haltestrom kalibriert.
+  - Weder Spec noch Design erwähnen das.
+- **Steps to Reproduce:** Akkuspannung im Stillstand mit Halten an und aus vergleichen (Hardwaretest)
+- **Priority:** Nächster Durchgang / im Hardwaretest messen
+
+#### BUG-84: Doku- und Kommentar-Drift
+- **Severity:** Low
+- **Beschreibung:**
+  - Der Kommentar im `default`-Zweig von `firmware/src/ble.cpp:255-259` zählt die Opcodes nur bis `0x07`.
+  - PROJ-6 `design.md:78, 200, 212` beschreibt den Status mit 10 Byte, der aktuelle Stand steht in PROJ-2 `design.md` bzw. im Stack-Pack.
+  - `docs/stacks/firmware-esp32-tmc2209.md:117` behauptet, weitere Opcodes seien „noch nicht festgelegt“ (vorbestehend).
+  - Der Ruhestrom in PROJ-6 `design.md:210` (ca. 100 mA) berücksichtigt den Haltestrom nicht.
+- **Priority:** Nice to have
+
+### Auch bemerkt (vorbestehend, nicht PROJ-2)
+- Der Release-APK ist mit dem öffentlichen Debug-Keystore signiert (`android/app/build.gradle:103`)
+- `gLastStatusPayload`/`gHasSentStatus` werden ohne Synchronisation aus zwei Tasks beschrieben (`ble.cpp:288-289, 448-449`)
+- `bleSetup()` läuft vor `motorSetup()` (`main.cpp:42-43`). Ein sehr frühes Subscribe würde `hold = true` vor dem Laden aus dem NVS melden. Praktisch kaum erreichbar.
+
+## Zusammenfassung
+
+- **Acceptance Criteria:** 12/12 im Code bzw. per Test belegt, 0 am Gerät verifiziert. EC: 9/9 im Code belegt, 1 davon mit Bug (EC-6 → BUG-78).
+- **Bugs:** 8 neu (0 Critical, 0 High, 1 Medium, 7 Low)
+- **Security:** 5 Checks verifiziert, 5 NOT VERIFIED (Rate limiting nicht implementiert; Brute force, URL-Credentials nicht anwendbar; Laufzeit-Fuzzing ohne Gerät; keine `[user]`-Tasks)
+- **Production Ready:** **NEIN — not verified.** Es gibt keinen Critical- oder High-Bug, aber kein einziges AC wurde am echten Slider ausgeführt (`probe.kind: none`). Der menschliche Hardware-Test oben fehlt, und BUG-78 (Medium) sollte vor dem Deploy entschieden werden.
+- **Empfehlung:** BUG-78 entscheiden und beheben (`/build`, ggf. vorher `/refine`), dann den Hardware-Test durchführen und protokollieren.
+
+> „Production Ready: JA“ würde nur „keine Critical/High-Bugs“ bedeuten, nicht „alles geprüft“.
+
+---
+
+# Frühere Läufe (2026-09-23 bis 2026-09-30, vor dem `/refine` vom 2026-10-07)
+
+> Unverändert übernommen. Diese Ergebnisse beziehen sich auf den Vertrag mit AC-1 bis AC-7 und EC-1 bis EC-5. Sie wurden in diesem Lauf **nicht** erneut abgehakt.
+
+
 **Getestet:** 2026-09-23
 **App-URL:** nicht ausführbar hier (`probe.kind: none`, sowohl Top-Level als auch Layer `firmware`) — jedes Laufzeit-AC ist unten `[!] NOT VERIFIED`, solange kein menschlicher Test protokolliert ist.
 **Tester:** 3 unabhängige `qa-engineer`-Subagenten (Acceptance / Security / Regression), jeweils in frischem Kontext ohne Kenntnis des Builds; zusammengeführt von dieser Session.
@@ -7,11 +283,11 @@
 
 > Legende: `[x]` in diesem Lauf verifiziert (Beleg erforderlich) · `[ ] BUG` als fehlerhaft verifiziert · `[!] NOT VERIFIED` in diesem Lauf nicht prüfbar (Grund erforderlich)
 
-## Re-Verifikation (2026-09-23, gleicher Tag)
+### Re-Verifikation (2026-09-23, gleicher Tag)
 
 Nach dem ersten Lauf hat der Nutzer entschieden: alle vier Medium-Bugs fixen, inklusive BLE-Bonding für BUG-3/BUG-4. `/build`-Fixes liefen parallel auf disjunkten Dateien (`git diff --stat` gegen den QA-Commit `5977e07`: `src/components/useJogState.ts`, `src/components/useJogState.test.ts`, `src/components/JogControls.tsx`, `firmware/src/motor.cpp`, `firmware/src/ble.cpp`, plus `design.md`/Stack-Pack-Doku). BUG-1 bis BUG-4 unten sind entsprechend als **behoben** markiert, mit der jeweiligen Evidenz aus der Fix-Session. Die übrigen Abschnitte (AC-1/2/5/6/7, EC-1/3/4/5, BUG-5..9) sind **unverändert seit dem ersten Lauf, nicht erneut geprüft** — der Fix hat diese Dateien/Verhaltensweisen nicht berührt. Suite danach: `npm test` → **5 Suites / 74 Tests, alle grün** (war 61; +13 aus der erweiterten `useJogState.test.ts`, 37 statt 24 Tests). `npx tsc --noEmit` → exit 0.
 
-## Menschlicher Hardware-Test (2026-09-23, ESP32 + echter Slider)
+### Menschlicher Hardware-Test (2026-09-23, ESP32 + echter Slider)
 
 Firmware kompiliert und geflasht (`pio run -e esp32dev -t upload`), App auf echtem Android-Gerät. Checkliste gezielt in dieser Reihenfolge durchgegangen, damit zuerst die beiden riskantesten offenen Punkte dieser Session getestet werden:
 1. **Handy vor dem Test vom Slider entkoppelt**, dann verbunden, sofort eine Jog-Taste gehalten → **funktioniert direkt beim ersten Versuch, keine Verzögerung/kein Kopplungsdialog bemerkt** (testet BUG-10s Fix: der Fire-and-forget-STOP nach dem Connect trifft das Timing zuverlässig)
@@ -23,7 +299,7 @@ Firmware kompiliert und geflasht (`pio run -e esp32dev -t upload`), App auf echt
 
 Nutzer-Bestätigung: „alles funktioniert", mit expliziter Einzelbestätigung für Punkt 1 (sofort, keine Verzögerung) und Punkt 6 (von selbst gestoppt) auf gezielte Rückfrage. AC-7 (Steuerung nur im `connected`-Zustand sichtbar) beiläufig durch den wiederholten Connect/Disconnect-Zyklus mitbestätigt, nicht separat abgefragt. **Nicht explizit getestet:** EC-1 (Finger aus dem Button-Bereich ziehen) und EC-5 (Zustand nach einem Reconnect) — beide bleiben `[!] NOT VERIFIED`, niedriges Risiko, aus der Quelle plausibel abgesichert (siehe unten).
 
-## Test-Suite (einmalig vor dem Fan-out gelaufen)
+### Test-Suite (einmalig vor dem Fan-out gelaufen)
 
 ```
 > CameraSliderApp@0.0.1 test
@@ -42,7 +318,7 @@ Danach von dieser Session ergänzt: `src/ble/client.test.ts` (4 neue Unit-Tests 
 
 Layer `firmware`: `[!] NOT VERIFIED — no test command recorded for layer firmware` (`.ai-eng-kit` → `layers[0].commands.test: null`, vorbestehende Lücke, nicht durch PROJ-2 entstanden).
 
-## Acceptance-Criteria-Status
+### Acceptance-Criteria-Status
 
 #### AC-1 — Taste halten → Slider fährt in der entsprechenden Richtung
 - [x] Menschlich verifiziert am echten Gerät, 2026-09-23 — funktioniert direkt beim ersten Versuch nach frischem Entkoppeln (siehe „Menschlicher Hardware-Test" oben, Punkt 1). Plumbing zusätzlich aus der Quelle bestätigt: `JogControls.tsx:109/116` (onPressIn) → `useJogState.ts:34-37` (idle→jogging_*) → `JogControls.tsx:67-84` (sofortiger Send + 300ms-Intervall) → `src/ble/client.ts:144-160` (Opcode 0x01, korrektes Payload) → `firmware/src/ble.cpp:61-71` (Längenprüfung + `motorJog()`) → `firmware/src/motor.cpp:83-105` (kontinuierlicher Lauf, kein `moveTo()`).
@@ -73,7 +349,7 @@ Layer `firmware`: `[!] NOT VERIFIED — no test command recorded for layer firmw
 - [x] Beiläufig menschlich bestätigt, 2026-09-23 — durch den wiederholten Connect/Disconnect-Zyklus während der Checkliste, nicht separat abgefragt.
 - [x] Verifiziert aus der Quelle: `RootScreen.tsx:34-61` rendert `<JogControls />` ausschließlich im `case 'connected'`; alle sieben übrigen Status (vollständiger Switch über `connectionReducer.ts:11-19`) zeigen PROJ-1-Notices bzw. den gesperrten Platzhalter (`reconnecting`). Zweiter Riegel: `JogControls.tsx:86-88` rendert `null` ohne `device`, `ConnectionProvider.tsx:274-281` liefert `device` nur im Status `connected`.
 
-## Edge-Cases-Status
+### Edge-Cases-Status
 
 #### EC-1 — Finger aus dem Button-Bereich gezogen zählt als Loslassen
 - [!] NOT VERIFIED — kein Touch-Gerät, kein Simulator. Aus der Quelle bestätigt ist nur, dass die App dem `Pressable`-Plattform-Default nicht in die Quere kommt (`JogControls.tsx:108-121`, kein `pressRetentionOffset`/`hitSlop`-Override).
@@ -94,7 +370,7 @@ Layer `firmware`: `[!] NOT VERIFIED — no test command recorded for layer firmw
 #### EC-5 — Reconnect nach Abbruch während Jog → App zeigt gestoppten Ausgangszustand, keine optisch aktive Taste
 - [x] Verifiziert aus der Quelle: `RootScreen.tsx` mountet `JogControls` nur im `connected`-Zweig — beim Verlassen (z. B. nach `reconnecting`) wird die Komponente **unmontiert**, nicht nur versteckt; `useJogState.ts` startet bei jedem Mount neu mit `useReducer(jogStateReducer, 'idle')`. Kein Zustand überlebt den Disconnect.
 
-## Security-Audit-Ergebnisse
+### Security-Audit-Ergebnisse
 
 _Dieses Feature hat keine HTTP-Oberfläche, keine Accounts, keine Datenbank (`platform: mobile`, `stack.backend: localstorage`). Die Standard-Checkliste greift größtenteils nicht — siehe die Zeilen unten, jede einzeln begründet statt stillschweigend übersprungen. Der reale Angriffsvektor ist der BLE-GATT-Kommandokanal._
 
@@ -113,12 +389,12 @@ _Dieses Feature hat keine HTTP-Oberfläche, keine Accounts, keine Datenbank (`pl
 - [!] **N-2 — akzeptierte Grenze, nicht behoben** (Medium, von der Re-Verifikation gefunden): Nach dem Bonden ist der Kommandokanal nicht an eine bestimmte Verbindung gebunden — mehrere gebondete Geräte könnten gleichzeitig JOG/STOP schreiben (last-writer-wins), und ein zweites gebondetes Gerät könnte den Watchdog durch eigene Heartbeats am Leben halten. Konsistent mit der Just-Works-Entscheidung oben (opportunistischer, nicht adversarieller Schutzanspruch) bewusst nicht extra abgesichert.
 - [x] **Just-Works-Bondierung menschlich verifiziert, 2026-09-23**: Handy vor dem Test entkoppelt, erster Jog-Versuch funktionierte direkt — kein spürbarer System-Dialog, kein Disconnect/Reconnect-Zyklus ausgelöst. Damit ist sowohl das App-seitige Fire-and-forget-STOP (I-1-Fix) als auch die Bondierung selbst am echten Gerät bestätigt, nicht nur aus der Quelle.
 
-## E2E-Tests
+### E2E-Tests
 _Optionale Schicht — von `/e2e-tests` für kritische Kernabläufe geschrieben._
 
 - Status: **nicht gelaufen** (führe `/e2e-tests` für kritische Abläufe aus)
 
-## Nicht verifiziert in diesem Lauf
+### Nicht verifiziert in diesem Lauf
 
 Nach dem menschlichen Hardware-Test (siehe oben) bleiben nur noch wenige, klar begrenzte Punkte offen:
 
@@ -130,9 +406,9 @@ Nach dem menschlichen Hardware-Test (siehe oben) bleiben nur noch wenige, klar b
 - [!] **Optik/Layout** (Button-Größen, Slider-Darstellung, dunkles Theme) — funktional bestätigt, aber kein systematischer visueller Check (kein Browser/Viewport-Tool hier verfügbar).
 - [!] **Layer `firmware`, automatisierte Tests** — no test command recorded for layer firmware (`.ai-eng-kit` → `layers[0].commands.test: null`, vorbestehende Lücke, kein PROJ-2-spezifisches Problem).
 
-## Bugs Found
+### Bugs Found
 
-### Previously Fixed
+#### Previously Fixed
 _Volle Reproduktions-/Begründungsdetails bleiben in den AC/EC-Ergebnissen und im Security-Audit oben erhalten — hier nur der Kurzverweis._
 
 | ID | Severity | Kurzbeschreibung |
@@ -182,7 +458,7 @@ _Volle Reproduktions-/Begründungsdetails bleiben in den AC/EC-Ergebnissen und i
 #### BUG-14/15: Veraltete Kommentare (Low, nebenbei mitkorrigiert)
 - `src/ble/client.ts`s JSDoc „plain GATT connect, no bonding/pairing" und `firmware/src/ble.cpp`s `kCommandCharUUID`-Kommentar „WRITE, future use" — beide während dieser Re-Verifikation direkt korrigiert (kein eigener Bug-Eintrag nötig, siehe Commit).
 
-## Zusammenfassung (nach menschlichem Hardware-Test, 2026-09-23)
+### Zusammenfassung (nach menschlichem Hardware-Test, 2026-09-23)
 - **Acceptance Criteria:** 7/7 verifiziert — alle sieben AC menschlich am echten Gerät bestätigt (AC-1, AC-2, AC-4, AC-5, AC-6 explizit getestet; AC-3, AC-7 ebenfalls bestätigt), zusätzlich alle aus der Quelle abgesichert
 - **Edge Cases:** 3/5 menschlich verifiziert (EC-2, EC-3, EC-4), 2/5 nur aus der Quelle (EC-1, EC-5 — nicht explizit getestet, niedriges Risiko)
 - **Bugs gefunden:** 13 gesamt (+ 2 nebenbei korrigierte Kommentare), **6 behoben** (BUG-1, BUG-2, BUG-3-Mechanik, BUG-4, BUG-10, BUG-11), **1 bewusst akzeptiert statt gefixt** (BUG-12), **1 als Prozess-Empfehlung offen** (BUG-13, `/refine PROJ-1`, blockiert PROJ-2 nicht), 0 Critical/High/Medium blockieren noch etwas, 5 Low weiterhin offen (BUG-5..9, alle "Nice to have")
@@ -193,7 +469,7 @@ _Volle Reproduktions-/Begründungsdetails bleiben in den AC/EC-Ergebnissen und i
 
 > "Production Ready: JA" heißt: kein Critical/High/Medium-Bug offen, und alle sieben Laufzeit-ACs wurden an echter Hardware durchgespielt. EC-1 und EC-5 wurden nicht separat abgefragt — aus der Quelle plausibel, niedriges Risiko, kein Blocker.
 
-## Nachtrag 2: BUG-16 — tatsächliche Ursache gefunden, jetzt echt geschlossen (2026-09-27)
+### Nachtrag 2: BUG-16 — tatsächliche Ursache gefunden, jetzt echt geschlossen (2026-09-27)
 
 Der erste Fix-Versuch (Write-with-Response, siehe Nachtrag oben) wurde ursprünglich als "bestätigt behoben" dokumentiert. Eine unabhängige `qa-engineer`-Re-Verifikation widersprach dem: Der eigene Diagnoseweg im Fix zeigte, dass der Fehler nach der Write-with-Response-Umstellung zunächst **weiterhin auftrat** und erst nach einem Firmware-Reflash (zur Diagnose, mit anderer Firmware) verschwand — die Bestätigung war durch den Reboot verfälscht, nicht durch den Fix belegt. Ein sauberer Retest (App- und Firmware-Stand unverändert seit dem letzten Reflash, kein Zwischen-Flash) hat das bestätigt: **der Fehler trat erneut auf.**
 
@@ -205,7 +481,7 @@ Der erste Fix-Versuch (Write-with-Response, siehe Nachtrag oben) wurde ursprüng
 - Die zuvor als Fix dokumentierte Write-with-Response-Umstellung (`src/ble/client.ts`) bleibt bestehen — sie ist weiterhin die richtige Entscheidung (Zustellbestätigung, Konsistenz mit dem restlichen Protokoll), war aber allein **nicht** die Ursache dieses Bugs.
 - **Lehre für zukünftige Hardware-Verifikationen:** ein Firmware-Reflash zwischen Fix und Bestätigungstest ist ein Confound — er setzt beliebigen RAM-Zustand zurück und kann einen Bug unabhängig vom eigentlichen Fix verschwinden lassen. Ein sauberer Bestätigungstest braucht denselben Firmware-/App-Stand, der auch tatsächlich committet wird, ohne Reflash dazwischen.
 
-## Nachtrag 3: BUG-17 — ScrollView stiehlt den Touch von den Jog-Tasten (2026-09-27)
+### Nachtrag 3: BUG-17 — ScrollView stiehlt den Touch von den Jog-Tasten (2026-09-27)
 
 Während desselben Hardware-Tests gemeldet: leichtes Verrutschen des Fingers auf der Vorwärts-/Rückwärts-Taste löste ein Stop aus, deutlich empfindlicher als erwartet.
 
@@ -225,7 +501,7 @@ Während desselben Hardware-Tests gemeldet: leichtes Verrutschen des Fingers auf
 
 **Betroffene Branches:** `feat/PROJ-5-zeitraffer-modus` (Commits `a4cf131` Firmware-Rückgabewert-Fix, `b715c90` pressRetentionOffset, `d49244c` ScrollView-Fix) — alle drei per Cherry-Pick auch auf `feat/PROJ-2-fix-jog-after-autodrive` (`30e1ed3`, `90eb197`, `88082df`).
 
-## Nachtrag 4: BUG-16-Fix vermutlich wirkungslos — Fehlerzweig mit dieser Bibliotheksversion praktisch unerreichbar (2026-09-27)
+### Nachtrag 4: BUG-16-Fix vermutlich wirkungslos — Fehlerzweig mit dieser Bibliotheksversion praktisch unerreichbar (2026-09-27)
 
 Eine zweite, unabhängige `qa-engineer`-Re-Verifikation (Auftrag: Code- und Firmware-Ebene prüfen, nicht die bereits erfolgte Hardware-Bestätigung wiederholen) hat den in Nachtrag 2 dokumentierten Fix bis in die vendorte `FastAccelStepper`-Bibliothek (0.31.8) zurückverfolgt und einen ernsten Einwand gefunden:
 
@@ -240,7 +516,7 @@ Eine zweite, unabhängige `qa-engineer`-Re-Verifikation (Auftrag: Code- und Firm
 - [!] **BUG-16 — Status zurückgesetzt auf offen (High), NOT VERIFIED ob der committete Fix wirkt.** Verifikation läuft weiter, siehe „Nächster Schritt" oben.
 - **`design.md` noch nicht nachgezogen** (von der Re-Verifikation ebenfalls gefunden): beschreibt BUG-16 weiterhin als durch Write-with-Response verursacht/behoben — nicht mehr aktuell, unabhängig vom Ausgang der laufenden Diagnose.
 
-## Nachtrag 5: Re-Verifikation nach Erhöhung der Höchstgeschwindigkeit 4000 → 8000 Steps/s (2026-09-29)
+### Nachtrag 5: Re-Verifikation nach Erhöhung der Höchstgeschwindigkeit 4000 → 8000 Steps/s (2026-09-29)
 
 **Scope (Re-Verifikation):** `git diff 0f08bd1..HEAD -- src firmware/src` (Commits `94ba380`, `5d65f78`). Im Code ändern sich nur `kJogSpeedMaxHz` (`firmware/src/motor.cpp:31`) und der App-Spiegel `MAX_SPEED_STEPS_PER_SEC` (`src/components/AutoDriveControls.tsx:33`); der Rest sind Kommentare, Test-Fixtures und Doku. Ein `qa-engineer`-Lauf mit allen drei Scopes (2 → 3 → 4), eingegrenzt auf den Diff — bewusst nicht der volle Fan-out, weil der Diff faktisch zwei Konstanten sind. Alles andere ist aus dem Bericht oben übernommen: _unverändert seit 2026-09-27, in diesem Lauf nicht neu geprüft_ (AC-4, AC-5, AC-7, EC-1, EC-2, EC-3, EC-5 — ihre Dateien liegen nicht im Diff).
 
@@ -267,7 +543,7 @@ Eine zweite, unabhängige `qa-engineer`-Re-Verifikation (Auftrag: Code- und Firm
 
 **Production-Ready: NEIN** — BUG-16 (High) ist weiterhin offen und BUG-18 (PROJ-3 AC-11) ist neu; zusätzlich Laufzeit nicht verifiziert. Status: **In Review**.
 
-## Nachtrag 6: BUG-16 — Fix am Gerät bestätigt, BUG-18 behoben (2026-09-29)
+### Nachtrag 6: BUG-16 — Fix am Gerät bestätigt, BUG-18 behoben (2026-09-29)
 
 - [x] **BUG-16 — vom Nutzer am echten Slider als behoben gemeldet** („bug16 behoben", 2026-09-29), nach Commit `4552ed5`. **Neue Ursachenvermutung und Fix:** `jogRunning` wurde nur von `motorStop()` zurückgesetzt; ein `moveTo()` (Auto-Fahrt/Zeitraffer), das einen als laufend markierten Jog überschrieb und dann ankam, ließ das Flag auf einem stehenden Stepper auf „läuft" stehen — jeder Herzschlag rief danach nur `applySpeedAcceleration()` auf. Jetzt: `motorJog()` setzt das Flag zurück, wenn `!stepper->isRunning()`, und `motorAutoDrive()`/`motorTimelapseMoveTo()` setzen `jogRunning = false` (`firmware/src/motor.cpp`). Der frühere Rückgabewert-Fix bleibt bestehen.
   - **Einschränkungen (ehrlich):** Die Ursache ist aus dem Code hergeleitet, nicht am Gerät nachgestellt (kein Serial-Log). Nach dem Flash lief der Test nicht auf einem lange laufenden Gerät — der Flash-Confound aus Nachtrag 4 gilt weiter, und die Stichprobengröße (Anzahl Durchläufe) ist nicht protokolliert. `[!]` Die Wirksamkeit ist damit vom Nutzer bestätigt, aber nicht durch einen unabhängigen `/qa`-Lauf verifiziert.
@@ -277,13 +553,13 @@ Eine zweite, unabhängige `qa-engineer`-Re-Verifikation (Auftrag: Code- und Firm
 
 **Status:** bleibt **In Review**, bis `/qa PROJ-2` (Re-Verifikation im Umfang der Fixes `4552ed5`, `655f28d`, `5feb442`) läuft. Kein Critical/High-Bug ist nach Stand des Nutzers offen.
 
-## Nachtrag 7: Unabhängige Re-Verifikation — BUG-16-Fix, DIR-Umkehr, 8000 Steps/s (2026-09-30)
+### Nachtrag 7: Unabhängige Re-Verifikation — BUG-16-Fix, DIR-Umkehr, 8000 Steps/s (2026-09-30)
 
 **Scope:** `git diff ea0b613..HEAD -- firmware/src src/ble src/components/JogControls.tsx src/components/useJogState.ts src/screens` → nur `firmware/src/motor.cpp` (`4552ed5` BUG-16, `5feb442` DIR-Umkehr). Weil `motor.cpp` von Jog, Auto-Fahrt und Zeitraffer geteilt wird: voller Fan-out mit drei `qa-engineer`-Lanes. `probe.kind: none` — Laufzeit/Hardware `[!] NOT VERIFIED — no way to run and probe this project was recorded`.
 
 **Test-Suite (einmalig, Owner):** `npm test` → 13 Suites, 210 Tests, 0 Fehler (`suite9.log`). Firmware kompiliert am HEAD (`pio run -e esp32dev`, SUCCESS, RAM 12,4 %, Flash 49,1 %, ohne Upload). Layer `firmware`: `[!] NOT VERIFIED — no test command recorded for layer firmware`.
 
-### BUG-16 — aus Code-Sicht geschlossen, Ursache korrigiert
+#### BUG-16 — aus Code-Sicht geschlossen, Ursache korrigiert
 - [x] **Geschlossen** — `motor.cpp:258-260` (`if (jogRunning && !stepper->isRunning()) jogRunning = false;`) behandelt jeden Pfad „Flag gesetzt, Stepper steht". Belegt per Host-Simulation der vendorten FastAccelStepper 0.31.8 (Queue-Attrappe): alter Herzschlag (`applySpeedAcceleration`) → 0 Schritte, neuer Herzschlag (`runForward`) → 3242 Schritte; im Dauerlauf ist `isRunning` in 0 von 200 Takten false, also kein Ruckeln/Neustart.
 - **Tatsächliche Ursache** (die Spur aus Nachtrag 4, jetzt belegt): `motorStop()` ruft `forceStop()` auch bei stehendem Motor (`motor.cpp:318`); das setzt `force_immediate_stop` (`FastAccelStepper.cpp:674-682`), das nur in `getNextCommand()` gelöscht wird und bei inaktiver Rampe gesetzt bleibt (`:373`). Das nächste `runForward()` liefert `MOVE_OK`, die Rampe endet aber ohne einen Schritt (`RampGenerator.cpp:128-141, 252-258`). Loslassen sendet wieder STOP → der Zustand hält sich selbst, bis Reboot/Flash — passt zu „dauerhaft ab einem Zeitpunkt" und „Reflash heilt es". `moveTo()` (Auto-Fahrt) ist nicht betroffen (5000/5000 Schritte).
 - Die in Nachtrag 6 und im Code-Kommentar (`motor.cpp:249-257, 489-491, 554`) genannte Ursache („`moveTo()` überschreibt einen laufenden Jog") ist **nicht erreichbar**: `motorAutoDrive()` und `motorTimelapseMoveTo()` lehnen bei laufendem Stepper ab (`motor.cpp:398, 514`). Die Zeilen `:491` und `:554` sind harmlos, aber praktisch wirkungslos.
@@ -320,7 +596,7 @@ Eine zweite, unabhängige `qa-engineer`-Re-Verifikation (Auftrag: Code- und Firm
 
 **Production-Ready: NOT READY — not verified.** Keine Critical/High-Bugs offen (BUG-16 aus Code-Sicht geschlossen). Offen: BUG-20 und BUG-21 (Medium). Der letzte protokollierte Hardware-Test aller PROJ-2-ACs (2026-09-23) liegt vor den Firmware-Änderungen; Freigabe nur über einen neu protokollierten Nutzer-Test. Status: **In Review**.
 
-## Nachtrag 8: Fix BUG-20/22/23 und protokollierter Nutzer-Test am Gerät (2026-09-30)
+### Nachtrag 8: Fix BUG-20/22/23 und protokollierter Nutzer-Test am Gerät (2026-09-30)
 
 - **Fix `a763cb3`:** `motorStop()` ruft `forceStop()` nur bei `stepper->isRunning()` (tatsächliche Ursache von BUG-16, behebt BUG-20); `lastJogMillis` wird vor dem Start gesetzt (BUG-23); Kommentare korrigiert. **Doku `8b33168`:** PROJ-2 `design.md` (richtige BUG-16-Ursache, DIR-Umkehr, Zeitstempel), Stack-Pack-Beispiel mit Polarität (BUG-22). Firmware kompiliert und geflasht (`pio run -e esp32dev -t upload`, SUCCESS).
 - **Protokollierter Nutzer-Test** — Checkliste an den Nutzer übergeben, Antwort „alles ok" für alle Punkte. Gerät: Android EB2103 (Debug-Build über Metro), Firmware-Stand `a763cb3`, ohne Neustart zwischen den Punkten:
@@ -335,7 +611,7 @@ Eine zweite, unabhängige `qa-engineer`-Re-Verifikation (Auftrag: Code- und Firm
   - [x] **AC-7** — nicht verbunden → Jog-Tasten nicht bedienbar — vom Nutzer am Gerät bestätigt, 2026-09-30
 - Einschränkung: Anzahl der Durchläufe nicht protokolliert; EC-1 (Finger herausziehen), EC-5 (Reconnect) nicht separat abgefragt. Der Fix `a763cb3` ist noch nicht durch einen unabhängigen `qa-engineer`-Lauf geprüft.
 
-## Nachtrag 9: Unabhängige Re-Verifikation des Fixes `a763cb3` — Freigabe (2026-09-30)
+### Nachtrag 9: Unabhängige Re-Verifikation des Fixes `a763cb3` — Freigabe (2026-09-30)
 
 **Scope:** `git diff 4034f4a..HEAD -- firmware/src features/PROJ-2-manuelle-steuerung-jog/design.md docs/stacks/firmware-esp32-tmc2209.md` (Commits `a763cb3`, `8b33168`). Ein `qa-engineer`-Lauf, alle drei Scopes (2 → 3 → 4), eingegrenzt auf den Diff und BUG-20/22/23. Firmware-Build am HEAD: SUCCESS (RAM 12,4 %, Flash 49,1 %, ohne Upload); Disassembly von `motor.cpp.o`; Host-Simulation gegen die vendorte FastAccelStepper 0.31.8 mit zeitgenauer Queue (Engine-Task alle 4 ms), alte und neue `motorStop()`-Variante im Vergleich. App-Suite vom Diff nicht betroffen (zuletzt `suite9.log`, 210 grün). Laufzeit: `[!] NOT VERIFIED — no way to run and probe this project was recorded`; der protokollierte Nutzer-Test steht in Nachtrag 8.
 

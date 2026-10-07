@@ -115,4 +115,42 @@ describe('useHoldSetting', () => {
     expect(mockSend).not.toHaveBeenCalled();
     expect(h.api.value).toBe(true);
   });
+
+  // Added by /qa 2026-10-07
+  it('keeps the requested value while the send is still in flight, beyond the timeout', async () => {
+    mockSend.mockReturnValue(new Promise(() => {}));
+    const h = setup(true);
+    act(() => h.api.toggle(false));
+    act(() => {
+      jest.advanceTimersByTime(HOLD_PENDING_TIMEOUT_MS * 3);
+    });
+    await act(async () => {});
+    expect(h.api.value).toBe(false);
+    expect(h.api.sendFailed).toBe(false);
+  });
+
+  it('does not snap back when a status with the old value arrives before the confirmation', async () => {
+    mockSend.mockResolvedValue(undefined);
+    const h = setup(true);
+    act(() => h.api.toggle(false));
+    await act(async () => {});
+    h.report(true);
+    expect(h.api.value).toBe(false);
+    h.report(false);
+    act(() => {
+      jest.advanceTimersByTime(HOLD_PENDING_TIMEOUT_MS);
+    });
+    expect(h.api.value).toBe(false);
+  });
+
+  it('never keeps the failed request, even when the slider reports no value (EC-9)', async () => {
+    mockSend.mockRejectedValue(new Error('gatt'));
+    const h = setup(true);
+    act(() => h.api.toggle(false));
+    await act(async () => {});
+    h.report(null);
+    expect(h.api.value).toBeNull();
+    h.report(true);
+    expect(h.api.value).toBe(true);
+  });
 });
