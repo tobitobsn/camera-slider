@@ -6,7 +6,7 @@
 > - Verfeinert von `/architecture`, sobald ein Feature designt wird.
 > - **Flughöhe:** Entitäten, Beziehungen und Besitzverhältnisse stehen hier (Produkt-Ebene). Spaltentypen, Indizes und exakte Fremdschlüssel werden pro Feature in dessen `design.md` entschieden — nicht hier.
 
-_Source: `/init`-Interview mit dem Nutzer, 2026-09-22. Kein Backend — reine lokale Datenstrukturen (AsyncStorage/SQLite) auf dem Handy, keine Datenbank-Tabellen._
+_Source: `/init`-Interview mit dem Nutzer, 2026-09-22. Kein Backend — reine lokale Datenstrukturen (AsyncStorage/SQLite) auf dem Handy, keine Datenbank-Tabellen. Ausnahme seit 2026-10-07: eine Geräte-Einstellung liegt auf dem Slider selbst (siehe unten)._
 
 ## Entitäten
 
@@ -14,6 +14,7 @@ _Source: `/init`-Interview mit dem Nutzer, 2026-09-22. Kein Backend — reine lo
 |---------|-----------|---------------------------|
 | Preset | Ein gespeichertes Fahrprofil (Name, Distanz + Richtung zwischen Start und Ende, Dauer) — bewusst keine absoluten Positionen, siehe PROJ-4s Decision Log; trägt ein `dirVersion`-Feld, das die Richtungs-Migration nach der DIR-Umkehr vom 2026-09-29 markiert | der Nutzer selbst, nur lokal auf dem Handy |
 | Video-Einstellungen | Die zuletzt gewählten Einstellungen der Videoaufnahme während der Auto-Fahrt (Video an/aus, Ton an/aus, Auflösung/Bildrate, Objektiv, Stabilisierung) — ein einziger app-weiter Datensatz, keine Fokus-/Belichtungssperre (die gilt nur pro Sitzung); eingeführt mit PROJ-3 AC-26 | der Nutzer selbst, nur lokal auf dem Handy |
+| Slider-Einstellung „Halten im Stillstand“ | Ob der Motor den Schlitten im Stillstand bestromt hält (an/aus, ab Werk an) — ein einzelner Wert, eingeführt mit PROJ-2 AC-8 bis AC-12 | gespeichert **auf dem Slider (ESP32)**, nicht auf dem Handy; die App liest und ändert ihn nur über die Verbindung |
 
 > Kein "zuletzt verbundenes Gerät" (Stand PROJ-1): Die App scannt bei jedem Start per Service-UUID neu und verbindet sich automatisch zum ersten passenden Treffer — kein gespeicherter Geräte-Bezug nötig. Entschieden im `/write-spec`-Interview zu PROJ-1, 2026-09-22.
 
@@ -27,6 +28,8 @@ Die aufgenommenen Videos selbst sind keine Entität der App: Sie landen in der G
 
 ```
 Preset (lokal)          Video-Einstellungen (lokal, ein Datensatz)
+
+Slider-Einstellung „Halten im Stillstand“ (auf dem ESP32, ein Wert)
 ```
 
 ---
