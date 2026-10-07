@@ -158,9 +158,23 @@ Zusätzlich mit einer Wegwerf-Probe (gelöscht) BUG-77 reproduziert, siehe unten
 
 - Status: **nicht gelaufen** (`/e2e-tests` für kritische Flows; bei probe `none` ohnehin nur am Gerät sinnvoll)
 
-## Menschlicher Hardware-Test (offen)
+## Menschlicher Hardware-Test (Teil 1 erledigt, Teil 2 offen)
 
-Ohne diesen Test kann das Feature nicht Approved werden. Pro Punkt ein Schritt:
+**Stand 2026-10-07:**
+- Getestet wurde mit der Firmware vom Stand `c396c7e`, frisch geflasht (`pio run -e esp32dev -t upload`, „Hash of data verified“).
+- Die App ist ein Release-APK mit dem BUG-78-Fix, installiert per `adb install -r` auf dem Galaxy S24 (SM-S921B).
+
+Ergebnisse von Teil 1:
+- [x] Schritt 1 / AC-12 — vom Nutzer verifiziert auf dem Galaxy S24 + echtem Slider, 2026-10-07: Nach dem Einschalten ist der Motor stromlos.
+- [x] Schritt 2 / AC-8 — vom Nutzer verifiziert auf dem Galaxy S24 + echtem Slider, 2026-10-07: Mit Halten an hält der Schlitten auf schräger Schiene, kein Ruck. Die Open Question „Reichen 60 %?“ ist damit für diese Aufstellung beantwortet.
+- [x] Schritt 3 / AC-9 — vom Nutzer verifiziert auf dem Galaxy S24 + echtem Slider, 2026-10-07: Mit Halten aus ist der Motor nach dem Stopp stromlos.
+- [x] Schritt 4 / AC-10 — vom Nutzer verifiziert auf dem Galaxy S24 + echtem Slider, 2026-10-07: Ein Umschalten im Stillstand wirkt sofort.
+- [x] Schritt 5 / AC-11 — vom Nutzer verifiziert auf dem Galaxy S24 + echtem Slider, 2026-10-07: Die Einstellung „aus“ bleibt über einen Neustart des Sliders erhalten.
+- [x] Schritt 6 / EC-6 (Jog-Teil) — vom Nutzer verifiziert auf dem Galaxy S24 + echtem Slider, 2026-10-07: Ein Umschalten während der Jog-Fahrt gilt erst nach dem Stopp.
+- [x] Schritt 7 / EC-8 — vom Nutzer verifiziert auf dem Galaxy S24 + echtem Slider, 2026-10-07: Der Motor hält weiter, wenn im Stillstand Bluetooth abgeschaltet wird.
+- [!] Schritte 8–12 — noch offen, der Nutzer testet sie später
+
+Ohne Teil 2 kann das Feature nicht Approved werden. Pro Punkt ein Schritt:
 
 1. **AC-12:** Slider frisch einschalten, ohne zu fahren. Lässt sich der Schlitten von Hand verschieben (stromlos)?
 2. **AC-8:** Schiene schräg aufstellen, schwerste Kamera drauf, Halten an, kurz joggen und loslassen. Bleibt der Schlitten stehen? Gibt es beim Stopp einen Ruck?
@@ -173,6 +187,7 @@ Ohne diesen Test kann das Feature nicht Approved werden. Pro Punkt ein Schritt:
 9. **PROJ-5:** Zeitraffer auf schräger Schiene mit Halten an. Verschiebt sich das Bild kurz nach jedem Schritt (Stromabsenkung beginnt ca. 0,4 s nach dem Stopp)?
 10. **PROJ-3:** Fahrt mit Video und Ton, Halten an. Ist der Haltestrom auf der Tonspur hörbar (Pfeifen/Brummen)?
 11. **AC-1–AC-7 (Kurz-Regression):** Jog vor/zurück, loslassen, beide Tasten, Bluetooth aus während der Fahrt. Alles wie bisher?
+12. **EC-6 / BUG-78:** Auto-Fahrt mit „Video aufnehmen“ starten. Ist der Schalter im Vorlauf, während der Fahrt und im Nachlauf ausgegraut? Dasselbe während einer Zeitraffer-Sequenz prüfen.
 
 ## Nicht verifiziert in diesem Lauf
 
@@ -261,10 +276,10 @@ Ohne diesen Test kann das Feature nicht Approved werden. Pro Punkt ein Schritt:
 
 ## Zusammenfassung
 
-- **Acceptance Criteria:** 12/12 im Code bzw. per Test belegt, 0 am Gerät verifiziert. EC: 9/9 im Code belegt, 1 davon mit Bug (EC-6 → BUG-78).
+- **Acceptance Criteria:** 12/12 im Code bzw. per Test belegt. Am Gerät vom Nutzer verifiziert (2026-10-07): AC-8, AC-9, AC-10, AC-11, AC-12, EC-6 (Jog-Teil) und EC-8. Noch offen am Gerät: AC-1–AC-7 (Kurz-Regression), Wärme/Akku, die Nachbar-Effekte (PROJ-3, PROJ-5) und der BUG-78-Teil von EC-6. EC: 9/9 im Code belegt. BUG-78 ist mit `c396c7e` gefixt und wartet auf die Re-Verifikation durch `/qa`.
 - **Bugs:** 8 neu (0 Critical, 0 High, 1 Medium, 7 Low)
 - **Security:** 5 Checks verifiziert, 5 NOT VERIFIED (Rate limiting nicht implementiert; Brute force, URL-Credentials nicht anwendbar; Laufzeit-Fuzzing ohne Gerät; keine `[user]`-Tasks)
-- **Production Ready:** **NEIN — not verified.** Es gibt keinen Critical- oder High-Bug, aber kein einziges AC wurde am echten Slider ausgeführt (`probe.kind: none`). Der menschliche Hardware-Test oben fehlt, und BUG-78 (Medium) sollte vor dem Deploy entschieden werden.
+- **Production Ready:** **NEIN — not verified.** Es gibt keinen Critical- oder High-Bug. Teil 1 des Hardware-Tests ist bestanden (Schritte 1–7). Es fehlen noch Teil 2 (Schritte 8–12) und die Re-Verifikation des BUG-78-Fixes.
 - **Empfehlung:** BUG-78 entscheiden und beheben (`/build`, ggf. vorher `/refine`), dann den Hardware-Test durchführen und protokollieren.
 
 > „Production Ready: JA“ würde nur „keine Critical/High-Bugs“ bedeuten, nicht „alles geprüft“.
