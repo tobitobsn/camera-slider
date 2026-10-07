@@ -76,9 +76,12 @@ type JogControlsProps = {
   onJoggingChange?: (jogging: boolean) => void;
   /**
    * PROJ-2 AC-10: the slider's reported "hold at standstill" setting; null
-   * (firmware without the setting) hides the switch. Deliberately separate
-   * from `disabled`: the switch stays operable during an auto-drive or a
-   * timelapse — the change applies at the next standstill (EC-6).
+   * (firmware without the setting) hides the switch. Locked together with
+   * the other controls via `disabled` (auto-drive incl. a video take's pre-/
+   * post-roll, timelapse — EC-6, qa-report.md BUG-78: the motor stands still
+   * there, so a toggle would apply mid-take); `holdLocked` locks it on its own
+   * for the battery lock. Stays operable during a jog — the firmware applies
+   * the change at the next standstill.
    */
   holdAtStandstill?: boolean | null;
   /** EC-7: the slider is locked after a protective stop (PROJ-6) — switch not operable. */
@@ -172,7 +175,7 @@ export function JogControls({
       {hold.value !== null && (
         <HoldSwitchRow
           value={hold.value}
-          disabled={holdLocked}
+          disabled={holdLocked || disabled}
           onValueChange={hold.toggle}
           sendFailed={hold.sendFailed}
         />

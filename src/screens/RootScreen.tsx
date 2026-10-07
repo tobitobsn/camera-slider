@@ -161,8 +161,8 @@ function renderContent(
               video.drive.busy
             }
             onJoggingChange={setJogging}
-            // PROJ-2 AC-10 / EC-7: the hold switch has its own lock — it stays
-            // operable during a drive (EC-6), only the battery lock blocks it.
+            // PROJ-2 AC-10 / EC-6 / EC-7: the hold switch is locked with the
+            // controls above (`disabled`) and additionally by the battery lock.
             holdAtStandstill={sliderStatus.holdAtStandstill}
             holdLocked={sliderStatus.batteryLocked}
           />
