@@ -33,6 +33,7 @@ const INITIAL_STATUS: SliderStatus = {
   moving: false,
   lockReason: 'none',
   shutdownSeconds: null,
+  holdAtStandstill: null,
 };
 
 /**

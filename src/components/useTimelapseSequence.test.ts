@@ -51,6 +51,7 @@ function fullStatus(overrides: Partial<SliderStatus> = {}): SliderStatus {
     moving: false,
     lockReason: 'none',
     shutdownSeconds: null,
+    holdAtStandstill: null,
     ...overrides,
   };
 }

@@ -11,6 +11,7 @@ import {
   sendAutoDriveCommand,
   sendSetEndFromDistanceCommand,
   sendTimelapseMoveCommand,
+  sendSetHoldCommand,
   parseStatusPayload,
 } from './client';
 
@@ -237,6 +238,25 @@ describe('sendTimelapseMoveCommand', () => {
   });
 });
 
+describe('sendSetHoldCommand', () => {
+  it('writes opcode 0x08 with 0x01 for on', async () => {
+    const device = createMockDevice();
+    await sendSetHoldCommand(device as unknown as Device, true);
+    const [serviceUUID, charUUID, base64Value] =
+      device.writeCharacteristicWithResponseForService.mock.calls[0];
+    expect(serviceUUID).toBe(SLIDER_SERVICE_UUID);
+    expect(charUUID).toBe(SLIDER_COMMAND_CHAR_UUID);
+    expect(Array.from(toByteArray(base64Value))).toEqual([0x08, 0x01]);
+  });
+
+  it('writes opcode 0x08 with 0x00 for off', async () => {
+    const device = createMockDevice();
+    await sendSetHoldCommand(device as unknown as Device, false);
+    const [, , base64Value] = device.writeCharacteristicWithResponseForService.mock.calls[0];
+    expect(Array.from(toByteArray(base64Value))).toEqual([0x08, 0x00]);
+  });
+});
+
 describe('parseStatusPayload', () => {
   // qa-report.md REG-2: PROJ-4 grew the wire payload from 5 to 6 bytes, but
   // the pre-PROJ-4 5-byte test cases were replaced by 6-byte ones instead of
@@ -284,6 +304,34 @@ describe('parseStatusPayload', () => {
       moving: false,
       lockReason: 'none',
       shutdownSeconds: null,
+      holdAtStandstill: null,
+    });
+  });
+
+  describe('PROJ-2 hold at standstill (11-byte payload)', () => {
+    function payload11(settings: number): string {
+      return fromByteArray(new Uint8Array([0x00, 0, 0, 0, 0, 0, 0x2c, 0x2e, 0, 0, settings]));
+    }
+
+    it('reads byte 10 bit 0 as holdAtStandstill', () => {
+      expect(parseStatusPayload(payload11(0x01)).holdAtStandstill).toBe(true);
+      expect(parseStatusPayload(payload11(0x00)).holdAtStandstill).toBe(false);
+    });
+
+    it('ignores the reserved bits 1-7', () => {
+      expect(parseStatusPayload(payload11(0xfe)).holdAtStandstill).toBe(false);
+      expect(parseStatusPayload(payload11(0xff)).holdAtStandstill).toBe(true);
+    });
+
+    it('reads a 10-byte payload (firmware before the hold setting) as null', () => {
+      const payload10 = fromByteArray(new Uint8Array([0x00, 0, 0, 0, 0, 0, 0x2c, 0x2e, 0, 0]));
+      expect(parseStatusPayload(payload10).holdAtStandstill).toBeNull();
+    });
+
+    it('leaves the existing fields untouched', () => {
+      const s = parseStatusPayload(payload11(0x01));
+      expect(s.batteryMillivolts).toBe(11820);
+      expect(s.batteryLocked).toBe(false);
     });
   });
 

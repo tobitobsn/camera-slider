@@ -4,6 +4,7 @@
 
 #include <Arduino.h>
 #include <FastAccelStepper.h>
+#include <Preferences.h>
 #include <TMCStepper.h>
 
 #include <math.h>
@@ -23,6 +24,22 @@ constexpr uint8_t kDriverAddress = 0b00;
 constexpr float kRSense = 0.11f;  // BTT TMC2209 V1.3: 0.11 Ohm sense resistors
 constexpr uint16_t kRmsCurrentMa = 1700;  // 42BYGHM809 datasheet phase current
 constexpr uint16_t kMicrosteps = 16;      // 400 full steps x 16 = 6400 steps/rev
+
+// PROJ-2 AC-8 (design.md "Erweiterung 2026-10-07"): standstill hold current
+// as a fraction of the run current — 0.6 x 1700 mA ≈ 1.0 A RMS, below the
+// stack pack's ~1.4 A continuous-load caution. A starting value; the
+// hardware test on an inclined rail confirms or adjusts it.
+constexpr float kHoldCurrentFraction = 0.6f;
+// TPOWERDOWN: delay after the last step before the current drops to IHOLD
+// (20 ≈ 0.4 s, the TMC2209's reset default, set explicitly here).
+// IHOLDDELAY: drop to IHOLD in gradual steps instead of at once, so the
+// carriage doesn't jerk at the transition.
+constexpr uint8_t kTPowerDown = 20;
+constexpr uint8_t kIHoldDelay = 8;
+
+// NVS location of the hold setting (AC-11) — default on when absent (AC-12).
+constexpr char kPrefsNamespace[] = "slider";
+constexpr char kPrefsHoldKey[] = "hold";
 
 // Motion tuning — same section, "Bewegungssteuerung".
 constexpr int32_t kAcceleration = 8000;  // steps/s^2
@@ -87,6 +104,7 @@ constexpr unsigned long kWatchdogTimeoutMs = 1000;
 constexpr uint32_t kMaxPlausibleDistanceSteps = 160000;
 
 TMC2209Stepper driver(&Serial2, kRSense, kDriverAddress);
+Preferences prefs;
 FastAccelStepperEngine engine = FastAccelStepperEngine();
 FastAccelStepper* stepper = nullptr;
 
@@ -187,6 +205,25 @@ volatile LockReason lockReason = LockReason::kNone;
 // underlying race is identical.
 volatile unsigned long timelapseMoveStartMillis = 0;
 
+// --- PROJ-2 refine 2026-10-07: hold at standstill ---------------------------
+//
+// holdApplied: the mode currently in effect (auto-enable off = true). Only
+// written by the loop() task (motorSetup(), motorHoldCheck()), read by the
+// motion entry points on the NimBLE host task — volatile for the same
+// cross-task reason as the flags above.
+// holdRequest: a pending request from motorSetHold() (NimBLE host task):
+// -1 none, 0 off, 1 on. Consumed by motorHoldCheck() on the loop() task.
+volatile bool holdApplied = true;
+volatile int8_t holdRequest = -1;
+
+// Energizes the driver before a motion starts when hold is on (auto-enable
+// is off then, so nothing else would). Harmless if already energized.
+void energizeIfHolding() {
+  if (holdApplied) {
+    stepper->enableOutputs();
+  }
+}
+
 uint32_t speedPercentToStepsPerSecond(uint8_t speedPercent) {
   if (speedPercent < 1) {
     speedPercent = 1;
@@ -216,7 +253,9 @@ void motorSetup() {
   Serial2.begin(115200, SERIAL_8N1, /*RX=*/kUartRxPin, /*TX=*/kUartTxPin);
   driver.begin();
   driver.toff(4);
-  driver.rms_current(kRmsCurrentMa);
+  driver.rms_current(kRmsCurrentMa, kHoldCurrentFraction);
+  driver.TPOWERDOWN(kTPowerDown);
+  driver.iholddelay(kIHoldDelay);
   driver.microsteps(kMicrosteps);
   driver.pwm_autoscale(true);
   driver.en_spreadCycle(false);
@@ -232,8 +271,14 @@ void motorSetup() {
   // and jog, auto-drive and timelapse stay consistent with each other.
   stepper->setDirectionPin(kDirPin, /*dirHighCountsUp=*/false);
   stepper->setEnablePin(kEnablePin, /*low_active_enables_stepper=*/true);
-  stepper->setAutoEnable(true);
   stepper->setAcceleration(kAcceleration);
+
+  // AC-11/AC-12: load the stored setting (default on). Hold on means
+  // auto-enable off — but the driver is NOT energized here: EN stays HIGH
+  // until the first motion (energizeIfHolding()) or an explicit switch-on.
+  prefs.begin(kPrefsNamespace, /*readOnly=*/false);
+  holdApplied = prefs.getBool(kPrefsHoldKey, true);
+  stepper->setAutoEnable(!holdApplied);
 }
 
 void motorJog(JogDirection direction, uint8_t speedPercent) {
@@ -267,6 +312,9 @@ void motorJog(JogDirection direction, uint8_t speedPercent) {
   // is called afterwards (FastAccelStepper.h, "## Speed" doc comment) — set
   // it before (re-)issuing whichever of those this call needs.
   stepper->setSpeedInHz(speedPercentToStepsPerSecond(speedPercent));
+
+  // PROJ-2 AC-8: with hold on, auto-enable is off — energize before moving.
+  energizeIfHolding();
 
   // qa-report.md BUG-16 (safety net): never trust the jogRunning flag over
   // the stepper itself — if it says running but the stepper is idle, start
@@ -520,6 +568,7 @@ void motorAutoDrive(JogDirection direction, uint16_t durationDeciseconds) {
   // Defensive: motorAutoDrive() only gets here with an idle stepper, so no
   // jog run can be superseded — this just clears a possibly stale flag.
   jogRunning = false;
+  energizeIfHolding();  // PROJ-2 AC-8
   stepper->moveTo(targetPosition, /*blocking=*/false);
 }
 
@@ -583,6 +632,7 @@ void motorTimelapseMoveTo(bool endIsAfterStart, uint32_t distanceSteps) {
   timelapseMoveStartMillis = millis();
   timelapseMoving = true;
   jogRunning = false;  // defensive, same as motorAutoDrive()
+  energizeIfHolding();  // PROJ-2 AC-8
   stepper->moveTo(targetPosition, /*blocking=*/false);
 }
 
@@ -629,6 +679,9 @@ MotorStatus motorGetStatus() {
   status.locked = lockedOut;
   status.lockReason = static_cast<uint8_t>(lockReason);
   status.moving = stepper != nullptr && stepper->isRunning();
+  const int8_t snapHoldRequest = holdRequest;
+  status.holdAtStandstill =
+      snapHoldRequest >= 0 ? snapHoldRequest == 1 : holdApplied;
 
   if (snapHasStart && snapHasEnd) {
     const int32_t signedDistance = snapEndPosition - snapStartPosition;
@@ -699,4 +752,62 @@ bool motorIsLocked() {
 
 bool motorIsRunning() {
   return stepper != nullptr && stepper->isRunning();
+}
+
+// --- PROJ-2 refine 2026-10-07: hold at standstill ---------------------------
+
+void motorSetHold(bool enabled) {
+  if (lockedOut) {
+    return;  // EC-7: never recorded, the lock is only lifted by a reboot
+  }
+  holdRequest = enabled ? 1 : 0;
+}
+
+void motorHoldCheck() {
+  if (stepper == nullptr) {
+    return;
+  }
+  if (lockedOut) {
+    // EC-7: motorLockout() already powered the driver down. Re-assert it in
+    // standstill in case a motion entry point passed its lock check just
+    // before the lock and energized the driver (battery.cpp re-stops such a
+    // run, but with hold on the driver would otherwise stay energized).
+    holdRequest = -1;
+    if (!stepper->isRunning()) {
+      stepper->disableOutputs();
+    }
+    return;
+  }
+  const int8_t request = holdRequest;
+  if (request < 0) {
+    return;
+  }
+  if (stepper->isRunning()) {
+    return;  // EC-6: applied at the next standstill
+  }
+  const bool enabled = request == 1;
+  if (enabled != holdApplied) {
+    prefs.putBool(kPrefsHoldKey, enabled);
+  }
+  // on: FastAccelStepper's engine auto-disables once its
+  // _auto_disable_delay_counter (armed by the last auto-enabled move) runs
+  // down — needAutoDisable() checks only that counter, not _autoEnable — and
+  // only disableOutputs() resets it. So: auto-enable off, disable (clears the
+  // counter, a few microseconds off), then energize.
+  // off: auto-enable on first, so a run that started on the NimBLE task in
+  // between keeps its outputs (disableOutputs() refuses on a running
+  // auto-enabled motor).
+  if (enabled) {
+    stepper->setAutoEnable(false);
+    stepper->disableOutputs();
+    stepper->enableOutputs();
+  } else {
+    stepper->setAutoEnable(true);
+    stepper->disableOutputs();
+  }
+  holdApplied = enabled;
+  // Clear only if no newer request arrived meanwhile.
+  if (holdRequest == request) {
+    holdRequest = -1;
+  }
 }

@@ -151,6 +151,11 @@ struct MotorStatus {
   // included) — lets the app dim the battery reading, which is only
   // refreshed in standstill.
   bool moving;
+  // PROJ-2 AC-8..AC-12: the user's "hold at standstill" setting — the
+  // pending request if motorSetHold() was called and motorHoldCheck() hasn't
+  // applied it yet, otherwise the applied (and stored) value. Reports the
+  // setting, not whether the driver is energized right now.
+  bool holdAtStandstill;
 };
 
 MotorStatus motorGetStatus();
@@ -233,3 +238,27 @@ bool motorIsLocked();
 // may be refreshed and to re-stop a stepper that is running despite the
 // lock (race guard, design.md Technical Decisions).
 bool motorIsRunning();
+
+// --- PROJ-2 refine 2026-10-07: hold at standstill (AC-8..AC-12) ---------------
+//
+// design.md "Erweiterung 2026-10-07: Halten im Stillstand". With hold on,
+// FastAccelStepper's auto-enable is off: every motion entry point energizes
+// the driver before starting and it stays on afterwards, the TMC2209
+// dropping to its reduced hold current (IHOLD) on its own. With hold off,
+// auto-enable is on — de-energized at standstill, the pre-2026-10-07
+// behaviour. Either way the driver stays off after boot until the first
+// motion (AC-12). The setting lives in NVS (Preferences, namespace
+// "slider", key "hold", default on) and survives reboots (AC-11).
+
+// Records a requested setting. Called from the NimBLE host task, so it only
+// stores the wish — motorHoldCheck() on the loop() task applies it, keeping
+// every driver/EN/flash access on the same task as the PROJ-6 lockout.
+// Ignored (not even recorded) while locked out (EC-7).
+void motorSetHold(bool enabled);
+
+// Call from loop(). While locked out: keeps the driver de-energized, does
+// nothing else (EC-7). Otherwise applies a pending request once the stepper
+// stands still (EC-6): stores it if it differs and switches immediately —
+// on: energize now and keep auto-enable off; off: auto-enable on and
+// de-energize now (AC-9, AC-10).
+void motorHoldCheck();

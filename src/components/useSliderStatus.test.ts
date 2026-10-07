@@ -25,6 +25,7 @@ const INITIAL_STATUS: SliderStatus = {
   moving: false,
   lockReason: 'none',
   shutdownSeconds: null,
+  holdAtStandstill: null,
 };
 
 const OTHER_STATUS: SliderStatus = {
@@ -41,6 +42,7 @@ const OTHER_STATUS: SliderStatus = {
   moving: false,
   lockReason: 'none',
   shutdownSeconds: null,
+  holdAtStandstill: null,
 };
 
 function fakeDevice(id: string): Device {

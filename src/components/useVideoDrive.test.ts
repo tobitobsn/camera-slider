@@ -59,6 +59,7 @@ const IDLE_STATUS: SliderStatus = {
   moving: false,
   lockReason: 'none',
   shutdownSeconds: null,
+  holdAtStandstill: null,
 };
 
 type Callbacks = Parameters<VideoRecorderPort['startRecording']>[0];

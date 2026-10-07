@@ -32,6 +32,7 @@ const AUTO_DRIVE_OPCODE = 0x04;
 const STOP_OPCODE = 0x05;
 const SET_END_FROM_DISTANCE_OPCODE = 0x06;
 const TIMELAPSE_MOVE_OPCODE = 0x07;
+const SET_HOLD_OPCODE = 0x08;
 
 const JOG_DIRECTION_BYTE: Record<JogDirection, number> = {
   forward: 0x00,
@@ -97,6 +98,13 @@ export type SliderStatus = {
   lockReason: LockReason;
   /** PROJ-6 AC-12: seconds until the slider switches itself off (1–60), null otherwise. */
   shutdownSeconds: number | null;
+  /**
+   * PROJ-2 AC-10: the slider's "hold at standstill" setting (the user's
+   * choice, not whether the motor is energized right now). Null when the
+   * payload has no byte 10 (firmware before 2026-10-07) — the app then
+   * doesn't offer the switch at all.
+   */
+  holdAtStandstill: boolean | null;
 };
 
 export type LockReason = 'none' | 'lowBattery' | 'measurementFault';
@@ -417,6 +425,23 @@ export async function sendTimelapseMoveCommand(
 }
 
 /**
+ * PROJ-2 AC-10: switches the slider's "hold at standstill" setting
+ * (opcode 0x08, payload 0x01 = on, 0x00 = off). The firmware stores it and
+ * applies it at the next standstill (EC-6). Write WITH response, like every
+ * other command — a failed write rejects, so the caller can revert the
+ * switch (design.md "Was der Schalter zeigt").
+ */
+export async function sendSetHoldCommand(device: Device, enabled: boolean): Promise<void> {
+  const payload = new Uint8Array([SET_HOLD_OPCODE, enabled ? 0x01 : 0x00]);
+
+  await device.writeCharacteristicWithResponseForService(
+    SLIDER_SERVICE_UUID,
+    SLIDER_COMMAND_CHAR_UUID,
+    fromByteArray(payload),
+  );
+}
+
+/**
  * Pure decoder for the Status characteristic's Notify payload — no BLE calls,
  * just bytes in, SliderStatus out. Exported separately so it's directly
  * unit-testable without mocking BLE.
@@ -436,6 +461,8 @@ export async function sendTimelapseMoveCommand(
  *    A 6-byte payload (older firmware) reads as no battery value, not
  *    locked, not moving; an 8-byte payload (PROJ-6 before the refine)
  *    reads a set bit 6 as reason 'lowBattery', no countdown.
+ *  - PROJ-2 (2026-10-07): byte 10 settings flags — bit 0 holdAtStandstill,
+ *    bits 1-7 reserved. Shorter payloads read as holdAtStandstill null.
  */
 export function parseStatusPayload(base64Value: string): SliderStatus {
   const bytes = toByteArray(base64Value);
@@ -465,6 +492,8 @@ export function parseStatusPayload(base64Value: string): SliderStatus {
   const rawSeconds = bytes.length >= 10 ? bytes[9] ?? 0 : 0;
   const shutdownSeconds = batteryLocked && rawSeconds > 0 && rawSeconds <= 60 ? rawSeconds : null;
 
+  const holdAtStandstill = bytes.length >= 11 ? ((bytes[10] ?? 0) & 0x01) !== 0 : null;
+
   let distanceSteps: number | null = null;
   let endIsAfterStart: boolean | null = null;
   if (hasStart && hasEnd) {
@@ -492,6 +521,7 @@ export function parseStatusPayload(base64Value: string): SliderStatus {
     moving,
     lockReason,
     shutdownSeconds,
+    holdAtStandstill,
   };
 }
 
