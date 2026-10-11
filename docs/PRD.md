@@ -24,7 +24,7 @@ Der MVP deckt manuelle Steuerung des Sliders per App (Jog), das Setzen von Start
 - Design-System: siehe `docs/design-system.md` (dunkles Theme, kräftige Akzentfarbe)
 
 ## Nicht-Ziele (Non-Goals)
-- Kein Pan/Tilt, nur lineare Achse
+- Kein Tilt; Pan (Drehachse) als zweite Achse seit PROJ-7
 - Kein Cloud-Konto/Sync zwischen Geräten
 - Keine Mehrbenutzer-/Nachbau-Dokumentation
 - iOS-Version vorerst nicht (später möglich)

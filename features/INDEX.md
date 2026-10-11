@@ -31,8 +31,9 @@
 | PROJ-4 | Presets verwalten | Mehrere benannte Fahrt-Profile lokal speichern, laden und löschen | Deployed | [features/PROJ-4-presets-verwalten/](PROJ-4-presets-verwalten/) | 2026-09-22 |
 | PROJ-5 | Zeitraffer-Modus | Schrittweise Fahrt mit automatischer Kameraauslösung für Zeitraffer-Aufnahmen | Deployed | [features/PROJ-5-zeitraffer-modus/](PROJ-5-zeitraffer-modus/) | 2026-09-22 |
 | PROJ-6 | Akkuanzeige | Ladezustand des 3S-Akkus (3× 18650) in der App anzeigen und bei niedrigem Stand warnen | Deployed | [features/PROJ-6-akkuanzeige/](PROJ-6-akkuanzeige/) | 2026-09-30 |
+| PROJ-7 | Drehachse (Pan) | Kamera per zweitem Schrittmotor drehen, per Hand und synchron zur Auto-Fahrt zwischen Start- und Endwinkel | Planned | [features/PROJ-7-drehachse-pan/](PROJ-7-drehachse-pan/) | 2026-10-12 |
 
-**Build order:** _P0 (MVP): PROJ-1 → PROJ-2 → PROJ-3 · P1: PROJ-4 (needs PROJ-3), PROJ-5 (needs PROJ-3), PROJ-6 (needs PROJ-1 + Spannungsteiler-Hardware)_
+**Build order:** _P0 (MVP): PROJ-1 → PROJ-2 → PROJ-3 · P1: PROJ-4 (needs PROJ-3), PROJ-5 (needs PROJ-3), PROJ-6 (needs PROJ-1 + Spannungsteiler-Hardware), PROJ-7 (needs PROJ-2 + PROJ-3 + zweiter Treiber/Drehachse-Hardware)_
 
 <!-- Add features above this line -->
 
@@ -50,4 +51,4 @@
 
 _(Die vorherige Zeile hier — `v1.0.0 · 2026-01-31 · https://app.example.com` — war ein nie bereinigter Kit-Platzhalter aus dem Scaffolding, kein echter Release; siehe BUG-11 in PROJ-1s `qa-report.md`. Ersetzt durch die echte erste Deployment-Zeile oben.)_
 
-## Next Available ID: PROJ-7
+## Next Available ID: PROJ-8
