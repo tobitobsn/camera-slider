@@ -158,7 +158,7 @@ Zusätzlich mit einer Wegwerf-Probe (gelöscht) BUG-77 reproduziert, siehe unten
 
 - Status: **nicht gelaufen** (`/e2e-tests` für kritische Flows; bei probe `none` ohnehin nur am Gerät sinnvoll)
 
-## Menschlicher Hardware-Test (Teil 1 erledigt, Teil 2 offen)
+## Menschlicher Hardware-Test (Teil 1 und Teil 2 erledigt)
 
 **Stand 2026-10-07:**
 - Getestet wurde mit der Firmware vom Stand `c396c7e`, frisch geflasht (`pio run -e esp32dev -t upload`, „Hash of data verified“).
@@ -172,9 +172,14 @@ Ergebnisse von Teil 1:
 - [x] Schritt 5 / AC-11 — vom Nutzer verifiziert auf dem Galaxy S24 + echtem Slider, 2026-10-07: Die Einstellung „aus“ bleibt über einen Neustart des Sliders erhalten.
 - [x] Schritt 6 / EC-6 (Jog-Teil) — vom Nutzer verifiziert auf dem Galaxy S24 + echtem Slider, 2026-10-07: Ein Umschalten während der Jog-Fahrt gilt erst nach dem Stopp.
 - [x] Schritt 7 / EC-8 — vom Nutzer verifiziert auf dem Galaxy S24 + echtem Slider, 2026-10-07: Der Motor hält weiter, wenn im Stillstand Bluetooth abgeschaltet wird.
-- [!] Schritte 8–12 — noch offen, der Nutzer testet sie später
+Ergebnisse von Teil 2 (gleicher Firmware- und App-Stand wie Teil 1, Galaxy S24, Ergebnisse gemeldet am 2026-10-13):
+- [x] Schritt 8 / Wärme/Akku (Open Questions) — vom Nutzer verifiziert: Nach 20 min Halten sind Treiber und Motor kühl, der Akkustand ist um 3 % gesunken. Für BUG-83 reicht das nicht, dafür fehlt der Vergleich mit Halten aus.
+- [x] Schritt 9 / PROJ-5 — vom Nutzer verifiziert: Im Zeitraffer auf schräger Schiene mit Halten an springt das Bild nicht.
+- [x] Schritt 10 / PROJ-3 — vom Nutzer verifiziert: Fahrt mit Video und Ton, Halten an, auf der Tonspur ist nichts zu hören.
+- [x] Schritt 11 / AC-1–AC-7 (Kurz-Regression) — vom Nutzer verifiziert: alles wie bisher.
+- [x] Schritt 12 / EC-6 (BUG-78-Teil) — vom Nutzer verifiziert: Im Video-Take und in der Zeitraffer-Sequenz reagiert der Schalter nicht, er ist also gesperrt. Das erfüllt EC-6 („nicht bedienbar“). **Er ist aber nicht ausgegraut**, siehe BUG-85.
 
-Ohne Teil 2 kann das Feature nicht Approved werden. Pro Punkt ein Schritt:
+Die Checkliste, ein Schritt pro Punkt:
 
 1. **AC-12:** Slider frisch einschalten, ohne zu fahren. Lässt sich der Schlitten von Hand verschieben (stromlos)?
 2. **AC-8:** Schiene schräg aufstellen, schwerste Kamera drauf, Halten an, kurz joggen und loslassen. Bleibt der Schlitten stehen? Gibt es beim Stopp einen Ruck?
@@ -269,6 +274,14 @@ Ohne Teil 2 kann das Feature nicht Approved werden. Pro Punkt ein Schritt:
   - Der Ruhestrom in PROJ-6 `design.md:210` (ca. 100 mA) berücksichtigt den Haltestrom nicht.
 - **Priority:** Nice to have
 
+#### BUG-85: Gesperrter Halte-Schalter wird nicht ausgegraut
+- **Severity:** Low (nur Optik, die Sperre selbst wirkt)
+- **Gefunden:** Hardware-Test Schritt 12, Galaxy S24, 2026-10-13
+- **Beschreibung:** Während Auto-Fahrt, Video-Take und Zeitraffer-Sequenz reagiert der Schalter „Motor hält im Stillstand“ nicht, sieht aber unverändert aus. Die Jog-Tasten daneben werden dagegen mit `opacity: 0.4` gedimmt (`JogControls.tsx:193, 258-259`). Der Nutzer sieht nicht, dass der Schalter gesperrt ist.
+- **Vermutete Ursache:** `HoldSwitchRow` setzt eigene `trackColor`/`thumbColor` (`HoldSwitchRow.tsx:33-34`). Unter Android ersetzen sie die Standard-Darstellung für `disabled`, und eine eigene Dimmung gibt es nicht. Am Gerät nicht separat geprüft: ob der Schalter „Video aufnehmen“ (gleiches Styling) dasselbe zeigt.
+- **Lösungsrichtung:** Den Schalter (oder die ganze Zeile) bei `disabled` wie die Jog-Tasten mit `opacity: 0.4` dimmen.
+- **Priority:** Nice to have
+
 ### Auch bemerkt (vorbestehend, nicht PROJ-2)
 - Der Release-APK ist mit dem öffentlichen Debug-Keystore signiert (`android/app/build.gradle:103`)
 - `gLastStatusPayload`/`gHasSentStatus` werden ohne Synchronisation aus zwei Tasks beschrieben (`ble.cpp:288-289, 448-449`)
@@ -276,11 +289,11 @@ Ohne Teil 2 kann das Feature nicht Approved werden. Pro Punkt ein Schritt:
 
 ## Zusammenfassung
 
-- **Acceptance Criteria:** 12/12 im Code bzw. per Test belegt. Am Gerät vom Nutzer verifiziert (2026-10-07): AC-8, AC-9, AC-10, AC-11, AC-12, EC-6 (Jog-Teil) und EC-8. Noch offen am Gerät: AC-1–AC-7 (Kurz-Regression), Wärme/Akku, die Nachbar-Effekte (PROJ-3, PROJ-5) und der BUG-78-Teil von EC-6. EC: 9/9 im Code belegt. BUG-78 ist mit `c396c7e` gefixt und wartet auf die Re-Verifikation durch `/qa`.
-- **Bugs:** 8 neu (0 Critical, 0 High, 1 Medium, 7 Low)
+- **Acceptance Criteria:** 12/12 im Code bzw. per Test belegt. Am Gerät vom Nutzer verifiziert: AC-8 bis AC-12, EC-6 (Jog-Teil) und EC-8 am 2026-10-07; AC-1 bis AC-7 (Kurz-Regression), Wärme/Akku, die Nachbar-Effekte (PROJ-3, PROJ-5) und der BUG-78-Teil von EC-6 am 2026-10-13. EC: 9/9 im Code belegt. Der BUG-78-Fix `c396c7e` wirkt am Gerät; die formale Re-Verifikation durch `/qa` steht noch aus.
+- **Bugs:** 9 neu (0 Critical, 0 High, 1 Medium, 8 Low); BUG-85 kam aus dem Hardware-Test vom 2026-10-13
 - **Security:** 5 Checks verifiziert, 5 NOT VERIFIED (Rate limiting nicht implementiert; Brute force, URL-Credentials nicht anwendbar; Laufzeit-Fuzzing ohne Gerät; keine `[user]`-Tasks)
-- **Production Ready:** **NEIN — not verified.** Es gibt keinen Critical- oder High-Bug. Teil 1 des Hardware-Tests ist bestanden (Schritte 1–7). Es fehlen noch Teil 2 (Schritte 8–12) und die Re-Verifikation des BUG-78-Fixes.
-- **Empfehlung:** BUG-78 entscheiden und beheben (`/build`, ggf. vorher `/refine`), dann den Hardware-Test durchführen und protokollieren.
+- **Production Ready:** **NEIN — not verified.** Es gibt keinen Critical- oder High-Bug. Der Hardware-Test ist vollständig bestanden (Schritte 1–12). Es fehlt noch die Re-Verifikation des BUG-78-Fixes durch `/qa`.
+- **Empfehlung:** `/qa PROJ-2` als Re-Verifikation im Umfang von `c396c7e` laufen lassen. Optional vorher BUG-85 (Optik) per `/build` beheben.
 
 > „Production Ready: JA“ würde nur „keine Critical/High-Bugs“ bedeuten, nicht „alles geprüft“.
 
