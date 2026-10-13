@@ -26,7 +26,7 @@
 | ID | Feature | Description | Status | Spec | Created |
 |----|---------|-------------|--------|------|---------|
 | PROJ-1 | BLE-Verbindung & Pairing | App verbindet sich per Bluetooth mit dem ESP32 und zeigt den Verbindungsstatus | Deployed | [features/PROJ-1-ble-verbindung-pairing/](PROJ-1-ble-verbindung-pairing/) | 2026-09-22 |
-| PROJ-2 | Manuelle Steuerung (Jog) | Slider per App manuell in beide Richtungen fahren, mit einstellbarer Geschwindigkeit und abschaltbarem Halten im Stillstand | Approved | [features/PROJ-2-manuelle-steuerung-jog/](PROJ-2-manuelle-steuerung-jog/) | 2026-09-22 |
+| PROJ-2 | Manuelle Steuerung (Jog) | Slider per App manuell in beide Richtungen fahren, mit einstellbarer Geschwindigkeit und abschaltbarem Halten im Stillstand | Deployed | [features/PROJ-2-manuelle-steuerung-jog/](PROJ-2-manuelle-steuerung-jog/) | 2026-09-22 |
 | PROJ-3 | Start-/Endpunkt & Auto-Fahrt | Start- und Endpunkt setzen und automatische Fahrt dazwischen mit einstellbarer Dauer auslösen, optional mit Videoaufnahme | Deployed | [features/PROJ-3-start-endpunkt-auto-fahrt/](PROJ-3-start-endpunkt-auto-fahrt/) | 2026-09-22 |
 | PROJ-4 | Presets verwalten | Mehrere benannte Fahrt-Profile lokal speichern, laden und löschen | Deployed | [features/PROJ-4-presets-verwalten/](PROJ-4-presets-verwalten/) | 2026-09-22 |
 | PROJ-5 | Zeitraffer-Modus | Schrittweise Fahrt mit automatischer Kameraauslösung für Zeitraffer-Aufnahmen | Deployed | [features/PROJ-5-zeitraffer-modus/](PROJ-5-zeitraffer-modus/) | 2026-09-22 |
@@ -48,6 +48,7 @@
 - _v1.4.0-PROJ-6 · 2026-10-01 · lokaler Release-Build (APK) + Firmware `9629317` (gemeinsam ausgeliefert, die App erwartet den 10-Byte-Status der Firmware) — `android/app/build/outputs/apk/release/app-release.apk` · PROJ-6_
 - _v1.5.0-PROJ-3 · 2026-10-02 · lokaler Release-Build (APK), Firmware unverändert seit v1.4.0 — `android/app/build/outputs/apk/release/app-release.apk` · PROJ-3_
 - _v1.6.0-PROJ-3 · 2026-10-04 · lokaler Release-Build (APK), Firmware unverändert seit v1.4.0 — `android/app/build/outputs/apk/release/app-release.apk` · PROJ-3_
+- _v1.7.0-PROJ-2 · 2026-10-13 · lokaler Release-Build (APK) + Firmware `79aad13` (gemeinsam ausgeliefert, die App erwartet den 11-Byte-Status mit Byte 10 „Halten im Stillstand“) — `android/app/build/outputs/apk/release/app-release.apk` · PROJ-2_
 
 _(Die vorherige Zeile hier — `v1.0.0 · 2026-01-31 · https://app.example.com` — war ein nie bereinigter Kit-Platzhalter aus dem Scaffolding, kein echter Release; siehe BUG-11 in PROJ-1s `qa-report.md`. Ersetzt durch die echte erste Deployment-Zeile oben.)_
 
