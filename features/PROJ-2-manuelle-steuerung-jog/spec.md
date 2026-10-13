@@ -53,8 +53,6 @@
 
 ## Open Questions
 - [ ] Exakte Geschwindigkeitsbereiche (mm/s) stehen erst nach der mechanischen Kalibrierung fest
-- [ ] Reichen 60 % Haltestrom bei der schrägsten geplanten Aufstellung mit der schwersten Kamera, und wie warm werden Motor und Treiber bei dauerhaftem Halten? → Hardwaretest nach `/build`; falls nötig Wert anpassen
-- [ ] Wie stark verkürzt dauerhaftes Halten die Akkulaufzeit (3S, 3× 18650)? → messen im Hardwaretest
 
 ## Decision Log
 
@@ -67,7 +65,7 @@
 | Dead-man's-switch: Halte-Signal alle ~300ms, Firmware stoppt eigenständig nach ~1s ohne Signal | Schützt vor App-Absturz/Hintergrund/Paketverlust, unabhängig vom offiziellen Verbindungsstatus | 2026-09-23 |
 | Kein zusätzlicher Jog-spezifischer Fehlerhinweis bei Verbindungsabbruch | PROJ-1s bestehender "Verbindung verloren"-Zustand reicht aus | 2026-09-23 |
 | Motor hält den Schlitten im Stillstand mit reduziertem Strom, abschaltbar in der App | Praxisbefund: auf geneigter Schiene reicht das Rastmoment des stromlosen Motors nicht, der Schlitten rutscht weg (und die gespeicherten Punkte stimmen danach nicht mehr); abschaltbar, um auf ebener Schiene Akku und Wärme zu sparen | 2026-10-07 |
-| Haltestrom vorerst 60 % des Fahrstroms | Kompromiss aus Haltemoment und Wärme/Akku; ein Startwert, der im Hardwaretest bestätigt oder angepasst wird | 2026-10-07 |
+| Haltestrom vorerst 60 % des Fahrstroms | Kompromiss aus Haltemoment und Wärme/Akku; ein Startwert, der im Hardwaretest bestätigt oder angepasst wird. Im Hardwaretest (2026-10-07/13) bestätigt: hält auf schräger Schiene ohne Ruck, Motor und Treiber nach 20 min Halten kühl, Akkustand dabei um ca. 3 % gesunken | 2026-10-07 |
 | Einstellung im Slider gespeichert, ab Werk an | Die Kamera soll auch nach Verbindungsabbruch oder Neustart des Sliders gehalten werden — nur eine Einstellung auf dem Gerät selbst gilt ohne App | 2026-10-07 |
 | Schalter bei der Jog-Steuerung unter dem Geschwindigkeitsregler | Die App hat nur eine Seite; dort ist er beim Aufbauen des Sliders zur Hand und selbsterklärend | 2026-10-07 |
 | Im Stillstand schaltet ein Verbindungsabbruch den Motor nicht ab | Der Abbruch-Stopp (AC-5) schützt vor unkontrollierter Fahrt; ein stehender, haltender Motor fährt nicht — ihn abzuschalten würde genau das Wegrutschen auslösen | 2026-10-07 |

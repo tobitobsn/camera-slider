@@ -280,18 +280,26 @@ Die Checkliste, ein Schritt pro Punkt:
 
 ## Bugs Found
 
-#### BUG-78: Halte-Schalter während eines Video-Takes (Vor-/Nachlauf) und in Zeitraffer-Pausen bedienbar, wirkt dort sofort
-- **Status:** **geschlossen** mit `c396c7e`, re-verifiziert am 2026-10-13 (siehe oben)
-- **Severity:** Medium
-- **Betroffen:** PROJ-2 EC-6, PROJ-3 AC-9 und AC-28 (Deployed). Die PROJ-2-Spec behauptet „deren Specs ändern sich dadurch nicht“.
-- **Steps to Reproduce:**
-  1. Halten an, schräge Schiene, „Video aufnehmen“ an, Auto-Fahrt auslösen
-  2. Im 2-s-Vorlauf (`useVideoDrive.ts:70`, `PREROLL_MS`) den Schalter auf „aus“ stellen
-  3. Erwartet: Laut PROJ-3 AC-9/AC-28 ist während der Fahrt nur der Stopp-Button bedienbar. Laut PROJ-2 EC-6 gilt die Änderung erst nach dem Stopp.
-  4. Tatsächlich: Der Schalter ist bedienbar (`RootScreen.tsx:164-167`, `holdLocked` nur `batteryLocked`). Die Firmware sieht `isRunning() == false` und schaltet im nächsten `loop()` sofort stromlos (`motor.cpp:785-807`). Der Schlitten kann mitten im aufgenommenen Take wegrutschen; bei „an“ ist ein Ruck möglich. Dasselbe passiert in den Pausen zwischen Zeitraffer-Schritten.
-- **Ursache:** Entscheidung im Design („Schalter bleibt während Auto-Fahrt/Zeitraffer bedienbar“, `design.md:189, 242`). Sie geht davon aus, dass die Firmware die Fahrt erkennt, aber Vor-/Nachlauf und Zeitraffer-Pausen meldet die Firmware nicht als Fahrt.
-- **Lösungsrichtungen:** (a) Schalter wie die übrigen Bedienelemente sperren, sobald `disabled` gilt (einfachste Variante, Alternative aus dem Design), dann EC-6 per `/refine` anpassen. (b) Bedienbar lassen, aber App-seitig bis zum Ende von Take/Sequenz aufschieben. (c) PROJ-3 AC-9/AC-28 per `/refine` lockern. Entscheidet der Nutzer.
-- **Priority:** Vor dem Deploy beheben
+### Previously Fixed
+_Behoben und unabhängig re-verifiziert. Details stehen in der Git-Historie (`git log --grep="PROJ-2"`)._
+
+| ID | Severity | Kurzbeschreibung |
+|---|---|---|
+| BUG-1 | Medium | AC-4/EC-2 — zweite Richtungstaste „gewann“ nach Zwischenloslassen, ohne dass beide je gemeinsam losgelassen wurden |
+| BUG-2 | Medium | AC-3 — Geschwindigkeitswechsel während laufender Fahrt in der Firmware nicht übernommen |
+| BUG-3 | Medium | Command-Characteristic ohne Authentifizierung, mit physischer Wirkung (Just-Works-Bonding; Schutzwirkung im Security-Audit 2026-09-23 beschrieben) |
+| BUG-4 | Medium | Kein Re-Advertising bei erfolgreichem Connect — Connection-Squatting möglich |
+| BUG-10 | High | App nicht an die Bonding-Pflicht angepasst — erster Jog nach frischem Pairing brach still ab |
+| BUG-11 | Medium | Fremdes Gerät konnte durch Verbinden+Trennen die laufende Fahrt stoppen |
+| BUG-14/15 | Low | Veraltete Kommentare in `client.ts`/`ble.cpp` |
+| BUG-16 | High | Jog nach Auto-Fahrt dauerhaft tot — Ursache `forceStop()` im Stillstand (Immediate-Stop-Flag), behoben in `a763cb3`. Lehre: Ein Firmware-Reflash zwischen Fix und Bestätigungstest verfälscht das Ergebnis, weil der Neustart den Fehlerzustand löscht |
+| BUG-17 | Medium | ScrollView stahl den Touch von den Jog-Tasten — Scrollen während Jog gesperrt |
+| BUG-18 | High | PROJ-3 AC-11 — automatisch eingetragene Mindestdauer abgerundet statt aufgerundet |
+| BUG-20 | Medium | Erster JOG nach STOP im Stillstand geschluckt (Restfenster siehe BUG-24) |
+| BUG-22 | Low | Doku/Kommentare mit falscher BUG-16-Ursache, DIR-Polarität fehlte (Rest siehe BUG-26) |
+| BUG-23 | Low | `lastJogMillis` erst nach dem Start gesetzt |
+| BUG-78 | Medium | Halte-Schalter im Video-Vor-/Nachlauf und in Zeitraffer-Pausen bedienbar — gesperrt mit `c396c7e`, re-verifiziert 2026-10-13 |
+
 
 #### BUG-77: Schnelles Mehrfach-Umschalten — veraltete Antworten bestimmen die Anzeige
 - **Severity:** Low
@@ -511,18 +519,6 @@ Nach dem menschlichen Hardware-Test (siehe oben) bleiben nur noch wenige, klar b
 
 ### Bugs Found
 
-#### Previously Fixed
-_Volle Reproduktions-/Begründungsdetails bleiben in den AC/EC-Ergebnissen und im Security-Audit oben erhalten — hier nur der Kurzverweis._
-
-| ID | Severity | Kurzbeschreibung |
-|---|---|---|
-| BUG-1 | Medium | AC-4/EC-2 — zweite Richtungstaste "gewinnt" nach Zwischenloslassen, ohne dass beide je gemeinsam losgelassen wurden |
-| BUG-2 | Medium | AC-3 — firmwareseitiger Geschwindigkeitswechsel während laufender Fahrt unbestätigt |
-| BUG-3 | Medium | Command-Characteristic ohne Authentifizierung, jetzt mit physischer Wirkung |
-| BUG-4 | Medium | Kein Re-Advertising bei erfolgreichem Connect — Connection-Squatting möglich |
-| BUG-10 | High | App nie an die neue Bonding-Pflicht angepasst — erster Jog-Versuch nach frischem Pairing brach still ab |
-| BUG-11 | Medium | Fremdes Gerät konnte durch bloßes Verbinden+Trennen die laufende Fahrt stoppen |
-
 #### BUG-5: StatusLine zeigt "Bereit" statt der in design.md spezifizierten leeren Zeile im Idle-Zustand
 - **Severity:** Low
 - **Beschreibung:** `design.md` spezifiziert die StatusLine als „Fährt vorwärts…" / „Fährt rückwärts…" / *nichts* (idle). Implementiert ist stattdessen „Bereit" (`JogControls.tsx:21-24`). Kosmetische Abweichung vom Design — für EC-5 (klar erkennbarer Ruhezustand) eher hilfreich als schädlich.
@@ -558,9 +554,6 @@ _Volle Reproduktions-/Begründungsdetails bleiben in den AC/EC-Ergebnissen und i
 - **Beschreibung:** `features/PROJ-1-ble-verbindung-pairing/spec.md` (Status: Approved) sagt weiterhin explizit „keine BLE-PIN/Bonding" (AC-3, Out of Scope, Decision Log) — seit PROJ-2s BUG-3-Fix stimmt das nicht mehr. Die Entscheidung ist nur in PROJ-2s `design.md` dokumentiert, nicht im Vertrag des Features, das sie eigentlich betrifft.
 - **Priority:** Empfehlung: `/refine PROJ-1` ausführen, um die Spec nachzuziehen — nicht in dieser Session gemacht, da `spec.md` während `/build`/Bugfixes read-only ist und eine Vertragsänderung einen eigenen Review verdient.
 
-#### BUG-14/15: Veraltete Kommentare (Low, nebenbei mitkorrigiert)
-- `src/ble/client.ts`s JSDoc „plain GATT connect, no bonding/pairing" und `firmware/src/ble.cpp`s `kCommandCharUUID`-Kommentar „WRITE, future use" — beide während dieser Re-Verifikation direkt korrigiert (kein eigener Bug-Eintrag nötig, siehe Commit).
-
 ### Zusammenfassung (nach menschlichem Hardware-Test, 2026-09-23)
 - **Acceptance Criteria:** 7/7 verifiziert — alle sieben AC menschlich am echten Gerät bestätigt (AC-1, AC-2, AC-4, AC-5, AC-6 explizit getestet; AC-3, AC-7 ebenfalls bestätigt), zusätzlich alle aus der Quelle abgesichert
 - **Edge Cases:** 3/5 menschlich verifiziert (EC-2, EC-3, EC-4), 2/5 nur aus der Quelle (EC-1, EC-5 — nicht explizit getestet, niedriges Risiko)
@@ -571,53 +564,6 @@ _Volle Reproduktions-/Begründungsdetails bleiben in den AC/EC-Ergebnissen und i
 - **Empfehlung:** Approved. Offene Punkte sind ausschließlich Low-Bugs (Nice to have) und zwei nicht blockierende Empfehlungen: `/refine PROJ-1` für BUG-13 (Spec-Drift), optional `/e2e-tests` für die kritischsten Abläufe als dauerhaftes Regressionsnetz.
 
 > "Production Ready: JA" heißt: kein Critical/High/Medium-Bug offen, und alle sieben Laufzeit-ACs wurden an echter Hardware durchgespielt. EC-1 und EC-5 wurden nicht separat abgefragt — aus der Quelle plausibel, niedriges Risiko, kein Blocker.
-
-### Nachtrag 2: BUG-16 — tatsächliche Ursache gefunden, jetzt echt geschlossen (2026-09-27)
-
-Der erste Fix-Versuch (Write-with-Response, siehe Nachtrag oben) wurde ursprünglich als "bestätigt behoben" dokumentiert. Eine unabhängige `qa-engineer`-Re-Verifikation widersprach dem: Der eigene Diagnoseweg im Fix zeigte, dass der Fehler nach der Write-with-Response-Umstellung zunächst **weiterhin auftrat** und erst nach einem Firmware-Reflash (zur Diagnose, mit anderer Firmware) verschwand — die Bestätigung war durch den Reboot verfälscht, nicht durch den Fix belegt. Ein sauberer Retest (App- und Firmware-Stand unverändert seit dem letzten Reflash, kein Zwischen-Flash) hat das bestätigt: **der Fehler trat erneut auf.**
-
-**Tatsächliche Ursache gefunden:** `firmware/src/motor.cpp`s `motorJog()` ignorierte den Rückgabewert von `FastAccelStepper::runForward()`/`runBackward()` (`int8_t`, `MOVE_OK`=0 oder ein `MOVE_ERR_*`-Code, siehe die vendorte `FastAccelStepper.h`) und setzte `jogRunning = true` unabhängig davon, ob der Start tatsächlich gelang. Jeder folgende 300ms-Heartbeat nahm danach den „bereits läuft, gleiche Richtung"-Zweig (nur `applySpeedAcceleration()` auf einem Motor, der nie wirklich lief) — kein Watchdog-Fang, da `isRunning()` korrekt `false` blieb. Ein einzelner fehlgeschlagener Start-Versuch (reproduzierbar direkt nach einer Auto-Fahrt) blieb dadurch dauerhaft hängen, bis ein unabhängiges STOP `jogRunning` zurücksetzte.
-
-**Fix:** `jogRunning`/`jogRunningDirection` werden jetzt nur bei erfolgreichem Start (`runForward()`/`runBackward()` liefert `0`) gesetzt — ein fehlgeschlagener Versuch wird beim nächsten Heartbeat automatisch neu versucht, statt hängen zu bleiben. Zusätzlich ein permanenter (nicht temporärer) Diagnose-Log `Serial.printf("Motor: jog start failed, MOVE_ERR=%d\n", ...)` auf dem Fehlerpfad — analog zum bestehenden `stepperConnectToPin`-Fehlerlog in derselben Datei.
-
-- [ ] **BUG-16 — NICHT bestätigt, siehe Nachtrag 4: der Fix selbst ist vermutlich wirkungslos.** Ursprünglich hier als „sauber verifiziert" dokumentiert (Firmware einmal geflasht, seither nicht mehr angefasst, Nutzer-Test danach: „funktioniert jetzt offensichtlich") — eine zweite, unabhängige Re-Verifikation hat das widerlegt. Bleibt als Beleg stehen (der Reflash selbst fand statt, die Nutzer-Bestätigung ist echt), aber die Schlussfolgerung „damit ist der Confound ausgeschlossen" war falsch: der Flash-Vorgang selbst ist bereits ein Reboot, und genau der könnte erneut die eigentliche Ursache verdeckt haben, nicht dieser Fix.
-- Die zuvor als Fix dokumentierte Write-with-Response-Umstellung (`src/ble/client.ts`) bleibt bestehen — sie ist weiterhin die richtige Entscheidung (Zustellbestätigung, Konsistenz mit dem restlichen Protokoll), war aber allein **nicht** die Ursache dieses Bugs.
-- **Lehre für zukünftige Hardware-Verifikationen:** ein Firmware-Reflash zwischen Fix und Bestätigungstest ist ein Confound — er setzt beliebigen RAM-Zustand zurück und kann einen Bug unabhängig vom eigentlichen Fix verschwinden lassen. Ein sauberer Bestätigungstest braucht denselben Firmware-/App-Stand, der auch tatsächlich committet wird, ohne Reflash dazwischen.
-
-### Nachtrag 3: BUG-17 — ScrollView stiehlt den Touch von den Jog-Tasten (2026-09-27)
-
-Während desselben Hardware-Tests gemeldet: leichtes Verrutschen des Fingers auf der Vorwärts-/Rückwärts-Taste löste ein Stop aus, deutlich empfindlicher als erwartet.
-
-**Erster Versuch (nicht ausreichend):** `Pressable`s `pressRetentionOffset` auf 40px in jede Richtung gesetzt — keine Wirkung am Gerät ("unverändert"). Nutzerhinweis „kann es mit dem Scrollen zu tun haben" hat auf die tatsächliche Ursache geführt.
-
-**Tatsächliche Ursache:** Die für PROJ-5 hinzugefügte `ScrollView` (`RootScreen.tsx`, behebt ein anderes Problem — Inhalt passte nicht mehr auf einen Bildschirm) verhandelt den Touch-Responder unabhängig von einem Kind-`Pressable`. Schon eine minimale vertikale Fingerbewegung ließ die `ScrollView` den Touch als Scroll-Geste beanspruchen und den Press abbrechen — das passiert eine Ebene über `Pressable`s eigener `pressRetentionOffset`-Logik, die deshalb nie zum Zug kam.
-
-**Fix:** `JogControls` meldet über einen neuen `onJoggingChange`-Callback nach oben, ob gerade eine Jog-Taste gehalten wird; `RootScreen` setzt `scrollEnabled={!jogging}` auf der `ScrollView` für die Dauer. `pressRetentionOffset` bleibt zusätzlich bestehen (schadet nicht, hilft bei einem eventuellen zukünftigen Layout ohne ScrollView).
-
-- [x] **BUG-17 — bestätigt behoben** ("funktioniert"), Nutzer-Bestätigung nach dem `scrollEnabled`-Fix.
-
-**Bug-Übersicht (Stand nach Nachtrag 3, siehe Nachtrag 4 für die Korrektur):**
-- Critical/High: 0 offen
-- Medium: BUG-12 (akzeptierte Grenze, Mehrgeräte-Steuerung), BUG-13 (Prozess-Empfehlung `/refine PROJ-1`)
-- Behoben in dieser Runde: ~~BUG-16~~ (siehe Nachtrag 4 — vermutlich weiterhin offen, High), BUG-17 (ScrollView stiehlt Touch, bestätigt)
-- Low: BUG-5..9, BUG-14/15 (bereits vorher offen/dokumentiert)
-
-**Betroffene Branches:** `feat/PROJ-5-zeitraffer-modus` (Commits `a4cf131` Firmware-Rückgabewert-Fix, `b715c90` pressRetentionOffset, `d49244c` ScrollView-Fix) — alle drei per Cherry-Pick auch auf `feat/PROJ-2-fix-jog-after-autodrive` (`30e1ed3`, `90eb197`, `88082df`).
-
-### Nachtrag 4: BUG-16-Fix vermutlich wirkungslos — Fehlerzweig mit dieser Bibliotheksversion praktisch unerreichbar (2026-09-27)
-
-Eine zweite, unabhängige `qa-engineer`-Re-Verifikation (Auftrag: Code- und Firmware-Ebene prüfen, nicht die bereits erfolgte Hardware-Bestätigung wiederholen) hat den in Nachtrag 2 dokumentierten Fix bis in die vendorte `FastAccelStepper`-Bibliothek (0.31.8) zurückverfolgt und einen ernsten Einwand gefunden:
-
-**`startResult` ist an dieser Stelle vermutlich immer 0 (Erfolg).** `runForward()`/`runBackward()` → `RampGenerator::startRun()` → gibt nur bei `_parameters.checkValidConfig() != MOVE_OK` einen Fehler zurück, und das schlägt laut `RampCalculator.h` nur fehl, wenn Geschwindigkeit oder Beschleunigung nie gesetzt wurden. Beide sind zum Zeitpunkt jedes `motorJog()`-Aufrufs immer gesetzt (`setAcceleration()` einmalig in `motorSetup()`, `setSpeedInHz()` unmittelbar vor jedem Start-Versuch, `motor.cpp:244`) — die beiden Flags, die den Fehler auslösen könnten, werden nur beim Booten zurückgesetzt. Der neue `else`-Zweig (inkl. des `Serial.printf`-Diagnose-Logs) ist damit nach dieser Analyse **toter Code**, der die Ursache nicht trifft.
-
-**Das erklärt die vorherige "erfolgreiche" Bestätigung nicht weg, sondern relativiert sie:** Das Flashen des Fixes ist selbst bereits ein ESP32-Reboot (Power-On-Reset). Der ursprüngliche Bug-Bericht beschrieb das Symptom als „dauerhaft, ab einem bestimmten Zeitpunkt" — nicht von Anfang an — und Nachtrag 2 selbst dokumentiert, dass der Fehler beim allerersten Diagnose-Reflash bereits einmal spurlos verschwunden war. Ein frischer Boot gefolgt von „mehrfach getestet, funktioniert" unterscheidet nicht zuverlässig zwischen „der Fix wirkt" und „ein frischer Boot maskiert den eigentlichen, wahrscheinlich zustandsabhängigen Bug erneut" — dieselbe Fehlerklasse wie beim allerersten Versuch, nur eine Ebene tiefer.
-
-**Alternative Spur (nicht bestätigt, nur eine Vermutung):** `FastAccelStepper::forceStop()` setzt ein Immediate-Stop-Flag, das nur innerhalb einer laufenden Rampe wieder gelöscht wird. Ein nachfolgender `startRun()`-Aufruf könnte `MOVE_OK` liefern, während die Rampe durch das noch gesetzte Flag sofort wieder beendet wird — der Motor „startet" laut Rückgabewert, bewegt sich aber nicht. Nicht abschließend mit dem normalen Jog-nach-Connect-Verhalten in Einklang gebracht, daher ausdrücklich nur eine Spur, kein bestätigter Fund.
-
-**Nächster Schritt (in Arbeit):** Der ESP32 läuft seit dem letzten (für diese Diagnose nötigen) Reflash ohne weitere Unterbrechung, ein Serial-Monitor läuft mit, ohne die Firmware erneut anzufassen. Gesucht wird: (a) taucht `Motor: jog start failed` je auf, wenn das Symptom erneut auftritt (würde den Fix als wirksam bestätigen), oder (b) tritt das Symptom ohne diese Zeile erneut auf (würde beweisen, dass die Ursache woanders liegt, z. B. der Immediate-Stop-Flag-Verdacht oben). Ausgedehnter Normalbetrieb über mehrere Auto-Fahrt-/Jog-Zyklen, nicht nur ein einzelner Test, ist hier die aussagekräftigere Bestätigung als ein einzelner Erfolg direkt nach einem Reboot.
-
-- [!] **BUG-16 — Status zurückgesetzt auf offen (High), NOT VERIFIED ob der committete Fix wirkt.** Verifikation läuft weiter, siehe „Nächster Schritt" oben.
-- **`design.md` noch nicht nachgezogen** (von der Re-Verifikation ebenfalls gefunden): beschreibt BUG-16 weiterhin als durch Write-with-Response verursacht/behoben — nicht mehr aktuell, unabhängig vom Ausgang der laufenden Diagnose.
 
 ### Nachtrag 5: Re-Verifikation nach Erhöhung der Höchstgeschwindigkeit 4000 → 8000 Steps/s (2026-09-29)
 
@@ -631,9 +577,7 @@ Eine zweite, unabhängige `qa-engineer`-Re-Verifikation (Auftrag: Code- und Firm
 - [x] Zeitraffer-Timeout passt zur neuen Geschwindigkeit — `useTimelapseSequence.ts:74-77`, `motor.cpp:520`
 - [x] AC-1, AC-2, AC-3, AC-6 / EC-4 — Steuerlogik unverändert (`motor.cpp:219-341`); Laufzeit: `[!] NOT VERIFIED — no way to run and probe this project was recorded`
 - [x] Security: Speed-Byte > 100 wird geklemmt (`motor.cpp:181-185`), Opcode-/Längenprüfung unverändert (`ble.cpp:143-233`), keine neuen Secrets
-- [ ] **BUG-18 (High nach Regressions-Regel, Wirkung Medium) — PROJ-3 AC-11:** `autoCorrectedDurationText()` trägt `formatSeconds(minAutoDriveDurationSeconds(d))` ein (`AutoDriveControls.tsx:188`); `formatSeconds` rundet mit `toFixed(1)` auf die nächste Zehntelsekunde statt aufzurunden (`:148-150`). Liegt der gerundete Wert unter dem echten Minimum, bleibt die Dauer ungültig, die Fahrt-Buttons bleiben gesperrt und jedes weitere Verlassen des Felds setzt denselben Wert erneut ein. Die Fehlerklasse existierte schon bei 4000, der Diff verschiebt die betroffenen Distanzen: jetzt z. B. d=4000 → „1.4" (echt 1,414), d=3000 → „1.2", d=9920 → „2.2" (vorher fahrbar). Workaround: Dauer manuell um 0,1 s erhöhen. Die Tests bleiben grün, weil sie nur `text == formatSeconds(min)` prüfen, nicht die Fahrbarkeit. Fix gehört in `/build` (aufrunden), Bezug: PROJ-3 BUG-4 (Rundung in der Fehlermeldung).
 - [ ] BUG-19 (Low): veraltete Kommentare — `AutoDriveControls.tsx:92` („= 2000 steps" → 8000), `useTimelapseSequence.test.ts:305-307` (Werte 13000/18000/30500 → 7250/12250/18500 ms), `AutoDriveControls.test.ts:107-111` (Aussage „must reject" stimmt bei Deckel 8000 nicht mehr).
-- BUG-16 (High, offen): vom Diff nicht berührt (`motorJog()`/`motorStop()`/`forceStop()` unverändert), bleibt offen.
 
 **Nebenwirkungen, kein Verstoß gegen ein AC (zur Kenntnis):**
 - Der Standardwert 50 % fährt jetzt ca. 4061 statt 2081 Steps/s (etwa doppelt so schnell).
@@ -648,9 +592,6 @@ Eine zweite, unabhängige `qa-engineer`-Re-Verifikation (Auftrag: Code- und Firm
 
 ### Nachtrag 6: BUG-16 — Fix am Gerät bestätigt, BUG-18 behoben (2026-09-29)
 
-- [x] **BUG-16 — vom Nutzer am echten Slider als behoben gemeldet** („bug16 behoben", 2026-09-29), nach Commit `4552ed5`. **Neue Ursachenvermutung und Fix:** `jogRunning` wurde nur von `motorStop()` zurückgesetzt; ein `moveTo()` (Auto-Fahrt/Zeitraffer), das einen als laufend markierten Jog überschrieb und dann ankam, ließ das Flag auf einem stehenden Stepper auf „läuft" stehen — jeder Herzschlag rief danach nur `applySpeedAcceleration()` auf. Jetzt: `motorJog()` setzt das Flag zurück, wenn `!stepper->isRunning()`, und `motorAutoDrive()`/`motorTimelapseMoveTo()` setzen `jogRunning = false` (`firmware/src/motor.cpp`). Der frühere Rückgabewert-Fix bleibt bestehen.
-  - **Einschränkungen (ehrlich):** Die Ursache ist aus dem Code hergeleitet, nicht am Gerät nachgestellt (kein Serial-Log). Nach dem Flash lief der Test nicht auf einem lange laufenden Gerät — der Flash-Confound aus Nachtrag 4 gilt weiter, und die Stichprobengröße (Anzahl Durchläufe) ist nicht protokolliert. `[!]` Die Wirksamkeit ist damit vom Nutzer bestätigt, aber nicht durch einen unabhängigen `/qa`-Lauf verifiziert.
-- [x] **BUG-18 — behoben** in `655f28d` (`ceilToDeciseconds`, `AutoDriveControls.tsx`), 195 Tests grün, Red-Check durchgeführt (4 Tests rot ohne Fix). Fahrbarkeit an der Hardware nicht separat getestet.
 - **Zusatzänderung `5feb442`:** DIR-Polarität invertiert (`setDirectionPin(kDirPin, false)`), weil „vorwärts/rückwärts" physisch vertauscht war; vom Nutzer bestätigt („passt"). Wirkt konsistent auf Jog, Auto-Fahrt und Zeitraffer.
 - Weiterhin offen: BUG-19 (Low, veraltete Kommentare), BUG-12/13 (Medium, akzeptiert/Prozess), BUG-5..9, 14, 15 (Low).
 
@@ -661,12 +602,6 @@ Eine zweite, unabhängige `qa-engineer`-Re-Verifikation (Auftrag: Code- und Firm
 **Scope:** `git diff ea0b613..HEAD -- firmware/src src/ble src/components/JogControls.tsx src/components/useJogState.ts src/screens` → nur `firmware/src/motor.cpp` (`4552ed5` BUG-16, `5feb442` DIR-Umkehr). Weil `motor.cpp` von Jog, Auto-Fahrt und Zeitraffer geteilt wird: voller Fan-out mit drei `qa-engineer`-Lanes. `probe.kind: none` — Laufzeit/Hardware `[!] NOT VERIFIED — no way to run and probe this project was recorded`.
 
 **Test-Suite (einmalig, Owner):** `npm test` → 13 Suites, 210 Tests, 0 Fehler (`suite9.log`). Firmware kompiliert am HEAD (`pio run -e esp32dev`, SUCCESS, RAM 12,4 %, Flash 49,1 %, ohne Upload). Layer `firmware`: `[!] NOT VERIFIED — no test command recorded for layer firmware`.
-
-#### BUG-16 — aus Code-Sicht geschlossen, Ursache korrigiert
-- [x] **Geschlossen** — `motor.cpp:258-260` (`if (jogRunning && !stepper->isRunning()) jogRunning = false;`) behandelt jeden Pfad „Flag gesetzt, Stepper steht". Belegt per Host-Simulation der vendorten FastAccelStepper 0.31.8 (Queue-Attrappe): alter Herzschlag (`applySpeedAcceleration`) → 0 Schritte, neuer Herzschlag (`runForward`) → 3242 Schritte; im Dauerlauf ist `isRunning` in 0 von 200 Takten false, also kein Ruckeln/Neustart.
-- **Tatsächliche Ursache** (die Spur aus Nachtrag 4, jetzt belegt): `motorStop()` ruft `forceStop()` auch bei stehendem Motor (`motor.cpp:318`); das setzt `force_immediate_stop` (`FastAccelStepper.cpp:674-682`), das nur in `getNextCommand()` gelöscht wird und bei inaktiver Rampe gesetzt bleibt (`:373`). Das nächste `runForward()` liefert `MOVE_OK`, die Rampe endet aber ohne einen Schritt (`RampGenerator.cpp:128-141, 252-258`). Loslassen sendet wieder STOP → der Zustand hält sich selbst, bis Reboot/Flash — passt zu „dauerhaft ab einem Zeitpunkt" und „Reflash heilt es". `moveTo()` (Auto-Fahrt) ist nicht betroffen (5000/5000 Schritte).
-- Die in Nachtrag 6 und im Code-Kommentar (`motor.cpp:249-257, 489-491, 554`) genannte Ursache („`moveTo()` überschreibt einen laufenden Jog") ist **nicht erreichbar**: `motorAutoDrive()` und `motorTimelapseMoveTo()` lehnen bei laufendem Stepper ab (`motor.cpp:398, 514`). Die Zeilen `:491` und `:554` sind harmlos, aber praktisch wirkungslos.
-- Laufzeit am Gerät: vom Nutzer am 2026-09-30 als behoben gemeldet (Nachtrag 6); in diesem Lauf `[!]`.
 
 ### Acceptance Criteria
 - [x] **AC-1** — Richtungskette durchgängig: „▲ Vorwärts" → `'forward'` → 0x00 (`client.ts:36-39`) → `kForward` (`ble.cpp:155-157`) → `runForward()` (`motor.cpp:293-295`). DIR-Umkehr (`motor.cpp:216`) kippt nur den Pin-Pegel (`StepperISR.cpp:52`), Zählrichtung, Positionen und `endIsAfterStart` bleiben — eine Stelle, konsistent für alle Modi. Einschränkung: BUG-20.
@@ -688,10 +623,7 @@ Eine zweite, unabhängige `qa-engineer`-Re-Verifikation (Auftrag: Code- und Firm
 - [x] PROJ-3 (Richtung, Ankunft, Stopp, Watchdog-Ausnahme, Speed-Grenzen App = Firmware), PROJ-4 (Vorzeichen SET_END_FROM_DISTANCE, Migration `dirVersion`), PROJ-5 (Richtung, 8000 Steps/s, Ankunftserkennung, Timeout), PROJ-1 (Verbindungsfluss, Disconnect-Stopp) — alles aus dem Code konsistent; Modusübergänge Jog → Auto-Fahrt → Jog, Jog → Zeitraffer → Jog, Stopp → Jog ohne Befund.
 
 ### Neue Bugs
-- [ ] **BUG-20 (Medium) — Der erste JOG nach einem STOP im Stillstand wird geschluckt; gefahren wird erst ab dem zweiten Herzschlag (~300 ms). Kurzes Antippen unter ~300 ms bewegt nichts.** Folge des BUG-16-Mechanismus: das Immediate-Stop-Flag schluckt den ersten Start, der Reset heilt es erst beim nächsten Herzschlag. STOP im Stillstand kommt häufig vor (nach jedem Connect, nach Ende/Abbruch des Zeitraffers, nach einem Watchdog-Stopp, nach jedem geschluckten Tipp). Simulation: erster Start 0 Schritte, zweiter 3242. Abhilfe-Idee: `forceStop()` in `motorStop()` nur bei `stepper->isRunning()`. Workaround: länger halten. Laufzeit `[!]`.
 - [ ] **BUG-21 (Medium, bedingt, deploy-relevant) — deployte App v1.2.0 und aktuelle Firmware passen nicht zusammen.** v1.2.0 hat die Preset-Migration (`a6b837d`) nicht; mit der Firmware ab `5feb442` legt ein altes Preset dort das Ende auf die Gegenseite (keine Endanschläge). App und Firmware müssen gemeinsam ausgeliefert werden; der Deployments-Eintrag hält keine Firmware-Version fest.
-- [ ] **BUG-22 (Low, Doku):** falsche BUG-16-Ursache in `motor.cpp:249-257, 489-491, 554` und Nachtrag 6; `design.md:81, 109, 119` kennen den Firmware-Fix und die DIR-Umkehr nicht; `docs/stacks/firmware-esp32-tmc2209.md:79` zeigt `setDirectionPin(26)` ohne Polarität; toter Fehlerzweig `motor.cpp:299-305` bleibt.
-- [ ] **BUG-23 (Low):** `lastJogMillis` wird erst nach dem Start gesetzt (`motor.cpp:293-308`); in einem Mikrosekunden-Fenster kann der Watchdog (anderer Task) nach >1 s Pause den frischen Start stoppen — endet immer im Stillstand, heilt beim nächsten Herzschlag.
 - Außerhalb Scope bemerkt: `FastAccelStepper @ ^0.31.1` offene Versionsbreite (Fix stützt sich auf Bibliotheksinternas); Zeitraffer-Rückfahrt bei ≤194 Steps von der Firmware verworfen (PROJ-5, Low).
 
 ### Nicht verifiziert
