@@ -1,5 +1,79 @@
 # QA-Testergebnisse
 
+## Re-Verifikation 2026-10-13 — BUG-78-Fix (`c396c7e`)
+
+**Art des Laufs:** Re-Verifikation. Der Diff seit dem QA-Commit `1283e4e` ist der Umfang. Die Spec wurde per `/refine` geändert (`9247b01`), aber nur EC-6, und zwar passend zum Fix. Deshalb wird die neue EC-6 hier vollständig geprüft und kein voller Lauf über alle AC gemacht.
+**Diff:** `git diff --stat 1283e4e..HEAD -- src firmware`:
+- `src/components/JogControls.tsx`: Schalter jetzt `disabled={holdLocked || disabled}` (`:178`)
+- `src/screens/RootScreen.tsx`: nur Kommentar (`:164-165`)
+- `src/components/JogControls.render.test.ts`: neu
+- Firmware: unverändert
+
+`git diff --stat c396c7e..HEAD -- src firmware` ist leer. Der Hardware-Test (Teil 2, 2026-10-13) lief also auf dem aktuellen Code-Stand.
+**Tester:** ein unabhängiger `qa-engineer`-Lauf ohne Kenntnis des Builds, mit allen drei Scopes in der Reihenfolge 2 → 3 → 4, beschränkt auf den Diff, BUG-78, BUG-85 und AC-10/EC-6/EC-7. Diese Session hat die Ergebnisse zusammengeführt und die Kernbelege nachgeprüft (`RootScreen.tsx:157-162`, `JogControls.tsx:178`).
+**Erreichbarkeit:** `probe.kind: none` für App und Layer `firmware`. Laufzeitverhalten ist nur über den protokollierten Nutzer-Test (unten, Schritte 1–12) belegt.
+
+**Testläufe (einmal vom Owner, vor dem Fan-out):**
+- [x] `npm test` → 25 Suites, 370 Tests, alle grün, Exit 0 (Log `scratchpad/test-run.log`)
+- [x] `npx tsc --noEmit -p tsconfig.json` → Exit 0
+- [x] Gegenprobe der Lane: `JogControls.tsx:178` auf die alte Bedingung `disabled={holdLocked}` zurückgesetzt, dann `npx jest src/components/JogControls.render.test.ts`. Ergebnis: 1 rot („is locked … (EC-6, BUG-78)“, Expected true, Received false), 3 grün. Danach per `git checkout` wiederhergestellt, `git status` sauber, 4/4 grün.
+- Firmware-Build: übersprungen. Die Firmware ist seit dem 2026-10-07 unverändert (`git diff --stat 1283e4e..HEAD -- firmware` ist leer).
+- [!] Firmware-Tests: NOT VERIFIED — no test command recorded for layer firmware
+
+**Ergebnisse:**
+- [x] **BUG-78 geschlossen.** `disabled` (`RootScreen.tsx:157-162`) = `driving || timelapse.isRunning || batteryLocked || video.drive.busy` sperrt jetzt auch den Schalter (`JogControls.tsx:178`). Alle Phasen sind abgedeckt:
+  - Auto-Fahrt: `autoDriving` wird vor `moveTo` gesetzt (`motor.cpp:567`).
+  - Video-Take: `busy = phase !== 'ready'` (`useVideoDrive.ts:445`) umfasst `starting`, `preroll`, `driving`, `postroll` und `saving`. Test `useVideoDrive.test.ts:202-222`.
+  - Zeitraffer: `isRunning` bleibt über Settle-Pause, Foto und Intervall-Pause hinweg true (`useTimelapseSequence.ts:448-480`). Test `useTimelapseSequence.test.ts:546`.
+  - Am Gerät vom Nutzer bestätigt (Schritt 12, 2026-10-13).
+- [x] **EC-6 (neue Fassung):**
+  - Erster Satz: wie bei BUG-78. Der Stopp-Button bleibt bedienbar (`AutoDriveControls.tsx:705`).
+  - Zweiter Satz: `jogging` speist `disabled` nicht (`RootScreen.tsx:83, 142`), und die Firmware meldet einen Jog nicht als `driving` (`motor.cpp:677`). Der Schalter bleibt also während Jog bedienbar. Die Firmware schiebt die Änderung auf, bis der Motor steht (`motor.cpp:786`).
+  - Am Gerät: Schritt 6 (2026-10-07) und Schritt 12 (2026-10-13).
+- [x] **AC-10:** Im Ruhezustand ist kein Term von `disabled` wahr. Render-Test „is operable … (AC-10)“. Bei `null` wird der Schalter ausgeblendet (`JogControls.tsx:175`).
+- [x] **EC-7:** `holdLocked` sperrt auch für sich allein (`JogControls.tsx:178`, Render-Test „is locked by the battery lock on its own (EC-7)“). Die Firmware-Seite ist unverändert (`motor.cpp:760-778`).
+- [ ] **BUG-85 weiter offen (Low):** `HoldSwitchRow.tsx` ist seit `1283e4e` unverändert, es gibt keine Dimmung bei `disabled`.
+- Alle übrigen AC/EC, die Design-Garantien, Security und die Regression der Nachbarn aus dem Lauf vom 2026-10-07 gelten weiter: unverändert seit 2026-10-07 und in diesem Lauf nicht erneut geprüft. Der Diff hat `motor.cpp`, `ble.cpp`, `useHoldSetting.ts`, `HoldSwitchRow.tsx` und `client.ts` nicht berührt.
+
+**Security (auf den Diff beschränkt): 1 verifiziert, 6 NOT VERIFIED.**
+- [x] Kein neuer Eingabepfad: Der Schalter sendet weiter einen Boolean über `sendSetHoldCommand` (`client.ts:434`, unverändert). Der Diff enthält keine Env-Variable und keine Konfiguration.
+- [!] Auth bypass, Authorization, Brute force, Credentials in der URL, sensible API-Daten: NOT VERIFIED — nicht anwendbar (kein Backend, keine Credentials, keine Formulare)
+- [!] Rate limiting: NOT VERIFIED — nicht implementiert, siehe BUG-81
+- Beobachtung (kein neuer Bug): Die EC-6-Sperre gibt es nur in der App. Ein fremder BLE-Client kann SET_HOLD weiter im Video-Vor- und -Nachlauf senden. Das deckt BUG-81 schon ab; der Fix macht es nicht schlechter.
+
+**Regression:**
+- [x] PROJ-1: In `RootScreen.tsx` haben sich nur Kommentare geändert. `__tests__/App.test.tsx` ist grün.
+- [x] PROJ-3, PROJ-5, PROJ-6: Jog-Tasten und Regler hängen am unveränderten `disabled` (`JogControls.tsx:168, 188, 201`). `useVideoDrive.test.ts`, `AutoDriveControls*.test.ts`, `useTimelapseSequence.test.ts`, `TimelapseControls.test.ts` und `BatteryLockBanner.test.ts` sind grün.
+- [!] Laufzeit der Nachbarn: NOT VERIFIED — no way to run and probe this project was recorded. Teilweise vom Nutzer abgedeckt (Schritte 9–11, 2026-10-13).
+
+**Unit-Tests (Step 6):** Keine neuen geschrieben. Der Diff enthält keine neue isolierte Logik, nur eine Prop-Bedingung, und die deckt der neue Render-Test samt Gegenprobe ab. Die verbleibende Lücke (wie `disabled` in `RootScreen` zusammengesetzt wird) ist kein Unit-Ziel, siehe BUG-86.
+
+**Neue Befunde:**
+- [ ] **BUG-86 (Low, Testlücke):** Kein Test sichert, wie sich `disabled` in `RootScreen.tsx:157-162` zusammensetzt: `video.drive.busy`, `timelapse.isRunning` und dass `jogging` nicht einfließt. Es gibt keine RootScreen-Testdatei. Würde später ein Term entfernt oder `jogging` ergänzt, bliebe die Suite grün, obwohl BUG-78 dann wieder auftritt bzw. der Schalter beim Jog gesperrt wäre. Empfehlung: den Ausdruck in eine kleine Funktion auslagern und testen, oder einen RootScreen-Render-Test schreiben.
+- [ ] **BUG-87 (Low, Kommentar-Drift, gehört zu BUG-84):**
+  - `HoldSwitchRow.tsx:11` dokumentiert `disabled` nur für EC-7.
+  - `JogControls.tsx:56-61` spricht noch von einem „not-yet-built“ Stopp-Button.
+- Info, kein Bug: Nach dem letzten Zeitraffer-Foto, und bei einer Auto-Fahrt ohne Video zwischen dem Tippen auf „Fahren“ und der ersten `driving`-Meldung, ist `disabled` für etwa ein Notify-Intervall (Millisekunden) false. Ein Umschalten genau in diesem Moment greift höchstens vor dem Losfahren. Es ist keine Aufnahme betroffen, weil alle Fotos schon gemacht sind bzw. noch kein Take läuft.
+
+**Nicht verifiziert in diesem Lauf:**
+- [!] Laufzeit von EC-6, AC-10, EC-7 und BUG-78 durch die Verifier — no way to run and probe this project was recorded. Belegt ist das Verhalten durch den Nutzer-Test (Schritte 4, 6 und 12).
+- [!] Optik des gesperrten Schalters (BUG-85) — kein Viewport
+- [!] Firmware-Laufzeit — layer firmware: nothing to probe, kein Testbefehl
+- [!] Bundle-Grep auf Secrets — kein Release-Build in diesem Lauf. Der Diff enthält keine Konfiguration.
+
+**Production Ready: JA.**
+- Es gibt keine Critical-, High- oder Medium-Bugs mehr: BUG-78, der einzige Medium-Bug, ist geschlossen.
+- Alle Laufzeit-ACs (AC-1 bis AC-12, EC-6, EC-8) hat der Nutzer am 2026-10-07 und am 2026-10-13 auf dem Galaxy S24 mit dem echten Slider ausgeführt, auf dem aktuellen Code-Stand.
+- Offen sind nur Low-Bugs: BUG-77, BUG-79 bis BUG-87.
+- Nicht verifiziert bleiben: EC-1, EC-5, EC-9 und EC-7 am Gerät, Fuzzing gegen die BLE-Schnittstelle (GATT), Firmware-Tests.
+- Status: **Approved**.
+
+**Deploy-Hinweis:** Das Status-Format ist auf 11 Byte gewachsen. App und Firmware müssen deshalb gemeinsam ausgeliefert werden. Die zuletzt deployte Firmware (`9629317`, v1.4.0) kennt SET_HOLD nicht.
+
+---
+
+## Lauf vom 2026-10-07 (vollständig, nach `/refine` „Halten im Stillstand“)
+
 **Getestet:** 2026-10-07
 **App-URL:** nicht ausführbar hier (`probe.kind: none`, Top-Level und Layer `firmware`). Jedes Laufzeit-AC ist unten `[!] NOT VERIFIED`, bis ein menschlicher Test protokolliert ist.
 **Tester:** 3 unabhängige `qa-engineer`-Subagenten (Acceptance / Security / Regression), jeweils in frischem Kontext ohne Kenntnis des Builds. Diese Session hat sie zusammengeführt, Code-Belege der Bugs stichprobenartig nachgeprüft und Step 6 (Unit-Tests) gemacht.
@@ -207,6 +281,7 @@ Die Checkliste, ein Schritt pro Punkt:
 ## Bugs Found
 
 #### BUG-78: Halte-Schalter während eines Video-Takes (Vor-/Nachlauf) und in Zeitraffer-Pausen bedienbar, wirkt dort sofort
+- **Status:** **geschlossen** mit `c396c7e`, re-verifiziert am 2026-10-13 (siehe oben)
 - **Severity:** Medium
 - **Betroffen:** PROJ-2 EC-6, PROJ-3 AC-9 und AC-28 (Deployed). Die PROJ-2-Spec behauptet „deren Specs ändern sich dadurch nicht“.
 - **Steps to Reproduce:**
